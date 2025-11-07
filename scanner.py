@@ -18,7 +18,7 @@ DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 # --- (v15.3) Vertex AI 설정 (us-central1 복귀) ---
 GCP_PROJECT_ID = "gen-lang-client-0379169283" 
-# 1. 리전을 'global' -> 'us-central1'로 복귀 (400 오류 해결)
+# 1. 리전을 'us-central1'로 유지
 GCP_REGION = "us-central1" 
 
 # --- (v9.5) "5분 안정화 엔진" (합의점) ---
@@ -57,7 +57,7 @@ def get_db_connection():
 ticker_minute_history = {} 
 ticker_tick_history = {} 
 
-# --- (v15.3) Gemini API 호출 함수 (us-central1 복귀 + responseSchema 제거) ---
+# --- (v15.4) Gemini API 호출 함수 (role: "system" 제거) ---
 async def get_gemini_probability(ticker, conditions_data):
     if not GEMINI_API_KEY:
         print(f"-> [Gemini AI] {ticker}: GEMINI_API_KEY가 설정되지 않아 AI 분석을 건너뜁니다.")
@@ -92,23 +92,21 @@ You MUST respond ONLY with the specified JSON schema.
     {json.dumps(conditions_data, indent=2)}
     """
     
-    # 2. API URL이 'global' 대신 GCP_REGION 변수를 사용
-    #    (모델은 여전히 gemini-2.5-flash-lite)
+    # API URL은 'us-central1' 리전 사용
     api_url = (
         f"https://{GCP_REGION}-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
         f"/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-flash-lite:generateContent"
     )
 
-    # 3. Payload (responseSchema 제거됨, system role 사용)
+    # --- 1. Payload 수정 (400 Bad Request 해결) ---
+    # "system" 프롬프트와 "user" 프롬프트를 하나로 합쳐서 "user" 역할로만 보냅니다.
+    combined_prompt = f"{system_prompt}\n\n{user_prompt}"
+
     payload = {
         "contents": [
             {
-                "role": "system", 
-                "parts": [{"text": system_prompt}]
-            },
-            {
                 "role": "user", 
-                "parts": [{"text": user_prompt}]
+                "parts": [{"text": combined_prompt}]
             }
         ],
         "generationConfig": {
@@ -159,7 +157,7 @@ def init_db():
     """PostgreSQL DB와 테이블 4개를 생성합니다."""
     conn = None
     try:
-        # 5. DATABASE_URL이 설정되었는지 먼저 확인
+        # 5. DATABASE_URL이 설정되지 않았는지 먼저 확인
         if not DATABASE_URL:
             print("❌ [DB] DATABASE_URL이 설정되지 않아 초기화를 건너뜁니다.")
             return
@@ -594,7 +592,7 @@ async def main():
         return
 
     # 3. 버전 정보 수정
-    print("스캐너 V15.3 (Vertex AI us-central1)을 시작합니다...") 
+    print("스캐너 V15.4 (system_role 제거)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:
