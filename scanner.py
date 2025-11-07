@@ -16,6 +16,12 @@ POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
+# --- (v14.0) Vertex AI 설정 ---
+# ❗️❗️❗️ 여기에 본인의 Google Cloud "프로젝트 ID"를 넣으세요 ❗️❗️❗️
+# (예: 'default-gemini-project-123456')
+GCP_PROJECT_ID = "gen-lang-client-0379169283" 
+GCP_REGION = "us-central1" # (대부분의 경우 us-central1)
+
 # --- (v9.5) "5분 안정화 엔진" (합의점) ---
 MAX_PRICE = 10
 TOP_N = 50
@@ -52,11 +58,14 @@ def get_db_connection():
 ticker_minute_history = {} 
 ticker_tick_history = {} 
 
-# --- Gemini API 호출 함수 (이전과 동일) ---
+# --- (v14.0) Gemini API 호출 함수 (Vertex AI용으로 수정) ---
 async def get_gemini_probability(ticker, conditions_data):
     if not GEMINI_API_KEY:
         print(f"-> [Gemini AI] {ticker}: GEMINI_API_KEY가 설정되지 않아 AI 분석을 건너뜁니다.")
         return 50 
+    if not GCP_PROJECT_ID or "YOUR_PROJECT_ID" in GCP_PROJECT_ID:
+        print(f"-> [Gemini AI] {ticker}: GCP_PROJECT_ID가 설정되지 않아 AI 분석을 건너뜁니다.")
+        return 50
 
     system_prompt = """
 You are a specialized quantitative analyst AI for high-speed scalping.
@@ -83,7 +92,13 @@ You MUST respond ONLY with the specified JSON schema.
     Analyze the following signal data for Ticker: {ticker}
     {json.dumps(conditions_data, indent=2)}
     """
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    # 1. Vertex AI용 API URL로 변경 (gemini-1.5-flash 모델 사용)
+    api_url = (
+        f"https://{GCP_REGION}-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
+        f"/locations/{GCP_REGION}/publishers/google/models/gemini-1.5-flash:generateContent"
+    )
+
     payload = {
         "contents": [{"parts": [{"text": user_prompt}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -99,11 +114,25 @@ You MUST respond ONLY with the specified JSON schema.
             }
         }
     }
+
+    # 2. API 키를 URL이 아닌 헤더(x-goog-api-key)로 전달
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(api_url, json=payload, timeout=10.0)
+            # 3. headers=headers 추가
+            response = await client.post(api_url, json=payload, headers=headers, timeout=10.0)
             response.raise_for_status()
             result = response.json()
+            
+            # Vertex AI는 응답 형식이 약간 다를 수 있습니다. (candidates가 없을 경우 대비)
+            if 'candidates' not in result:
+                print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: 응답에 'candidates' 없음. {result}")
+                return 50
+
             response_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '{}')
             score_data = json.loads(response_text)
             score = int(score_data.get("probability_score", 50))
@@ -545,8 +574,15 @@ async def main():
     if not DATABASE_URL:
         print("❌ [메인] DATABASE_URL이 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
         return
+    # Vertex AI용 키 확인
+    if not GEMINI_API_KEY:
+        print("❌ [메인] GEMINI_API_KEY가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
+        return
+    if not GCP_PROJECT_ID or "YOUR_PROJECT_ID" in GCP_PROJECT_ID:
+        print("❌ [메인] GCP_PROJECT_ID가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
+        return
 
-    print("스캐너 V13.0 (PostgreSQL)을 시작합니다...") 
+    print("스캐너 V14.0 (Vertex AI)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:
