@@ -1,51 +1,54 @@
 from flask import Flask, render_template, jsonify, request, send_from_directory
 import json
-import os
+import os  # 1. os 임포트
 import requests
 from datetime import datetime, timedelta
-import sqlite3 
+import psycopg2  # 2. sqlite3 대신 psycopg2 임포트
+from psycopg2.extras import RealDictCursor # 3. 딕셔너리 커서 임포트
 
 app = Flask(__name__)
 
-# --- API 키 설정 ---
-# (v10.0) app.py는 "무료 키"를 사용 (5 API/분)
-API_KEY = "YmpGnmOSQHvi8fVMOB1gIyp_aqcMeqmp"
+# --- (v12.0) API 키 설정 (보안) ---
+# 4. Render '환경 변수'에서 API 키를 읽어옵니다. (하드코딩 삭제)
+API_KEY = os.environ.get('POLYGON_API_KEY')
 
-# --- (v3.11) DB 경로 ---
-DB_FILE = "danso.db"
+# --- (v13.0) DB 경로 설정 (PostgreSQL 연동) ---
+# 5. Render '환경 변수'에서 Neon DB 연결 주소를 읽어옵니다.
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db_connection():
+    """PostgreSQL DB 연결을 생성합니다."""
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL 환경 변수가 설정되지 않았습니다.")
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
 
 # --- 1. 메인 페이지 라우트 ---
 @app.route('/')
 def dashboard_page():
     return render_template('index.html')
 
-# --- ✅ (PWA 수정) 2. PWA 파일 서빙 라우트 (sw.js, manifest.json) ---
-
+# --- 2. PWA 파일 서빙 라우트 ---
 @app.route('/sw.js')
 def serve_sw():
-    """서비스 워커 파일을 루트에서 서빙합니다."""
     return send_from_directory('.', 'sw.js', mimetype='application/javascript')
 
 @app.route('/manifest.json')
 def serve_manifest():
-    """매니페스트 파일을 루트에서 서빙합니다."""
     return send_from_directory('.', 'manifest.json', mimetype='application/manifest+json')
 
-# (보너스) 404 오류를 없애기 위한 파비콘 라우트
 @app.route('/favicon.ico')
 def serve_favicon():
-    """파비콘 파일을 서빙합니다. (danso_logo.png 재활용)"""
     return send_from_directory(os.path.join(app.root_path, 'static', 'images'), 
                                'danso_logo.png', mimetype='image/png')
 
-# --- 3. (v10.0) 대시보드 데이터 API (DB 사용) ---
+# --- 3. 대시보드 데이터 API (PostgreSQL) ---
 @app.route('/api/dashboard')
 def get_dashboard_data():
     conn = None
     try:
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor) 
         
         cursor.execute("SELECT value FROM status WHERE key = 'status_data' ORDER BY last_updated DESC LIMIT 1")
         status_row = cursor.fetchone()
@@ -54,12 +57,13 @@ def get_dashboard_data():
         else:
             status = {'last_scan_time': 'N/A', 'watching_count': 0, 'watching_tickers': []}
             
-        cursor.execute("SELECT ticker, price, time FROM signals ORDER BY time DESC LIMIT 50")
-        signals = [dict(row) for row in cursor.fetchall()]
+        cursor.execute("SELECT ticker, price, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time FROM signals ORDER BY time DESC LIMIT 50")
+        signals = cursor.fetchall()
         
-        cursor.execute("SELECT ticker, price, time, probability_score FROM recommendations ORDER BY time DESC LIMIT 50")
-        recommendations = [dict(row) for row in cursor.fetchall()]
+        cursor.execute("SELECT ticker, price, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time, probability_score FROM recommendations ORDER BY time DESC LIMIT 50")
+        recommendations = cursor.fetchall()
         
+        cursor.close()
         conn.close()
         
         return jsonify({
@@ -69,28 +73,33 @@ def get_dashboard_data():
         })
     except Exception as e:
         if conn: conn.close()
+        print(f"Error in /api/dashboard: {e}") 
         return jsonify({
             'status': {'last_scan_time': 'Scanner waiting...', 'watching_count': 0, 'watching_tickers': []},
             'signals': [], 'recommendations': []
         })
 
-# --- 4. (v3.11) 커뮤니티 API (게시글 읽기) ---
+# --- 4. 커뮤니티 API (게시글 읽기) (PostgreSQL) ---
 @app.route('/api/posts')
 def get_posts():
+    conn = None
     try:
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT author, content, time FROM posts ORDER BY time DESC LIMIT 100")
-        posts = [dict(row) for row in cursor.fetchall()]
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT author, content, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time FROM posts ORDER BY time DESC LIMIT 100")
+        posts = cursor.fetchall()
+        cursor.close()
         conn.close()
         return jsonify({"status": "OK", "posts": posts})
     except Exception as e:
+        if conn: conn.close()
+        print(f"Error in /api/posts (GET): {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- 5. (v3.11) 커뮤니티 API (게시글 쓰기) ---
+# --- 5. 커뮤니티 API (게시글 쓰기) (PostgreSQL) ---
 @app.route('/api/posts', methods=['POST'])
 def create_post():
+    conn = None
     try:
         data = request.get_json()
         author = data.get('author', 'Anonymous')
@@ -99,21 +108,25 @@ def create_post():
         if not content:
             return jsonify({"status": "error", "message": "Content is empty."}), 400
             
-        conn = sqlite3.connect(DB_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO posts (author, content, time) VALUES (?, ?, ?)",
-                       (author, content, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        cursor.execute("INSERT INTO posts (author, content, time) VALUES (%s, %s, %s)",
+                       (author, content, datetime.now()))
         conn.commit()
+        cursor.close()
         conn.close()
         
         return jsonify({"status": "OK", "message": "Post created."})
     except Exception as e:
+        if conn: conn.close()
+        print(f"Error in /api/posts (POST): {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 # --- 6. 실시간 호가 API ---
 @app.route('/api/quote/<string:ticker>')
 def get_quote(ticker):
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+    
     url = f"https://api.polygon.io/v3/quotes/{ticker.upper()}?limit=1&apiKey={API_KEY}"
     try:
         response = requests.get(url)
@@ -128,7 +141,8 @@ def get_quote(ticker):
 # --- 7. 기업 상세 정보 + 재무제표 API ---
 @app.route('/api/details/<string:ticker>')
 def get_ticker_details(ticker):
-    # ✅ (500 에러 수정) 누락되었던 API URL을 복구합니다.
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+
     url = f"https://api.polygon.io/v3/reference/tickers/{ticker.upper()}?apiKey={API_KEY}"
     try:
         response = requests.get(url)
@@ -138,15 +152,11 @@ def get_ticker_details(ticker):
             logo_url = results.get('branding', {}).get('logo_url', '')
             if logo_url: logo_url += f"?apiKey={API_KEY}"
             
-            # (v12.0) v3 API 응답이 변경되어 재무/비율 데이터 가져오는 방식 수정
             financials_node = results.get('financials', {})
             market_cap = financials_node.get('market_capitalization', {}).get('value', 'N/A')
             dividend_yield = financials_node.get('dividend_yield', {}).get('value', 'N/A')
-            
-            # v3에서는 ratios가 별도 노드가 아닐 수 있습니다. (데이터 확인 필요)
-            # 우선 P/E는 financial > fundamental에서 가져오도록 시도
-            pe_ratio = financials_node.get('price_to_earnings_ratio', 'N/A') # (경로 추정)
-            ps_ratio = financials_node.get('price_to_sales_ratio', 'N/A') # (경로 추정)
+            pe_ratio = financials_node.get('price_to_earnings_ratio', 'N/A')
+            ps_ratio = financials_node.get('price_to_sales_ratio', 'N/A')
 
             financial_data = {
                 "market_cap": market_cap,
@@ -170,12 +180,12 @@ def get_ticker_details(ticker):
 # --- 8. 1분봉 차트 데이터 API ---
 @app.route('/api/chart_data/<string:ticker>')
 def get_chart_data(ticker):
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+    
     try:
         today = datetime.now().strftime('%Y-%m-%d')
-        # (v12.0) 차트 데이터 조회를 3일 전이 아닌 7일 전으로 늘림 (주말 대비)
         past_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
         
-        # ✅ (500 에러 수정) 누락되었던 API URL을 복구합니다.
         url = f"https://api.polygon.io/v2/aggs/ticker/{ticker.upper()}/range/1/minute/{past_date}/{today}?sort=asc&limit=5000&apiKey={API_KEY}"
         
         response = requests.get(url)
@@ -193,19 +203,19 @@ def get_chart_data(ticker):
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- 9. (v3.7) 시장 개요 API ---
+# --- 9. 시장 개요 API ---
 @app.route('/api/market_overview')
 def get_market_overview():
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+    
     try:
         gainers_data = []
         losers_data = []
 
-        # ✅ (500 에러 수정) 누락되었던 API URL을 복구합니다.
         url_g = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={API_KEY}"
         res_g = requests.get(url_g); res_g.raise_for_status() 
         gainers_data = res_g.json().get('tickers') or []
         
-        # ✅ (500 에러 수정) 누락되었던 API URL을 복구합니다.
         url_l = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers?apiKey={API_KEY}"
         res_l = requests.get(url_l); res_l.raise_for_status() 
         losers_data = res_l.json().get('tickers') or []
@@ -217,7 +227,77 @@ def get_market_overview():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# --- (v13.0) DB 초기화 함수 (PostgreSQL 용) ---
+def init_db():
+    """PostgreSQL DB와 테이블 4개를 생성합니다."""
+    conn = None
+    try:
+        if not DATABASE_URL:
+            print("❌ [DB] DATABASE_URL이 설정되지 않아 초기화를 건너뜁니다.")
+            return
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS status (
+            key TEXT PRIMARY KEY, 
+            value TEXT NOT NULL, 
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id SERIAL PRIMARY KEY, 
+            ticker TEXT NOT NULL, 
+            price REAL NOT NULL, 
+            time TIMESTAMP NOT NULL
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS recommendations (
+            id SERIAL PRIMARY KEY, 
+            ticker TEXT NOT NULL UNIQUE, 
+            price REAL NOT NULL, 
+            time TIMESTAMP NOT NULL, 
+            probability_score INTEGER
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS posts (
+            id SERIAL PRIMARY KEY, 
+            author TEXT NOT NULL, 
+            content TEXT NOT NULL, 
+            time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        conn.commit()
+        
+        try:
+            cursor.execute("ALTER TABLE recommendations ADD COLUMN probability_score INTEGER")
+            conn.commit()
+            print("-> [DB] 'recommendations' 테이블에 'probability_score' 컬럼 추가 시도 완료.")
+        except psycopg2.Error as e:
+            if e.pgcode == '42701': # 'Duplicate Column' 에러 코드
+                conn.rollback() # (중요) 에러 발생 시 롤백
+            else:
+                conn.rollback() # (중요) 에러 발생 시 롤백
+                print(f"❌ [DB] ALTER TABLE 중 예외 발생 (코드: {e.pgcode}): {e}")
+                raise 
+            
+        cursor.close()
+        conn.close()
+        print(f"✅ [DB] PostgreSQL 테이블 초기화 성공.")
+    except Exception as e:
+        if conn: 
+            conn.rollback() 
+            conn.close()
+        print(f"❌ [DB] PostgreSQL 초기화 실패: {e}")
+
+# (v13.0) Gunicorn으로 실행될 때 DB 초기화
+init_db()
 
 if __name__ == '__main__':
-    # 5000번 포트 (v10.0)
-    app.run(debug=True, port=5000) # (v12.0) 디버그 모드를 True로 변경
+    # 로컬에서 flask run 또는 python app.py로 실행할 때는
+    # debug=True가 활성화되고 init_db()가 이미 위에서 실행되었음
+    app.run(debug=True, port=5000)
