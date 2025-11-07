@@ -83,7 +83,7 @@ You MUST respond ONLY with the specified JSON schema.
     Analyze the following signal data for Ticker: {ticker}
     {json.dumps(conditions_data, indent=2)}
     """
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {
         "contents": [{"parts": [{"text": user_prompt}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
