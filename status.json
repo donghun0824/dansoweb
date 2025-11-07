@@ -1,0 +1,74 @@
+{
+  "last_scan_time": "2025-11-02 01:13:45",
+  "watching_count": 17,
+  "watching_tickers": [
+    {
+      "ticker": "SLDPW",
+      "is_new": false
+    },
+    {
+      "ticker": "AMPGW",
+      "is_new": false
+    },
+    {
+      "ticker": "MSAI",
+      "is_new": false
+    },
+    {
+      "ticker": "DFSCW",
+      "is_new": false
+    },
+    {
+      "ticker": "EOSEW",
+      "is_new": false
+    },
+    {
+      "ticker": "HKD",
+      "is_new": false
+    },
+    {
+      "ticker": "BENF",
+      "is_new": false
+    },
+    {
+      "ticker": "CURR",
+      "is_new": false
+    },
+    {
+      "ticker": "YDESW",
+      "is_new": false
+    },
+    {
+      "ticker": "MSAIW",
+      "is_new": false
+    },
+    {
+      "ticker": "AMTD",
+      "is_new": false
+    },
+    {
+      "ticker": "RANI",
+      "is_new": false
+    },
+    {
+      "ticker": "LGCL",
+      "is_new": false
+    },
+    {
+      "ticker": "ARKOW",
+      "is_new": false
+    },
+    {
+      "ticker": "ALPS",
+      "is_new": false
+    },
+    {
+      "ticker": "CABA",
+      "is_new": false
+    },
+    {
+      "ticker": "OPTXW",
+      "is_new": false
+    }
+  ]
+}
