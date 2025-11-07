@@ -16,10 +16,10 @@ POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-# --- (v15.0) Vertex AI 설정 (Global) ---
+# --- (v15.3) Vertex AI 설정 (us-central1 복귀) ---
 GCP_PROJECT_ID = "gen-lang-client-0379169283" 
-# 1. 리전을 us-central1 -> global 로 변경
-GCP_REGION = "global" 
+# 1. 리전을 'global' -> 'us-central1'로 복귀 (400 오류 해결)
+GCP_REGION = "us-central1" 
 
 # --- (v9.5) "5분 안정화 엔진" (합의점) ---
 MAX_PRICE = 10
@@ -57,7 +57,7 @@ def get_db_connection():
 ticker_minute_history = {} 
 ticker_tick_history = {} 
 
-# --- (v15.1) Gemini API 호출 함수 (Vertex AI Payload 수정) ---
+# --- (v15.3) Gemini API 호출 함수 (us-central1 복귀 + responseSchema 제거) ---
 async def get_gemini_probability(ticker, conditions_data):
     if not GEMINI_API_KEY:
         print(f"-> [Gemini AI] {ticker}: GEMINI_API_KEY가 설정되지 않아 AI 분석을 건너뜁니다.")
@@ -92,13 +92,14 @@ You MUST respond ONLY with the specified JSON schema.
     {json.dumps(conditions_data, indent=2)}
     """
     
+    # 2. API URL이 'global' 대신 GCP_REGION 변수를 사용
+    #    (모델은 여전히 gemini-2.5-flash-lite)
     api_url = (
-        f"https://us-central1-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
-        f"/locations/global/publishers/google/models/gemini-2.5-flash-lite:generateContent"
+        f"https://{GCP_REGION}-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
+        f"/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-flash-lite:generateContent"
     )
 
-    # --- 1. Payload 수정 (400 Bad Request 해결) ---
-    # Vertex AI는 'systemInstruction'을 별도로 받지 않고, 'contents'의 첫 항목으로 받습니다.
+    # 3. Payload (responseSchema 제거됨, system role 사용)
     payload = {
         "contents": [
             {
@@ -110,18 +111,8 @@ You MUST respond ONLY with the specified JSON schema.
                 "parts": [{"text": user_prompt}]
             }
         ],
-        # 'systemInstruction' 필드 삭제
-        
         "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": {
-                "type": "OBJECT",
-                "properties": {
-                    "probability_score": {"type": "NUMBER"},
-                    "reasoning": {"type": "STRING"}
-                },
-                "propertyOrdering": ["probability_score", "reasoning"]
-            }
+            "responseMimeType": "application/json"
         }
     }
 
@@ -134,15 +125,13 @@ You MUST respond ONLY with the specified JSON schema.
         async with httpx.AsyncClient() as client:
             response = await client.post(api_url, json=payload, headers=headers, timeout=10.0)
             
-            # 400 Bad Request일 때, Google이 보낸 상세 오류 메시지를 출력합니다.
             if not response.is_success:
                 print(f"-> ❌ [Gemini AI] {ticker} 요청 실패 (HTTP {response.status_code}): {response.text}")
-                response.raise_for_status() # 여기서 오류를 발생시킴
+                response.raise_for_status() 
                 
             result = response.json()
             
             if 'candidates' not in result:
-                # Vertex AI가 JSON 스키마를 따르지 않고 오류를 반환한 경우
                 if 'error' in result:
                      print(f"-> ❌ [Gemini AI] {ticker} Vertex AI 오류: {result['error']['message']}")
                      return 50
@@ -150,14 +139,18 @@ You MUST respond ONLY with the specified JSON schema.
                 return 50
 
             response_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '{}')
+            
+            if not response_text.strip().startswith('{'):
+                print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: AI가 JSON이 아닌 텍스트로 응답함. {response_text}")
+                return 50
+
             score_data = json.loads(response_text)
             score = int(score_data.get("probability_score", 50))
             reasoning = score_data.get("reasoning", "No reasoning provided.")
             print(f"-> [Gemini AI] {ticker}: 상승 확률 {score}% (이유: {reasoning})")
             return score
     except Exception as e:
-        # 이미 위에서 상세 오류를 출력했으므로, 여기서는 간단히 로깅합니다.
-        if 'response' not in locals(): # response 변수가 없는 경우 (네트워크 오류 등)
+        if 'response' not in locals(): 
             print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: {e}")
         return 50
 
@@ -601,7 +594,7 @@ async def main():
         return
 
     # 3. 버전 정보 수정
-    print("스캐너 V15.1 (Vertex AI Payload)을 시작합니다...") 
+    print("스캐너 V15.3 (Vertex AI us-central1)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:
