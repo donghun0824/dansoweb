@@ -16,11 +16,10 @@ POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
-# --- (v14.0) Vertex AI 설정 ---
-# ❗️❗️❗️ 여기에 본인의 Google Cloud "프로젝트 ID"를 넣으세요 ❗️❗️❗️
-# (예: 'default-gemini-project-123456')
+# --- (v15.0) Vertex AI 설정 (Global) ---
 GCP_PROJECT_ID = "gen-lang-client-0379169283" 
-GCP_REGION = "us-central1" # (대부분의 경우 us-central1)
+# 1. 리전을 us-central1 -> global 로 변경
+GCP_REGION = "global" 
 
 # --- (v9.5) "5분 안정화 엔진" (합의점) ---
 MAX_PRICE = 10
@@ -58,7 +57,7 @@ def get_db_connection():
 ticker_minute_history = {} 
 ticker_tick_history = {} 
 
-# --- (v14.0) Gemini API 호출 함수 (Vertex AI용으로 수정) ---
+# --- (v15.0) Gemini API 호출 함수 (Global / gemini-2.5-flash-lite) ---
 async def get_gemini_probability(ticker, conditions_data):
     if not GEMINI_API_KEY:
         print(f"-> [Gemini AI] {ticker}: GEMINI_API_KEY가 설정되지 않아 AI 분석을 건너뜁니다.")
@@ -93,10 +92,13 @@ You MUST respond ONLY with the specified JSON schema.
     {json.dumps(conditions_data, indent=2)}
     """
     
-    # 1. Vertex AI용 API URL로 변경 (gemini-1.5-flash 모델 사용)
+    # 2. Vertex AI용 API URL 변경 (global 리전, gemini-2.5-flash-lite 모델)
+    #    'global' 리전은 API URL 접두사에 'us-central1'을 사용하는 것이 일반적입니다.
+    #    (만약 'global-aiplatform...'가 작동한다면 그것도 괜찮습니다)
+    #    가장 안정적인 'us-central1' 게이트웨이를 통해 'global' 위치를 호출합니다.
     api_url = (
-        f"https://{GCP_REGION}-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
-        f"/locations/{GCP_REGION}/publishers/google/models/gemini-1.5-flash:generateContent"
+        f"https://us-central1-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
+        f"/locations/global/publishers/google/models/gemini-2.5-flash-lite:generateContent"
     )
 
     payload = {
@@ -115,7 +117,7 @@ You MUST respond ONLY with the specified JSON schema.
         }
     }
 
-    # 2. API 키를 URL이 아닌 헤더(x-goog-api-key)로 전달
+    # 3. API 키를 헤더(x-goog-api-key)로 전달
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": GEMINI_API_KEY
@@ -123,12 +125,11 @@ You MUST respond ONLY with the specified JSON schema.
 
     try:
         async with httpx.AsyncClient() as client:
-            # 3. headers=headers 추가
+            # 4. headers=headers 추가
             response = await client.post(api_url, json=payload, headers=headers, timeout=10.0)
             response.raise_for_status()
             result = response.json()
             
-            # Vertex AI는 응답 형식이 약간 다를 수 있습니다. (candidates가 없을 경우 대비)
             if 'candidates' not in result:
                 print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: 응답에 'candidates' 없음. {result}")
                 return 50
@@ -582,7 +583,8 @@ async def main():
         print("❌ [메인] GCP_PROJECT_ID가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
         return
 
-    print("스캐너 V14.0 (Vertex AI)을 시작합니다...") 
+    # 3. 버전 정보 수정
+    print("스캐너 V15.0 (Vertex AI Global)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:
