@@ -1,9 +1,9 @@
-// 이 파일의 이름은 반드시 'firebase-messaging-sw.js'여야 합니다.
-// (경로: static/firebase-messaging-sw.js)
+// 이 파일은 "최상위(Root)" 폴더에 있어야 합니다. (현재 위치가 맞습니다)
 
-// 1. Firebase 모듈 가져오기 (CDN)
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
-import { getMessaging, onBackgroundMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
+// 1. Firebase "compat" (v8) 라이브러리를 importScripts로 가져옵니다.
+// 'import' (v9) 문법은 서비스 워커 루트에서 작동하지 않습니다.
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 
 // 2. ✅ 사용자님의 firebaseConfig
 const firebaseConfig = {
@@ -16,12 +16,12 @@ const firebaseConfig = {
   measurementId: "G-DFFBKLCBWS"
 };
 
-// 3. Firebase 초기화
-initializeApp(firebaseConfig);
-const messaging = getMessaging();
+// 3. Firebase "compat" 버전으로 초기화
+firebase.initializeApp(firebaseConfig);
+const messaging = firebase.messaging(); // compat 방식
 
 // 4. 백그라운드 메시지(푸시 알림) 처리
-onBackgroundMessage(messaging, (payload) => {
+messaging.onBackgroundMessage((payload) => {
   console.log(
     "[firebase-messaging-sw.js] Received background message ",
     payload
@@ -32,7 +32,7 @@ onBackgroundMessage(messaging, (payload) => {
   const notificationOptions = {
     body: payload.notification.body,
     icon: "/static/images/danso_logo.png", // (Flask의 static 경로)
-    badge: "/static/images/danso_badge.png" // (안드로이드용 배지 아이콘 예시)
+    badge: "/static/images/danso_logo.png" // (안드로이드용 배지 아이콘 예시)
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
