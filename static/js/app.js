@@ -1,5 +1,93 @@
+// app.js (v2 - 모듈형 SDK)
+
+// 1. Firebase 모듈 가져오기 (CDN에서 바로 가져옴)
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
+import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
+
+// 2. ✅ 사용자님의 firebaseConfig
+const firebaseConfig = {
+  apiKey: "AIzaSyDWDmEgyl2z6mh8-OJ4jXubROLqbPbl6wk",
+  authDomain: "gen-lang-client-0379169283.firebaseapp.com",
+  projectId: "gen-lang-client-0379169283",
+  storageBucket: "gen-lang-client-0379169283.firebasestorage.app",
+  messagingSenderId: "506115337247",
+  appId: "1:506115337247:web:efe15620d3547b7255392a",
+  measurementId: "G-DFFBKLCBWS"
+};
+
+// 3. Firebase 초기화
+const app = initializeApp(firebaseConfig);
+const messaging = getMessaging(app);
+
+// 4. FCM 함수 정의
+function requestNotificationPermission() {
+    console.log("Requesting notification permission...");
+    
+    Notification.requestPermission().then((permission) => {
+        if (permission === "granted") {
+            console.log("Notification permission granted.");
+            getFCMToken();
+        } else {
+            console.log("Notification permission denied.");
+        }
+    });
+}
+
+function getFCMToken() {
+    // 5. ✅ 사용자님의 VAPID 공개 키
+    const VAPID_PUBLIC_KEY = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
+
+    getToken(messaging, { vapidKey: VAPID_PUBLIC_KEY })
+        .then((currentToken) => {
+            if (currentToken) {
+                console.log("FCM Token:", currentToken);
+                // 6. ✅ (가장 중요) 이 토큰을 우리 DB에 저장해야 합니다.
+                sendTokenToServer(currentToken);
+            } else {
+                console.log("No registration token available. Request permission to generate one.");
+            }
+        }).catch((err) => {
+            console.log("An error occurred while retrieving token. ", err);
+        });
+}
+
+function sendTokenToServer(token) {
+    // 7. 이 'token'을 Render의 PostgreSQL DB에 저장하는 API를 호출합니다.
+    // (이 '/subscribe' API는 Flask 백엔드에서 새로 만들어야 합니다.)
+    
+    fetch("/subscribe", { // (API 주소는 예시입니다)
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token: token }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log("Token sent to server:", data);
+    })
+    .catch((error) => {
+        console.error("Error sending token to server:", error);
+    });
+}
+
+// 8. (선택사항) 앱이 "켜져 있을 때" (포그라운드) 알림 받기
+onMessage(messaging, (payload) => {
+  console.log("Message received in foreground: ", payload);
+  // (알림을 화면에 직접 띄우는 로직을 여기에 추가할 수 있습니다)
+  new Notification(payload.notification.title, { 
+      body: payload.notification.body,
+      icon: "/static/images/danso_logo.png" 
+  });
+});
+
+
+// --- (기존 app.js 코드 시작) ---
 document.addEventListener('DOMContentLoaded', function() {
-        
+    
+    // 9. ✅ 페이지가 로드되면 바로 알림 권한 요청
+    requestNotificationPermission();
+
     // --- 1. DOM 요소 가져오기 (v11.0) ---
     const scanStatusEl = document.getElementById('scan-status-text');
     const scanCountEl = document.getElementById('scan-watching-count');
@@ -64,7 +152,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <div class="ticker">${signal.ticker}</div>
                                 <span class="option-label">EXPLOSION</span>
                             </div>
-                            <!-- ✅ (v12.0) "폭발" 신호는 AI 점수가 없으므로 .signal-details 래퍼 추가 -->
                             <div class="signal-details">
                                 <div class="price">@ $${signal.price}</div>
                             </div>
@@ -89,10 +176,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <div class="ticker">${rec.ticker}</div>
                                 <span class="option-label">SETUP</span>
                             </div>
-                            <!-- ✅ (v12.0) 가격과 AI 점수를 묶는 래퍼 추가 -->
                             <div class="signal-details">
                                 <div class="price">@ $${rec.price}</div>
-                                <!-- ✅ (v12.0) "AI 상승 확률" 표시 (Gemini 아이콘) -->
                                 <div class="ai-score">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                       <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L21.75 5.25l-.813 2.846a4.5 4.5 0 0 0-3.09 3.09L15 12l2.846.813a4.5 4.5 0 0 0 3.09 3.09L21.75 18.75l.813-2.846a4.5 4.5 0 0 0-3.09-3.09L18.25 12Z" />
@@ -442,20 +527,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     fetchDashboardData();
     fetchCommunityPosts();
+    
     // --- PWA 서비스 워커 등록 ---
-// 이 코드는 app.js의 다른 코드와 상관없이 맨 아래에 추가하면 됩니다.
-
-if ('serviceWorker' in navigator) {
-  // 페이지가 로드되면 서비스 워커를 등록합니다.
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js') // sw.js 파일 경로
-      .then(registration => {
-        console.log('✅ ServiceWorker registration successful:', registration.scope);
-      })
-      .catch(err => {
-        console.log('❌ ServiceWorker registration failed:', err);
+    // (기존의 sw.js 등록 코드는 그대로 둡니다. PWA 캐싱을 담당합니다.)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js') // sw.js 파일 경로
+          .then(registration => {
+            console.log('✅ ServiceWorker registration successful:', registration.scope);
+          })
+          .catch(err => {
+            console.log('❌ ServiceWorker registration failed:', err);
+          });
       });
-  });
-}
+    }
 
 });
