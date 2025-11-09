@@ -9,6 +9,7 @@ from datetime import datetime
 import psycopg2  # 2. sqlite3 대신 psycopg2
 import time
 import httpx 
+from pywebpush import webpush, WebPushException # <-- ✅ 1. pywebpush 임포트
 
 # --- (v12.0) API 키 설정 (보안) ---
 # 3. Render 환경 변수에서 API 키를 읽어옵니다.
@@ -20,6 +21,10 @@ DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 GCP_PROJECT_ID = "gen-lang-client-0379169283" 
 # 1. 리전을 'us-central1'로 유지
 GCP_REGION = "us-central1" 
+
+# --- ✅ 2. (NEW) Firebase VAPID 키 (FCM 발송용) ---
+VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY')
+VAPID_EMAIL = "mailto:cbvkqtm98@gmail.com" # (본인 이메일로 수정 권장)
 
 # --- (v9.5) "5분 안정화 엔진" (합의점) ---
 MAX_PRICE = 10
@@ -98,7 +103,6 @@ You MUST respond ONLY with the specified JSON schema.
         f"/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-flash-lite:generateContent"
     )
 
-    # --- 1. Payload 수정 (400 Bad Request 해결) ---
     # "system" 프롬프트와 "user" 프롬프트를 하나로 합쳐서 "user" 역할로만 보냅니다.
     combined_prompt = f"{system_prompt}\n\n{user_prompt}"
 
@@ -157,7 +161,7 @@ def init_db():
     """PostgreSQL DB와 테이블 4개를 생성합니다."""
     conn = None
     try:
-        # 5. DATABASE_URL이 설정되지 않았는지 먼저 확인
+        # 5. DATABASE_URL이 설정되지 않았는지 확인
         if not DATABASE_URL:
             print("❌ [DB] DATABASE_URL이 설정되지 않아 초기화를 건너뜁니다.")
             return
@@ -173,6 +177,7 @@ def init_db():
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
+
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id SERIAL PRIMARY KEY, 
@@ -198,6 +203,17 @@ def init_db():
             time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
+        
+        # --- ✅ 3. FCM 토큰 테이블 추가 (scanner.py에도 추가) ---
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fcm_tokens (
+            id SERIAL PRIMARY KEY,
+            token TEXT NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        # --- 여기까지 추가 ---
+        
         conn.commit()
         
         try:
@@ -235,6 +251,59 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
         print(f"🔔 [알림] {ticker} @ ${price} (디스코드 전송 완료)")
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
+
+# --- ✅ 4. (NEW) FCM 푸시 알림 발송 함수 ---
+def send_fcm_notification(ticker, price, probability_score):
+    """DB의 모든 토큰에 FCM 푸시 알림을 발송합니다."""
+    if not VAPID_PRIVATE_KEY:
+        print("🔔 [FCM] VAPID_PRIVATE_KEY가 설정되지 않아 푸시 알림을 건너뜁니다.")
+        return
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT token FROM fcm_tokens")
+        tokens = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        if not tokens:
+            print("🔔 [FCM] DB에 등록된 알림 구독자가 없습니다.")
+            return
+
+        # 알림 메시지 페이로드
+        message_data = json.dumps({
+            "title": f"🚀 AI Signal: {ticker}",
+            "body": f"New setup detected @ ${price} (AI Score: {probability_score}%)",
+            "icon": "/static/images/danso_logo.png" # PWA가 참조할 아이콘 경로
+        })
+
+        print(f"🔔 [FCM] {len(tokens)}명의 구독자에게 {ticker} 알림 발송 시도...")
+
+        for (token_str,) in tokens:
+            try:
+                # app.js가 보낸 토큰은 이미 JSON 문자열이므로, 그대로 json.loads()
+                subscription_info = json.loads(token_str) 
+                
+                webpush(
+                    subscription_info=subscription_info,
+                    data=message_data,
+                    vapid_private_key=VAPID_PRIVATE_KEY,
+                    vapid_claims={"sub": VAPID_EMAIL}
+                )
+            except WebPushException as ex:
+                print(f"❌ [FCM] 토큰 전송 실패: {ex}")
+                # (참고: 토큰이 만료되었으면(410, 404) DB에서 삭제하는 로직이 필요)
+            except Exception as e:
+                # json.loads(token_str) 실패 등을 포함
+                print(f"❌ [FCM] 알 수 없는 토큰 오류 (토큰 형식 확인 필요): {e}")
+        
+        print(f"✅ [FCM] {len(tokens)}명에게 알림 발송 완료.")
+
+    except Exception as e:
+        if conn: conn.close()
+        print(f"❌ [FCM] 푸시 알림 발송 중 DB 오류: {e}")
 
 # --- (v13.0) DB 로그 함수 (PostgreSQL 용) ---
 def log_signal(ticker, price, probability_score=50):
@@ -459,7 +528,12 @@ async def handle_msg(msg_list):
                 
                 print(f"💡💡💡 [통합 엔진 v5.1] {ticker} @ ${last['close']} (AI Score: {probability_score}%) 💡💡💡")
                 is_new_rec = log_recommendation(ticker, float(last['close']), probability_score)
-                if is_new_rec: send_discord_alert(ticker, float(last['close']), "recommendation", probability_score)
+                
+                # --- ✅ 5. (NEW) FCM 푸시 알림 발송 호출 ---
+                if is_new_rec: 
+                    send_discord_alert(ticker, float(last['close']), "recommendation", probability_score)
+                    send_fcm_notification(ticker, float(last['close']), probability_score)
+                # --- 여기까지 수정 ---
             
             else:
                 pass
@@ -590,9 +664,11 @@ async def main():
     if not GCP_PROJECT_ID or "YOUR_PROJECT_ID" in GCP_PROJECT_ID:
         print("❌ [메인] GCP_PROJECT_ID가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
         return
+    # --- ✅ 6. (NEW) VAPID 키 확인 ---
+    if not VAPID_PRIVATE_KEY:
+        print("⚠️ [메인] VAPID_PRIVATE_KEY가 설정되지 않았습니다. FCM 푸시 알림이 비활성화됩니다.")
 
-    # 3. 버전 정보 수정
-    print("스캐너 V15.4 (system_role 제거)을 시작합니다...") 
+    print("스캐너 V15.4 (FCM 발송 기능 추가)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:

@@ -31,7 +31,20 @@ def dashboard_page():
 # --- 2. PWA 파일 서빙 라우트 ---
 @app.route('/sw.js')
 def serve_sw():
+    # 'static' 폴더가 아닌, 'app.py'와 같은 위치(루트)에 있는 sw.js를 서빙
     return send_from_directory('.', 'sw.js', mimetype='application/javascript')
+
+# ✅ (FCM) firebase-messaging-sw.js 서빙
+# app.js가 static 폴더의 서비스 워커를 등록하려고 시도할 경우를 대비
+@app.route('/firebase-messaging-sw.js')
+def serve_firebase_sw_root():
+    return send_from_directory('.', 'firebase-messaging-sw.js', mimetype='application/javascript')
+
+# static 폴더 안의 파일도 서빙 (경로가 꼬일 경우 대비)
+@app.route('/static/firebase-messaging-sw.js')
+def serve_firebase_sw_static():
+    return send_from_directory('static', 'firebase-messaging-sw.js', mimetype='application/javascript')
+
 
 @app.route('/manifest.json')
 def serve_manifest():
@@ -227,6 +240,41 @@ def get_market_overview():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# --- ✅ 10. (NEW) FCM Token Subscription API ---
+@app.route('/subscribe', methods=['POST'])
+def subscribe():
+    """PWA로부터 FCM 토큰을 받아 DB에 저장합니다."""
+    data = request.json
+    token = data.get('token')
+
+    if not token:
+        return jsonify({"status": "error", "message": "No token provided"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 'ON CONFLICT'를 사용해 중복 토큰을 무시합니다. (Idempotent)
+        cursor.execute(
+            "INSERT INTO fcm_tokens (token) VALUES (%s) ON CONFLICT (token) DO NOTHING", 
+            (token,)
+        )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print(f"✅ [FCM] New token registered: {token[:20]}...")
+        return jsonify({"status": "success", "message": "Token registered"}), 201
+        
+    except Exception as e:
+        if conn: 
+            conn.rollback()
+            conn.close()
+        print(f"❌ [FCM Subscribe Error] DB 저장 실패: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 # --- (v13.0) DB 초기화 함수 (PostgreSQL 용) ---
 def init_db():
     """PostgreSQL DB와 테이블 4개를 생성합니다."""
@@ -271,6 +319,17 @@ def init_db():
             time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
+        
+        # --- ✅ (NEW) FCM 토큰 테이블 생성 ---
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fcm_tokens (
+            id SERIAL PRIMARY KEY,
+            token TEXT NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        # --- 여기까지 추가 ---
+
         conn.commit()
         
         try:
