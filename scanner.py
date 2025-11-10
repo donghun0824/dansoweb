@@ -144,6 +144,14 @@ You MUST respond ONLY with the specified JSON schema.
 
             response_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '{}')
             
+            # --- ✅ (v16.1) AI가 Markdown으로 감싸서 응답할 경우 JSON 추출 ---
+            if '```json' in response_text:
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                if start != -1 and end != -1:
+                    response_text = response_text[start:end]
+            # --- 여기까지 추가 ---
+            
             if not response_text.strip().startswith('{'):
                 print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: AI가 JSON이 아닌 텍스트로 응답함. {response_text}")
                 return 50
@@ -263,7 +271,7 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.0) 튜닝: FCM 푸시 알림 발송 함수 ---
+# --- (v16.1) 튜닝: FCM 푸시 알림 발송 함수 (오류 방어) ---
 def send_fcm_notification(ticker, price, probability_score):
     """DB의 모든 토큰에 FCM 푸시 알림을 발송합니다."""
     if not VAPID_PRIVATE_KEY:
@@ -294,10 +302,19 @@ def send_fcm_notification(ticker, price, probability_score):
         })
 
         print(f"🔔 [FCM] {len(tokens)}명의 구독자에게 {ticker} 알림 발송 시도...")
+        
+        success_count = 0
+        fail_count = 0
 
         for (token_str,) in tokens:
             try:
-                # app.js가 보낸 토큰은 이미 JSON 문자열이므로, 그대로 json.loads()
+                # --- ✅ (NEW) 비어있는 토큰 방어 코드 ---
+                if not token_str:
+                    print("❌ [FCM] DB에서 비어있는 토큰 발견 (무시함).")
+                    fail_count += 1
+                    continue
+                # --- 여기까지 추가 ---
+
                 subscription_info = json.loads(token_str) 
                 
                 webpush(
@@ -306,14 +323,16 @@ def send_fcm_notification(ticker, price, probability_score):
                     vapid_private_key=VAPID_PRIVATE_KEY,
                     vapid_claims={"sub": VAPID_EMAIL}
                 )
+                success_count += 1
             except WebPushException as ex:
                 print(f"❌ [FCM] 토큰 전송 실패: {ex}")
-                # (참고: 토큰이 만료되었으면(410, 404) DB에서 삭제하는 로직이 필요)
+                fail_count += 1
             except Exception as e:
-                # json.loads(token_str) 실패 등을 포함
                 print(f"❌ [FCM] 알 수 없는 토큰 오류 (토큰 형식 확인 필요): {e}")
+                fail_count += 1
         
-        print(f"✅ [FCM] {len(tokens)}명에게 알림 발송 완료.")
+        # ✅ (NEW) 성공/실패 카운트 로그
+        print(f"✅ [FCM] {success_count}명에게 발송 완료, {fail_count}명 실패.")
 
     except Exception as e:
         if conn: conn.close()
@@ -364,7 +383,7 @@ def find_active_tickers():
         return set()
         
     print(f"\n[사냥꾼] 1단계: 'Top Gainers' (조건: ${MAX_PRICE} 미만) 스캔 중...")
-    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={POLYGON_API_KEY}"
+    url = f"[https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=](https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=){POLYGON_API_KEY}"
     tickers_to_watch = set()
     try:
         response = requests.get(url)
