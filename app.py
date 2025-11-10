@@ -45,10 +45,11 @@ def serve_favicon():
     return send_from_directory(os.path.join(app.root_path, 'static', 'images'),
                                'danso_logo.png', mimetype='image/png')
 
-# --- 3. 대시보드 데이터 API ---
+# --- 🔽 [수정됨] 대시보드 데이터 API 🔽 ---
 @app.route('/api/dashboard')
 def get_dashboard_data():
     conn = None
+    cursor = None  # <-- 변수를 try 밖에서 초기화
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -68,14 +69,19 @@ def get_dashboard_data():
         print(f"Error in /api/dashboard: {e}")
         return jsonify({'status': {'last_scan_time': 'Scanner waiting...', 'watching_count': 0, 'watching_tickers': []}, 'signals': [], 'recommendations': []})
     finally:
-        if conn:
+        # --- 🔽 [수정됨] 🔽 ---
+        # cursor와 conn이 모두 성공적으로 생성되었을 때만 닫도록 수정
+        if cursor:
             cursor.close()
+        if conn:
             conn.close()
+        # --- 🔼 [수정됨] 🔼 ---
 
 # --- 4 & 5. 커뮤니티 API (게시글 읽기/쓰기) ---
 @app.route('/api/posts', methods=['GET', 'POST'])
 def handle_posts():
     conn = None
+    cursor = None # <-- 변수를 try 밖에서 초기화
     try:
         conn = get_db_connection()
         if request.method == 'GET':
@@ -100,11 +106,12 @@ def handle_posts():
         print(f"Error in /api/posts: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
+        # --- 🔽 [수정됨] 🔽 ---
+        if cursor:
+            cursor.close()
         if conn:
-            # cursor가 정의되었는지 확인 후 닫기
-            if 'cursor' in locals() and cursor and not cursor.closed:
-                cursor.close()
             conn.close()
+        # --- 🔼 [수정됨] 🔼 ---
 
 
 # --- 6. 실시간 호가 API ---
@@ -114,6 +121,7 @@ def get_quote(ticker):
     url = f"https://api.polygon.io/v3/quotes/{ticker.upper()}?limit=1&apiKey={API_KEY}"
     try:
         response = requests.get(url)
+        response.raise_for_status() # HTTP 오류가 나면 예외 발생
         data = response.json()
         if data.get('status') == 'OK' and data.get('results'):
             return jsonify(data['results'][0])
@@ -128,6 +136,7 @@ def get_ticker_details(ticker):
     url = f"https://api.polygon.io/v3/reference/tickers/{ticker.upper()}?apiKey={API_KEY}"
     try:
         response = requests.get(url)
+        response.raise_for_status()
         data = response.json()
         if data.get('status') == 'OK' and data.get('results'):
             results = data['results']
@@ -161,6 +170,7 @@ def get_chart_data(ticker):
         past_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
         url = f"https://api.polygon.io/v2/aggs/ticker/{ticker.upper()}/range/1/minute/{past_date}/{today}?sort=asc&limit=5000&apiKey={API_KEY}"
         response = requests.get(url)
+        response.raise_for_status()
         data = response.json()
         if data.get('status') == 'OK' and data.get('results'):
             chart_data = [{
@@ -185,50 +195,44 @@ def get_market_overview():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- 🔽 [수정됨] 푸시 구독 API 🔽 ---
+# --- 10. 푸시 구독 API ---
 @app.route('/subscribe', methods=['POST'])
 def subscribe():
     """PWA 푸시 구독 정보(객체 전체)를 받아서 DB에 저장합니다."""
-    
-    # 1. app.js가 보낸 JSON 객체 전체를 받습니다.
     subscription_data = request.json
-    
-    # 2. (중요) 이 객체가 유효한지 확인합니다.
     if not subscription_data or 'endpoint' not in subscription_data:
         return jsonify({'status': 'error', 'message': 'Invalid subscription data provided'}), 400
         
-    # 3. (핵심) DB에 저장하기 위해 객체를 다시 JSON "문자열"로 변환합니다.
     token_string_to_store = json.dumps(subscription_data)
-
     conn = None
+    cursor = None # <-- 변수를 try 밖에서 초기화
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # 4. JSON "문자열"을 token 컬럼에 저장합니다.
         cursor.execute(
             "INSERT INTO fcm_tokens (token) VALUES (%s) ON CONFLICT (token) DO NOTHING",
             (token_string_to_store,)
         )
         conn.commit()
-        
         print(f"✅ [FCM] 새 구독자 저장 성공: {subscription_data.get('endpoint')[:50]}...")
         return jsonify({'status': 'OK', 'message': 'Subscription saved successfully'})
-        
     except Exception as e:
         if conn: conn.rollback()
         print(f"❌ [FCM] 구독자 저장 실패: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     finally:
+        # --- 🔽 [수정됨] 🔽 ---
+        if cursor:
+            cursor.close()
         if conn:
-            if 'cursor' in locals() and cursor and not cursor.closed:
-                cursor.close()
             conn.close()
-# --- 🔼 [수정 완료] 🔼 ---
+        # --- 🔼 [수정됨] 🔼 ---
 
+# --- DB 초기화 ---
 def init_db():
     """PostgreSQL DB와 테이블을 생성합니다."""
     conn = None
+    cursor = None # <-- 변수를 try 밖에서 초기화
     try:
         if not DATABASE_URL:
             print("❌ [DB] DATABASE_URL이 설정되지 않았습니다.")
@@ -261,10 +265,12 @@ def init_db():
         if conn: conn.rollback()
         print(f"❌ [DB] PostgreSQL 초기화 실패: {e}")
     finally:
+        # --- 🔽 [수정됨] 🔽 ---
+        if cursor:
+            cursor.close()
         if conn:
-            if 'cursor' in locals() and cursor and not cursor.closed:
-                cursor.close()
             conn.close()
+        # --- 🔼 [수정됨] 🔼 ---
 
 # Gunicorn으로 실행될 때 DB 초기화
 init_db()
