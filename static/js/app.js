@@ -1,8 +1,9 @@
-// app.js (v2 - 모듈형 SDK)
+// app.js (v3 - 표준 Push API 적용)
 
 // 1. Firebase 모듈 가져오기 (CDN에서 바로 가져옴)
+// (Firebase App 초기화는 여전히 필요할 수 있습니다. 다른 Firebase 서비스를 쓴다면 남겨두세요)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
-import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
+// import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js"; // (사용 안 함)
 
 // 2. ✅ 사용자님의 firebaseConfig
 const firebaseConfig = {
@@ -17,75 +18,111 @@ const firebaseConfig = {
 
 // 3. Firebase 초기화
 const app = initializeApp(firebaseConfig);
-const messaging = getMessaging(app);
+// const messaging = getMessaging(app); // (사용 안 함)
 
-// 4. FCM 함수 정의
+// --- 🔽 [수정됨] 표준 Push API 함수 🔽 ---
+
+// 4. ✅ (NEW) 표준 Push API 함수 정의
 function requestNotificationPermission() {
     console.log("Requesting notification permission...");
     
     Notification.requestPermission().then((permission) => {
         if (permission === "granted") {
             console.log("Notification permission granted.");
-            getFCMToken();
+            // 서비스 워커가 준비되면 구독 시작
+            subscribeUserToPush(); 
         } else {
             console.log("Notification permission denied.");
         }
     });
 }
 
-function getFCMToken() {
+function subscribeUserToPush() {
     // 5. ✅ 사용자님의 VAPID 공개 키
     const VAPID_PUBLIC_KEY = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
 
-    getToken(messaging, { vapidKey: VAPID_PUBLIC_KEY })
-        .then((currentToken) => {
-            if (currentToken) {
-                console.log("FCM Token:", currentToken);
-                // 6. ✅ (가장 중요) 이 토큰을 우리 DB에 저장해야 합니다.
-                sendTokenToServer(currentToken);
-            } else {
-                console.log("No registration token available. Request permission to generate one.");
-            }
-        }).catch((err) => {
-            console.log("An error occurred while retrieving token. ", err);
-        });
+    navigator.serviceWorker.ready.then(registration => {
+        const subscribeOptions = {
+            userVisibleOnly: true,
+            // VAPID 공개 키를 ArrayBuffer로 변환
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+        };
+
+        console.log("Subscribing with PushManager...");
+        return registration.pushManager.subscribe(subscribeOptions);
+    })
+    .then(pushSubscription => {
+        if (pushSubscription) {
+            console.log("Received PushSubscription: ", JSON.stringify(pushSubscription));
+            // 6. ✅ (가장 중요) 이 pushSubscription 객체 전체를 DB에 저장합니다.
+            sendSubscriptionToServer(pushSubscription);
+        } else {
+            console.log("Failed to get push subscription.");
+        }
+    })
+    .catch(err => {
+        console.error("Error subscribing to push: ", err);
+    });
 }
 
-function sendTokenToServer(token) {
-    // 7. 이 'token'을 Render의 PostgreSQL DB에 저장하는 API를 호출합니다.
-    // (이 '/subscribe' API는 Flask 백엔드에서 새로 만들어야 합니다.)
+function sendSubscriptionToServer(subscription) {
+    // 7. 이 'subscription' 객체 전체를 Render의 PostgreSQL DB에 저장합니다.
     
-    fetch("/subscribe", { // (API 주소는 예시입니다)
+    fetch("/subscribe", { // (API 주소는 기존과 동일)
         method: "POST",
         headers: {
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ token: token }),
+        // 8. ✅ (핵심) 구독 객체 전체를 문자열로 변환하여 전송
+        //    이것이 백엔드 pywebpush가 원하는 형식입니다.
+        body: JSON.stringify(subscription), 
     })
     .then(response => response.json())
     .then(data => {
-        console.log("Token sent to server:", data);
+        console.log("Subscription sent to server:", data);
     })
     .catch((error) => {
-        console.error("Error sending token to server:", error);
+        console.error("Error sending subscription to server:", error);
     });
 }
 
-// 8. (선택사항) 앱이 "켜져 있을 때" (포그라운드) 알림 받기
-onMessage(messaging, (payload) => {
-  console.log("Message received in foreground: ", payload);
-  // (알림을 화면에 직접 띄우는 로직을 여기에 추가할 수 있습니다)
-  new Notification(payload.notification.title, { 
-      body: payload.notification.body,
-      icon: "/static/images/danso_logo.png" 
-  });
+// 9. (선택사항) 서비스 워커로부터 메시지 받기 (포그라운드)
+navigator.serviceWorker.addEventListener('message', event => {
+    console.log("Message received in foreground: ", event.data);
+    if (event.data && event.data.notification) {
+        const payload = event.data.notification;
+        new Notification(payload.title, { 
+            body: payload.body,
+            icon: "/static/images/danso_logo.png" 
+        });
+    }
 });
+
+// 10. (필수) VAPID 키 변환 헬퍼 함수
+// (applicationServerKey는 Uint8Array 형식이 필요합니다)
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
+// --- 🔼 [수정 완료] 🔼 ---
 
 
 // --- (기존 app.js 코드 시작) ---
 document.addEventListener('DOMContentLoaded', function() {
     
     // 9. ✅ 페이지가 로드되면 바로 알림 권한 요청
+    // (이제 새로 수정한 함수를 호출합니다)
     requestNotificationPermission();
 
     // --- 1. DOM 요소 가져오기 (v11.0) ---
