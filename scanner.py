@@ -22,28 +22,30 @@ GCP_PROJECT_ID = "gen-lang-client-0379169283"
 # 1. 리전을 'us-central1'로 유지
 GCP_REGION = "us-central1" 
 
-# --- ✅ 2. (NEW) Firebase VAPID 키 (FCM 발송용) ---
+# --- ✅ (NEW) Firebase VAPID 키 (FCM 발송용) ---
 VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY')
 VAPID_EMAIL = "mailto:cbvkqtm98@gmail.com" # (본인 이메일로 수정 권장)
 
 # --- (v9.5) "5분 안정화 엔진" (합의점) ---
 MAX_PRICE = 10
 TOP_N = 50
-MIN_DATA_REQ = 6
+MIN_DATA_REQ = 6 # (유지) 안정적인 분석을 위해 6개 1분봉 요구
 
-# --- (v9.5) 엔진 1: WAE (5분) ---
+# --- (v16.0) 튜닝: 엔진 1 (WAE) ---
 WAE_MACD = (2, 3, 4) 
 WAE_SENSITIVITY = 150
 WAE_BB = (5, 1.5) 
 WAE_ATR = 5 
 WAE_ATR_MULT = 1.5
 WAE_CMF = 5 
-WAE_RSI_RANGE = (45, 75) 
+# ✅ (튜닝 2-A) RSI 한도를 75에서 70으로 낮춤
+WAE_RSI_RANGE = (45, 70) 
 RSI_LENGTH = 5 
 
-# --- (v9.5) 엔진 2: 일목 (5분) ---
+# --- (v16.0) 튜닝: 엔진 2 (일목) ---
 ICHIMOKU_SHORT = (2, 3, 5) 
-CLOUD_PROXIMITY = 20.0 
+# ✅ (튜닝 2-A) 구름 이격도를 20%에서 7%로 대폭 낮춤
+CLOUD_PROXIMITY = 7.0 
 CLOUD_THICKNESS = 0.5
 OBV_LOOKBACK = 3 
 
@@ -204,7 +206,7 @@ def init_db():
         )
         """)
         
-        # --- ✅ 3. FCM 토큰 테이블 추가 (scanner.py에도 추가) ---
+        # --- ✅ FCM 토큰 테이블 추가 (scanner.py에도 추가) ---
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS fcm_tokens (
             id SERIAL PRIMARY KEY,
@@ -234,25 +236,34 @@ def init_db():
         if conn: conn.close()
         print(f"❌ [DB] PostgreSQL 초기화 실패: {e}")
 
-# --- (v8.0) 알림/로그 함수 ---
+# --- (v16.0) 튜닝: 알림/로그 함수 ---
 def send_discord_alert(ticker, price, type="signal", probability_score=50):
     if not DISCORD_WEBHOOK_URL or "YOUR_DISCORD" in DISCORD_WEBHOOK_URL or len(DISCORD_WEBHOOK_URL) < 50:
         print(f"🔔 [알림] {ticker} @ ${price} (디스코드 URL 미설정)")
         return
         
+    # ✅ (튜닝 2-B) 3% 풀백(Pullback) 진입가 계산
+    pullback_price = price * 0.97
+        
     if type == "signal": 
-        content = f"🚀 **WAE 폭발 신호** 🚀\n**{ticker}** @ **${price}**\n**AI 상승 확률: {probability_score}%**"
+        content = f"🚀 **WAE 폭발 신호** 🚀\n**{ticker}** @ **${price:.4f}**\n**AI 상승 확률: {probability_score}%**"
     else: 
-        content = f"💡 **정석 셋업 (추천)** 💡\n**{ticker}** @ **${price}**\n**AI 상승 확률: {probability_score}%**"
+        # ✅ (튜닝 2-B) 알림 메시지에 풀백 진입가 추가
+        content = (
+            f"💡 **AI Setup (Recommendation)** 💡\n"
+            f"**{ticker}** @ **${price:.4f}**\n"
+            f"**Pullback Entry: ${pullback_price:.4f}**\n"
+            f"**AI Score: {probability_score}%**"
+        )
         
     data = {"content": content}
     try: 
         requests.post(DISCORD_WEBHOOK_URL, json=data)
-        print(f"🔔 [알림] {ticker} @ ${price} (디스코드 전송 완료)")
+        print(f"🔔 [알림] {ticker} @ ${price:.4f} (디스코드 전송 완료)")
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- ✅ 4. (NEW) FCM 푸시 알림 발송 함수 ---
+# --- (v16.0) 튜닝: FCM 푸시 알림 발송 함수 ---
 def send_fcm_notification(ticker, price, probability_score):
     """DB의 모든 토큰에 FCM 푸시 알림을 발송합니다."""
     if not VAPID_PRIVATE_KEY:
@@ -272,10 +283,13 @@ def send_fcm_notification(ticker, price, probability_score):
             print("🔔 [FCM] DB에 등록된 알림 구독자가 없습니다.")
             return
 
-        # 알림 메시지 페이로드
+        # ✅ (튜닝 2-B) 3% 풀백(Pullback) 진입가 계산
+        pullback_price = price * 0.97
+        
+        # ✅ (튜닝 2-B) 알림 메시지에 풀백 진입가 추가
         message_data = json.dumps({
-            "title": f"🚀 AI Signal: {ticker}",
-            "body": f"New setup detected @ ${price} (AI Score: {probability_score}%)",
+            "title": f"🚀 AI Signal: {ticker} @ ${price:.4f}",
+            "body": f"Pullback Entry: ${pullback_price:.4f} (AI Score: {probability_score}%)",
             "icon": "/static/images/danso_logo.png" # PWA가 참조할 아이콘 경로
         })
 
@@ -489,7 +503,7 @@ async def handle_msg(msg_list):
         try:
             cond_wae_momentum = (last['t1'] > last['e1']) and (last['t1'] > last['deadZone'])
             cond_volume = (last[CMF_COL] > 0) and (last['OBV'] > prev['OBV'])
-            cond_rsi = (WAE_RSI_RANGE[0] < last[RSI_COL] < WAE_RSI_RANGE[1])
+            cond_rsi = (WAE_RSI_RANGE[0] < last[RSI_COL] < WAE_RSI_RANGE[1]) # ✅ (튜닝 2-A) 적용됨
 
             cloud_a_current = df[SENKOU_A_COL].iloc[-K]; cloud_b_current = df[SENKOU_B_COL].iloc[-K]
             cloud_top = max(cloud_a_current, cloud_b_current); 
@@ -499,7 +513,9 @@ async def handle_msg(msg_list):
             
             cloud_thickness = abs(cloud_a_current - cloud_b_current) / last['close'] * 100
             dist_bull = (last['close'] - cloud_top) / last['close'] * 100
-            cond_cloud_shape = (cloud_thickness >= CLOUD_THICKNESS) and (0 <= dist_bull <= CLOUD_PROXIMITY)
+            
+            # ✅ (튜닝 2-A) CLOUD_PROXIMITY (7.0)이 여기서 적용됨
+            cond_cloud_shape = (cloud_thickness >= CLOUD_THICKNESS) and (0 <= dist_bull <= CLOUD_PROXIMITY) 
 
             chikou = last[CHIKOU_COL] 
             price_K_ago = df['close'].iloc[-K] 
@@ -516,7 +532,7 @@ async def handle_msg(msg_list):
                     "wae_momentum": bool(cond_wae_momentum),
                     "rsi_ok": bool(cond_rsi),
                     "volume_ok": bool(cond_volume),
-                    "cloud_shape_ok (20%)": bool(cond_cloud_shape),
+                    "cloud_shape_ok (7%)": bool(cond_cloud_shape), # (튜닝 반영)
                     "ichimoku_trend_ok": bool(cond_ichimoku_trend),
                     "chikou_ok": bool(cond_chikou),
                     "rsi_value": float(round(last[RSI_COL], 2)),
@@ -526,14 +542,13 @@ async def handle_msg(msg_list):
                 
                 probability_score = await get_gemini_probability(ticker, conditions_data)
                 
-                print(f"💡💡💡 [통합 엔진 v5.1] {ticker} @ ${last['close']} (AI Score: {probability_score}%) 💡💡💡")
+                print(f"💡💡💡 [통합 엔진 v5.1] {ticker} @ ${last['close']:.4f} (AI Score: {probability_score}%) 💡💡💡")
                 is_new_rec = log_recommendation(ticker, float(last['close']), probability_score)
                 
-                # --- ✅ 5. (NEW) FCM 푸시 알림 발송 호출 ---
                 if is_new_rec: 
+                    # ✅ (튜닝 2-B) 수정된 함수가 여기서 호출됨
                     send_discord_alert(ticker, float(last['close']), "recommendation", probability_score)
                     send_fcm_notification(ticker, float(last['close']), probability_score)
-                # --- 여기까지 수정 ---
             
             else:
                 pass
@@ -557,13 +572,13 @@ async def websocket_engine(websocket):
     except Exception as e:
         print(f"-> ❌ [엔진 v9.0] 웹소켓 오류: {e}")
 
-# --- 3분마다 '사냥꾼' 실행 (v9.7 수정) ---
+# --- (v16.0) 튜닝: 1분마다 '사냥꾼' 실행 ---
 async def periodic_scanner(websocket):
     current_subscriptions = set() 
     
     while True:
         try:
-            print(f"\n[사냥꾼] (v9.7) 7분 주기 시작. '신호 피드' (signals, recommendations) DB를 청소합니다...")
+            print(f"\n[사냥꾼] (v16.0) 1분 주기 시작. '신호 피드' (signals, recommendations) DB를 청소합니다...")
             conn = get_db_connection()
             cursor = conn.cursor()
             # 10. PostgreSQL은 TRUNCATE가 더 빠름 (DELETE도 작동은 함)
@@ -634,8 +649,9 @@ async def periodic_scanner(websocket):
         except Exception as e:
             print(f"❌ [DB] 'status' 저장 실패: {e}")
             
-        print(f"\n[사냥꾼] 7분(420초) 후 다음 스캔을 시작합니다...")
-        await asyncio.sleep(420) 
+        # ✅ (튜닝 1) 7분(420초) -> 1분(60초)로 변경
+        print(f"\n[사냥꾼] 1분(60초) 후 다음 스캔을 시작합니다...")
+        await asyncio.sleep(60) 
 
 # --- (v8.1) "수동 Keepalive" 로봇 ---
 async def manual_keepalive(websocket):
@@ -664,11 +680,12 @@ async def main():
     if not GCP_PROJECT_ID or "YOUR_PROJECT_ID" in GCP_PROJECT_ID:
         print("❌ [메인] GCP_PROJECT_ID가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
         return
-    # --- ✅ 6. (NEW) VAPID 키 확인 ---
+    # VAPID 키 확인
     if not VAPID_PRIVATE_KEY:
         print("⚠️ [메인] VAPID_PRIVATE_KEY가 설정되지 않았습니다. FCM 푸시 알림이 비활성화됩니다.")
 
-    print("스캐너 V15.4 (FCM 발송 기능 추가)을 시작합니다...") 
+    # ✅ (튜닝) 버전 정보 수정
+    print("스캐너 V16.0 (Tuned: 60s scan, Pullback alerts)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:
