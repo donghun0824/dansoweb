@@ -381,7 +381,10 @@ def find_active_tickers():
         return set()
         
     print(f"\n[사냥꾼] 1단계: 'Top Gainers' (조건: ${MAX_PRICE} 미만) 스캔 중...")
-    url = f"[https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=](https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=){POLYGON_API_KEY}"
+    
+    # ✅ (수정) URL을 올바른 f-string 형식으로 변경
+    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={POLYGON_API_KEY}"
+    
     tickers_to_watch = set()
     try:
         response = requests.get(url)
@@ -399,7 +402,10 @@ def find_active_tickers():
             
     except Exception as e:
         print(f"-> ❌ [사냥꾼] 1단계 스캔 오류 (API 키/한도 확인): {e}")
-        return tickers_to_watch
+        return tickers_to_watch # 예외 발생 시 반환
+        
+    # ✅ (추가) 성공 시에도 항상 set을 반환
+    return tickers_to_watch
 
 # --- 2단계 로직: "v5.1 느슨한 통합 엔진" (5분) ---
 async def handle_msg(msg_list):
