@@ -1,4 +1,4 @@
-// app.js (v2 - 모듈형 SDK)
+// app.js (v2 - 모듈형 SDK / 타이밍 오류 수정)
 
 // 1. Firebase 모듈 가져오기 (CDN에서 바로 가져옴)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
@@ -26,6 +26,7 @@ function requestNotificationPermission() {
     Notification.requestPermission().then((permission) => {
         if (permission === "granted") {
             console.log("Notification permission granted.");
+            // 권한이 승인되면 토큰 가져오기 실행
             getFCMToken();
         } else {
             console.log("Notification permission denied.");
@@ -33,28 +34,38 @@ function requestNotificationPermission() {
     });
 }
 
+// ✅ [수정 1] 서비스워커가 'active' 될 때까지 기다리도록 수정
 function getFCMToken() {
     // 5. ✅ 사용자님의 VAPID 공개 키
     const VAPID_PUBLIC_KEY = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
 
-    getToken(messaging, { vapidKey: VAPID_PUBLIC_KEY })
-        .then((currentToken) => {
-            if (currentToken) {
-                console.log("FCM Token:", currentToken);
-                // 6. ✅ (가장 중요) 이 토큰을 우리 DB에 저장해야 합니다.
-                sendTokenToServer(currentToken);
-            } else {
-                console.log("No registration token available. Request permission to generate one.");
-            }
-        }).catch((err) => {
-            console.log("An error occurred while retrieving token. ", err);
+    // ✅ 서비스워커가 'active' 될 때까지 기다립니다.
+    navigator.serviceWorker.ready.then((activeRegistration) => {
+        
+        console.log("Service Worker is active, retrieving token...");
+
+        // 서비스워커가 준비되면 getToken을 호출합니다.
+        return getToken(messaging, { 
+            vapidKey: VAPID_PUBLIC_KEY,
+            serviceWorkerRegistration: activeRegistration // 'active' 워커를 명시
         });
+
+    }).then((currentToken) => {
+        if (currentToken) {
+            console.log("FCM Token:", currentToken);
+            // 6. ✅ 이 토큰을 우리 DB에 저장합니다.
+            sendTokenToServer(currentToken);
+        } else {
+            console.log("No registration token available. Request permission to generate one.");
+        }
+    }).catch((err) => {
+        console.log("An error occurred while retrieving token (sw.js active wait failed?). ", err);
+    });
 }
+
 
 function sendTokenToServer(token) {
     // 7. 이 'token'을 Render의 PostgreSQL DB에 저장하는 API를 호출합니다.
-    // (이 '/subscribe' API는 Flask 백엔드에서 새로 만들어야 합니다.)
-    
     fetch("/subscribe", { // (API 주소는 예시입니다)
         method: "POST",
         headers: {
@@ -74,7 +85,6 @@ function sendTokenToServer(token) {
 // 8. (선택사항) 앱이 "켜져 있을 때" (포그라운드) 알림 받기
 onMessage(messaging, (payload) => {
   console.log("Message received in foreground: ", payload);
-  // (알림을 화면에 직접 띄우는 로직을 여기에 추가할 수 있습니다)
   new Notification(payload.notification.title, { 
       body: payload.notification.body,
       icon: "/static/images/danso_logo.png" 
@@ -85,8 +95,8 @@ onMessage(messaging, (payload) => {
 // --- (기존 app.js 코드 시작) ---
 document.addEventListener('DOMContentLoaded', function() {
     
-    // 9. ✅ 페이지가 로드되면 바로 알림 권한 요청
-    requestNotificationPermission();
+    // 9. ✅ [수정 2] 페이지 로드 시 바로 호출하던 코드를 주석 처리 (너무 빠름)
+    // requestNotificationPermission();
 
     // --- 1. DOM 요소 가져오기 (v11.0) ---
     const scanStatusEl = document.getElementById('scan-status-text');
@@ -529,12 +539,16 @@ document.addEventListener('DOMContentLoaded', function() {
     fetchCommunityPosts();
     
     // --- PWA 서비스 워커 등록 ---
-    // (기존의 sw.js 등록 코드는 그대로 둡니다. PWA 캐싱을 담당합니다.)
+    // ✅ [수정 3] 'register' 성공 직후에 알림 권한을 요청하도록 수정
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js') // sw.js 파일 경로
           .then(registration => {
             console.log('✅ ServiceWorker registration successful:', registration.scope);
+            
+            // ✅ 서비스워커가 '등록'된 직후에 알림 권한을 요청합니다.
+            requestNotificationPermission(); 
+
           })
           .catch(err => {
             console.log('❌ ServiceWorker registration failed:', err);
