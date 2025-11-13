@@ -9,7 +9,8 @@ from datetime import datetime
 import psycopg2  # 2. sqlite3 대신 psycopg2
 import time
 import httpx 
-from pywebpush import webpush, WebPushException # <-- ✅ 1. pywebpush 임포트
+import firebase_admin # ✅ 1. firebase-admin 임포트
+from firebase_admin import credentials, messaging # ✅ 2. 관련 모듈 임포트
 
 # --- (v12.0) API 키 설정 (보안) ---
 # 3. Render 환경 변수에서 API 키를 읽어옵니다.
@@ -17,14 +18,18 @@ POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
+# ✅ 3. Firebase Admin SDK 환경 변수
+FIREBASE_ADMIN_SDK_JSON_STR = os.environ.get('FIREBASE_ADMIN_SDK_JSON')
+FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID')
+
 # --- (v15.3) Vertex AI 설정 (us-central1 복귀) ---
 GCP_PROJECT_ID = "gen-lang-client-0379169283" 
 # 1. 리전을 'us-central1'로 유지
 GCP_REGION = "us-central1" 
 
 # --- ✅ 2. (NEW) Firebase VAPID 키 (FCM 발송용) ---
-VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY')
-VAPID_EMAIL = "mailto:cbvkqtm98@gmail.com" # (본인 이메일로 수정 권장)
+VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY') # (이제 pywebpush용이라 사용 안 함)
+VAPID_EMAIL = "mailto:cbvkqtm98@gmail.com" # (이제 pywebpush용이라 사용 안 함)
 
 # --- (v16.2) 튜닝 되돌리기 (API 한도 문제 해결) ---
 MAX_PRICE = 10
@@ -58,6 +63,30 @@ def get_db_connection():
         raise ValueError("DATABASE_URL 환경 변수가 설정되지 않았습니다.")
     conn = psycopg2.connect(DATABASE_URL)
     return conn
+
+# ✅ 4. Firebase Admin SDK 초기화 함수 (새로 추가)
+def init_firebase():
+    """Firebase Admin SDK를 초기화합니다."""
+    try:
+        if not FIREBASE_ADMIN_SDK_JSON_STR:
+            print("❌ [FCM] FIREBASE_ADMIN_SDK_JSON이 설정되지 않아 FCM을 건너뜁니다.")
+            return False
+        
+        # 환경 변수에서 JSON 문자열을 읽어 딕셔너리로 변환
+        sdk_json_dict = json.loads(FIREBASE_ADMIN_SDK_JSON_STR)
+        
+        cred = credentials.Certificate(sdk_json_dict)
+        
+        # 이미 초기화되었는지 확인 (Render가 재시작할 때 오류 방지)
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred, {
+                'projectId': FIREBASE_PROJECT_ID
+            })
+        print(f"✅ [FCM] Firebase Admin SDK 초기화 성공 (Project ID: {FIREBASE_PROJECT_ID})")
+        return True
+    except Exception as e:
+        print(f"❌ [FCM] Firebase Admin SDK 초기화 실패: {e}")
+        return False
 
 ticker_minute_history = {} 
 ticker_tick_history = {} 
@@ -272,11 +301,14 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.1) 튜닝: FCM 푸시 알림 발송 함수 (FCM 오류 방어) ---
+# --- (v16.3) 튜닝: FCM 푸시 알림 발송 함수 (firebase-admin 사용) ---
+# ✅ 5. send_fcm_notification 함수 전체를 교체
 def send_fcm_notification(ticker, price, probability_score):
-    """DB의 모든 토큰에 FCM 푸시 알림을 발송합니다."""
-    if not VAPID_PRIVATE_KEY:
-        print("🔔 [FCM] VAPID_PRIVATE_KEY가 설정되지 않아 푸시 알림을 건너뜁니다.")
+    """DB의 모든 문자열 토큰에 FCM 푸시 알림을 발송합니다."""
+    
+    # Firebase SDK가 초기화되지 않았으면 중단
+    if not firebase_admin._apps:
+        print("🔔 [FCM] Firebase Admin SDK가 초기화되지 않아 알림을 건너뜁니다.")
         return
 
     conn = None
@@ -284,57 +316,51 @@ def send_fcm_notification(ticker, price, probability_score):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT token FROM fcm_tokens")
-        tokens = cursor.fetchall()
+        # [(token1,), (token2,)] -> [token1, token2]
+        tokens_list = [token[0] for token in cursor.fetchall() if token[0]] 
         cursor.close()
         conn.close()
 
-        if not tokens:
+        if not tokens_list:
             print("🔔 [FCM] DB에 등록된 알림 구독자가 없습니다.")
             return
-        
-        # ✅ (v16.2) "풀백 진입가"는 v16.0 튜닝이므로 *제거*하고 원래대로 복귀
-        message_data = json.dumps({
-            "title": f"🚀 AI Signal: {ticker} @ ${price:.4f}",
-            "body": f"New setup detected (AI Score: {probability_score}%)",
-            "icon": "/static/images/danso_logo.png" # PWA가 참조할 아이콘 경로
-        })
 
-        print(f"🔔 [FCM] {len(tokens)}명의 구독자에게 {ticker} 알림 발송 시도...")
+        print(f"🔔 [FCM] {len(tokens_list)}명의 구독자에게 {ticker} 알림 발송 시도...")
         
-        success_count = 0
-        fail_count = 0
-
-        for (token_str,) in tokens:
-            try:
-                # --- ✅ (v16.1) 비어있는 토큰 방어 코드 ---
-                if not token_str:
-                    print("❌ [FCM] DB에서 비어있는 토큰 발견 (무시함).")
-                    fail_count += 1
-                    continue
-                # --- 여기까지 추가 ---
-
-                subscription_info = json.loads(token_str) 
-                
-                webpush(
-                    subscription_info=subscription_info,
-                    data=message_data,
-                    vapid_private_key=VAPID_PRIVATE_KEY,
-                    vapid_claims={"sub": VAPID_EMAIL}
-                )
-                success_count += 1
-            except WebPushException as ex:
-                print(f"❌ [FCM] 토큰 전송 실패: {ex}")
-                fail_count += 1
-            except Exception as e:
-                print(f"❌ [FCM] 알 수 없는 토큰 오류 (토큰 형식 확인 필요): {e}")
-                fail_count += 1
+        # 1. 알림 내용 정의
+        notification_payload = messaging.Notification(
+            title=f"🚀 AI Signal: {ticker} @ ${price:.4f}",
+            body=f"New setup detected (AI Score: {probability_score}%)",
+            # (아이콘은 PWA가 자체적으로 처리하므로 여기서는 불필요)
+        )
         
-        # ✅ (v16.1) 성공/실패 카운트 로그
-        print(f"✅ [FCM] {success_count}명에게 발송 완료, {fail_count}명 실패.")
+        # 2. 메시지 생성 (토큰 목록과 알림 내용 결합)
+        message = messaging.MulticastMessage(
+            tokens=tokens_list,
+            notification=notification_payload
+        )
+
+        # 3. 메시지 발송
+        response = messaging.send_multicast(message)
+        
+        # 4. 결과 로깅
+        print(f"✅ [FCM] {response.success_count}명에게 발송 완료, {response.failure_count}명 실패.")
+
+        if response.failure_count > 0:
+            failed_tokens = []
+            for idx, resp in enumerate(response.responses):
+                if not resp.success:
+                    # 실패한 토큰과 이유 로깅
+                    token = tokens_list[idx]
+                    print(f"❌ [FCM] 토큰 전송 실패: {token} (이유: {resp.exception})")
+                    failed_tokens.append(token)
+            
+            # (개선) 여기서 failed_tokens를 DB에서 삭제하는 로직을 추가할 수 있습니다.
 
     except Exception as e:
         if conn: conn.close()
-        print(f"❌ [FCM] 푸시 알림 발송 중 DB 오류: {e}")
+        # Firebase Admin SDK 관련 오류
+        print(f"❌ [FCM] 푸시 알림 발송 중 치명적 오류: {e}")
 
 # --- (v13.0) DB 로그 함수 (PostgreSQL 용) ---
 def log_signal(ticker, price, probability_score=50):
@@ -383,7 +409,7 @@ def find_active_tickers():
     print(f"\n[사냥꾼] 1단계: 'Top Gainers' (조건: ${MAX_PRICE} 미만) 스캔 중...")
     
     # ✅ (수정) URL을 올바른 f-string 형식으로 변경
-    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={POLYGON_API_KEY}"
+    url = f"[https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=](https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=){POLYGON_API_KEY}"
     
     tickers_to_watch = set()
     try:
@@ -702,12 +728,14 @@ async def main():
     if not GCP_PROJECT_ID or "YOUR_PROJECT_ID" in GCP_PROJECT_ID:
         print("❌ [메인] GCP_PROJECT_ID가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
         return
-    # VAPID 키 확인
-    if not VAPID_PRIVATE_KEY:
-        print("⚠️ [메인] VAPID_PRIVATE_KEY가 설정되지 않았습니다. FCM 푸시 알림이 비활성화됩니다.")
+    
+    # ✅ (수정) Firebase Admin SDK 키 확인
+    if not FIREBASE_ADMIN_SDK_JSON_STR or not FIREBASE_PROJECT_ID:
+        print("⚠️ [메인] FIREBASE_ADMIN_SDK_JSON 또는 FIREBASE_PROJECT_ID가 설정되지 않았습니다. FCM 푸시 알림이 비활성화됩니다.")
+
 
     # ✅ (튜닝) 버전 정보 수정
-    print("스캐너 V16.2 (7-min scan, bugfixes)을 시작합니다...") 
+    print("스캐너 V16.3 (FCM-Admin SDK)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:
@@ -751,9 +779,11 @@ async def main():
             print(f"-> ❌ [메인] 치명적 오류 발생: {e}. 10초 후 재연결합니다...")
             await asyncio.sleep(10)
 
+# ✅ 5. __name__ == "__main__" 블록 수정
 if __name__ == "__main__":
     init_db() 
+    init_firebase() # ✅ Firebase 초기화 호출 추가
     try: 
-        asyncio.run(main())
+        asyncIO.run(main())
     except KeyboardInterrupt: 
         print("\n[메인] 사용자에 의해 프로그램이 종료되었습니다.")

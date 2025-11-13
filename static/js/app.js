@@ -285,12 +285,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // --- (v3.0) 모달 제어 함수 ---
-    async function openTickerModal(ticker) {
+    
         currentModalTicker = ticker;
         modal.style.display = 'block';
         modalTickerName.textContent = ticker;
         showModalTab('info', null, true); 
-        
+        window.openTickerModal = async function(ticker) {
         document.getElementById('tab-info').innerHTML = '<p>Loading company info...</p>';
         document.getElementById('tab-quote').innerHTML = '<p>Loading real-time quote...</p>';
         document.getElementById('tab-financials').innerHTML = '<p>Loading financials summary...</p>';
