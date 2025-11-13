@@ -341,7 +341,7 @@ def send_fcm_notification(ticker, price, probability_score):
         )
 
         # 3. 메시지 발송
-        response = messaging.send_multicast(message)
+        response = messaging.send(message)
         
         # 4. 결과 로깅
         print(f"✅ [FCM] {response.success_count}명에게 발송 완료, {response.failure_count}명 실패.")
@@ -410,7 +410,7 @@ def find_active_tickers():
     
     # ✅ (수정) URL을 올바른 f-string 형식으로 변경
     url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={POLYGON_API_KEY}"
-    
+
     tickers_to_watch = set()
     try:
         response = requests.get(url)
