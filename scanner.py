@@ -784,6 +784,6 @@ if __name__ == "__main__":
     init_db() 
     init_firebase() # ✅ Firebase 초기화 호출 추가
     try: 
-        asyncIO.run(main())
+        asyncio.run(main())
     except KeyboardInterrupt: 
         print("\n[메인] 사용자에 의해 프로그램이 종료되었습니다.")
