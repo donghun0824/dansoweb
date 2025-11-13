@@ -277,6 +277,28 @@ def init_db():
         # ✅ (v16.2) 502 오류 방지를 위해 raise -> print로 변경
         print(f"❌ [DB] PostgreSQL 초기화 실패 (무시함): {e}")
 
+# --- (v16.1) 튜닝: 알림/로그 함수 ---
+def send_discord_alert(ticker, price, type="signal", probability_score=50):
+    if not DISCORD_WEBHOOK_URL or "YOUR_DISCORD" in DISCORD_WEBHOOK_URL or len(DISCORD_WEBHOOK_URL) < 50:
+        print(f"🔔 [알림] {ticker} @ ${price} (디스코드 URL 미설정)")
+        return
+        
+    if type == "signal": 
+        content = f"🚀 **WAE 폭발 신호** 🚀\n**{ticker}** @ **${price:.4f}**\n**AI 상승 확률: {probability_score}%**"
+    else: 
+        content = (
+            f"💡 **AI Setup (Recommendation)** 💡\n"
+            f"**{ticker}** @ **${price:.4f}**\n"
+            f"**AI Score: {probability_score}%**"
+        )
+        
+    data = {"content": content}
+    try: 
+        requests.post(DISCORD_WEBHOOK_URL, json=data)
+        print(f"🔔 [알림] {ticker} @ ${price:.4f} (디스코드 전송 완료)")
+    except Exception as e: 
+        print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
+        
 # --- (v16.5) 튜닝: FCM 푸시 알림 발송 함수 (send_multicast 사용) ---
 def send_fcm_notification(ticker, price, probability_score):
     """DB의 모든 문자열 토큰에 FCM 푸시 알림을 발송합니다."""
