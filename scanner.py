@@ -301,12 +301,10 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.3) 튜닝: FCM 푸시 알림 발송 함수 (firebase-admin 사용) ---
-# ✅ 5. send_fcm_notification 함수 전체를 교체
+# --- (v16.4) 튜닝: FCM 푸시 알림 발송 함수 (send_all 사용) ---
 def send_fcm_notification(ticker, price, probability_score):
     """DB의 모든 문자열 토큰에 FCM 푸시 알림을 발송합니다."""
     
-    # Firebase SDK가 초기화되지 않았으면 중단
     if not firebase_admin._apps:
         print("🔔 [FCM] Firebase Admin SDK가 초기화되지 않아 알림을 건너뜁니다.")
         return
@@ -316,7 +314,6 @@ def send_fcm_notification(ticker, price, probability_score):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT token FROM fcm_tokens")
-        # [(token1,), (token2,)] -> [token1, token2]
         tokens_list = [token[0] for token in cursor.fetchall() if token[0]] 
         cursor.close()
         conn.close()
@@ -331,17 +328,18 @@ def send_fcm_notification(ticker, price, probability_score):
         notification_payload = messaging.Notification(
             title=f"🚀 AI Signal: {ticker} @ ${price:.4f}",
             body=f"New setup detected (AI Score: {probability_score}%)",
-            # (아이콘은 PWA가 자체적으로 처리하므로 여기서는 불필요)
         )
         
-        # 2. 메시지 생성 (토큰 목록과 알림 내용 결합)
-        message = messaging.MulticastMessage(
-            tokens=tokens_list,
-            notification=notification_payload
-        )
+        # 2. ✅ [수정] send_all을 위해, "메시지 객체 리스트"를 만듭니다.
+        messages = [
+            messaging.Message(
+                token=token,
+                notification=notification_payload,
+            ) for token in tokens_list
+        ]
 
-        # 3. 메시지 발송
-        response = messaging.send(message)
+        # 3. ✅ [수정] send_multicast나 send 대신 send_all을 사용합니다.
+        response = messaging.send_all(messages)
         
         # 4. 결과 로깅
         print(f"✅ [FCM] {response.success_count}명에게 발송 완료, {response.failure_count}명 실패.")
@@ -350,18 +348,14 @@ def send_fcm_notification(ticker, price, probability_score):
             failed_tokens = []
             for idx, resp in enumerate(response.responses):
                 if not resp.success:
-                    # 실패한 토큰과 이유 로깅
                     token = tokens_list[idx]
                     print(f"❌ [FCM] 토큰 전송 실패: {token} (이유: {resp.exception})")
                     failed_tokens.append(token)
-            
-            # (개선) 여기서 failed_tokens를 DB에서 삭제하는 로직을 추가할 수 있습니다.
 
     except Exception as e:
         if conn: conn.close()
-        # Firebase Admin SDK 관련 오류
         print(f"❌ [FCM] 푸시 알림 발송 중 치명적 오류: {e}")
-
+          
 # --- (v13.0) DB 로그 함수 (PostgreSQL 용) ---
 def log_signal(ticker, price, probability_score=50):
     conn = None
