@@ -298,8 +298,8 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
         print(f"🔔 [알림] {ticker} @ ${price:.4f} (디스코드 전송 완료)")
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
-        
-# --- (v16.5) 튜닝: FCM 푸시 알림 발송 함수 (send_multicast 사용) ---
+
+# --- (v16.6) 튜닝: FCM 푸시 알림 발송 함수 (send_all 사용) ---
 def send_fcm_notification(ticker, price, probability_score):
     """DB의 모든 문자열 토큰에 FCM 푸시 알림을 발송합니다."""
     
@@ -328,14 +328,16 @@ def send_fcm_notification(ticker, price, probability_score):
             body=f"New setup detected (AI Score: {probability_score}%)",
         )
         
-        # 2. ✅ [수정] MulticastMessage (토큰 목록과 알림 결합)
-        message = messaging.MulticastMessage(
-            tokens=tokens_list,
-            notification=notification_payload
-        )
+        # 2. ✅ [수정] send_all을 위해, "메시지(Message) 객체 리스트"를 만듭니다.
+        messages = [
+            messaging.Message(
+                token=token,
+                notification=notification_payload,
+            ) for token in tokens_list
+        ]
 
-        # 3. ✅ [수정] send_multicast 함수 사용
-        response = messaging.send_multicast(message)
+        # 3. ✅ [수정] send_multicast 대신 send_all을 사용합니다.
+        response = messaging.send_all(messages)
         
         # 4. 결과 로깅
         print(f"✅ [FCM] {response.success_count}명에게 발송 완료, {response.failure_count}명 실패.")
