@@ -409,7 +409,7 @@ def find_active_tickers():
     print(f"\n[사냥꾼] 1단계: 'Top Gainers' (조건: ${MAX_PRICE} 미만) 스캔 중...")
     
     # ✅ (수정) URL을 올바른 f-string 형식으로 변경
-    url = f"[https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=](https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=){POLYGON_API_KEY}"
+    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={POLYGON_API_KEY}"
     
     tickers_to_watch = set()
     try:
