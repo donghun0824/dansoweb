@@ -1,4 +1,4 @@
-// app.js (v2 - 모듈형 SDK / 타이밍 오류 수정)
+// app.js (v2 - 모듈형 SDK / 타이밍 + 모달 오류 모두 수정)
 
 // 1. Firebase 모듈 가져오기 (CDN에서 바로 가져옴)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
@@ -34,7 +34,7 @@ function requestNotificationPermission() {
     });
 }
 
-// ✅ [수정 1] 서비스워커가 'active' 될 때까지 기다리도록 수정
+// (수정 1) 서비스워커가 'active' 될 때까지 기다리도록 수정
 function getFCMToken() {
     // 5. ✅ 사용자님의 VAPID 공개 키
     const VAPID_PUBLIC_KEY = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
@@ -95,7 +95,7 @@ onMessage(messaging, (payload) => {
 // --- (기존 app.js 코드 시작) ---
 document.addEventListener('DOMContentLoaded', function() {
     
-    // 9. ✅ [수정 2] 페이지 로드 시 바로 호출하던 코드를 주석 처리 (너무 빠름)
+    // 9. (수정 2) 페이지 로드 시 바로 호출하던 코드를 주석 처리 (너무 빠름)
     // requestNotificationPermission();
 
     // --- 1. DOM 요소 가져오기 (v11.0) ---
@@ -286,11 +286,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // --- (v3.0) 모달 제어 함수 ---
     
+    // ✅ [수정 4] 'window.'를 앞에 추가하고, 꼬인 코드를 정리합니다.
+    window.openTickerModal = async function(ticker) {
         currentModalTicker = ticker;
         modal.style.display = 'block';
         modalTickerName.textContent = ticker;
         showModalTab('info', null, true); 
-        window.openTickerModal = async function(ticker) {
+        
         document.getElementById('tab-info').innerHTML = '<p>Loading company info...</p>';
         document.getElementById('tab-quote').innerHTML = '<p>Loading real-time quote...</p>';
         document.getElementById('tab-financials').innerHTML = '<p>Loading financials summary...</p>';
@@ -332,7 +334,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="quote-line"><span>Dividend Yield</span><span>${formatRatio(f.dividend_yield)} %</span></div>`;
             } else {
                 document.getElementById('tab-info').innerHTML = `<p style="color: red;">Could not load company info.</p>`;
-                document.getElementById('tab-financials').innerHTML = `<p style="color: red;">Could not load financials.</p>`;
+                document.getElementById('tab-financials').innerHTML = `<p style."color: red;">Could not load financials.</p>`;
             }
         } catch (e) {
             document.getElementById('tab-info').innerHTML = `<p style="color: red;">Info load failed: ${e.message}</p>`; 
@@ -539,7 +541,7 @@ document.addEventListener('DOMContentLoaded', function() {
     fetchCommunityPosts();
     
     // --- PWA 서비스 워커 등록 ---
-    // ✅ [수정 3] 'register' 성공 직후에 알림 권한을 요청하도록 수정
+    // (수정 3) 'register' 성공 직후에 알림 권한을 요청하도록 수정
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js') // sw.js 파일 경로
