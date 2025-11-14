@@ -298,10 +298,9 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.8) 튜닝: FCM 푸시 알림 발송 함수 (send_all -> 1개씩 send로 변경) ---
-# ✅ 7번 지적 사항 반영 (404 우회)
+# --- (v16.9) 튜닝: FCM 푸시 알림 발송 함수 (data 페이로드 사용) ---
 def send_fcm_notification(ticker, price, probability_score):
-    """DB의 모든 문자열 토큰에 FCM 푸시 알림을 '1개씩' 발송합니다."""
+    """DB의 모든 문자열 토큰에 FCM 'data' 푸시 알림을 '1개씩' 발송합니다."""
     
     if not firebase_admin._apps:
         print("🔔 [FCM] Firebase Admin SDK가 초기화되지 않아 알림을 건너뜁니다.")
@@ -322,37 +321,53 @@ def send_fcm_notification(ticker, price, probability_score):
 
         print(f"🔔 [FCM] {len(tokens_list)}명의 구독자에게 {ticker} 알림 '1개씩' 발송 시도...")
         
-        # 1. 알림 내용 정의
-        notification_payload = messaging.Notification(
-            title=f"🚀 AI Signal: {ticker} @ ${price:.4f}",
-            body=f"New setup detected (AI Score: {probability_score}%)",
-        )
+        # 1. ✅ [수정] 'notification' 대신 'data' 페이로드를 정의합니다.
+        # sw.js가 이 데이터를 받아서 알림을 직접 만듭니다.
+        data_payload = {
+            'title': f"🚀 AI Signal: {ticker} @ ${price:.4f}",
+            'body': f"New setup detected (AI Score: {probability_score}%)",
+            'icon': '/static/images/danso_logo.png' # (알림 아이콘)
+        }
         
         success_count = 0
         failure_count = 0
         failed_tokens = []
 
-        # 2. ✅ 100개를 묶어보내는 대신, 1개씩 루프를 돌며 발송
         for token in tokens_list:
             try:
-                # 3. ✅ 1명에게만 보내는 Message 객체 생성
+                # 2. ✅ [수정] 'notification=' 대신 'data='를 사용합니다.
                 message = messaging.Message(
                     token=token,
-                    notification=notification_payload,
+                    data=data_payload,
+                    # (WebpushConfig를 추가하여 우선순위를 높일 수 있습니다)
+                    webpush=messaging.WebpushConfig(
+                        headers={'Urgency': 'high'}
+                    )
                 )
                 
-                # 4. ✅ 단일 발송 함수인 send() 사용
                 response = messaging.send(message)
                 success_count += 1
                 
             except Exception as e:
-                # 5. 개별 발송 실패 시
                 print(f"❌ [FCM] 토큰 전송 실패: {token} (이유: {e})")
                 failure_count += 1
-                failed_tokens.append(token)
+                if "Requested entity was not found" in str(e):
+                    failed_tokens.append(token)
         
-        # 6. 최종 결과 로깅
         print(f"✅ [FCM] {success_count}명에게 발송 완료, {failure_count}명 실패.")
+        
+        # 7. ✅ "Not Found" 토큰들을 DB에서 삭제
+        if failed_tokens:
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
+                conn.commit()
+                cursor.close()
+                conn.close()
+                print(f"🧹 [FCM] 만료된 토큰 {len(failed_tokens)}개를 DB에서 삭제했습니다.")
+            except Exception as e:
+                print(f"❌ [FCM] 만료된 토큰 DB 삭제 실패: {e}")
 
     except Exception as e:
         if conn: conn.close()

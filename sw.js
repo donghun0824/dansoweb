@@ -67,3 +67,22 @@ self.addEventListener('fetch', event => {
   }
   // 외부 도메인 요청은 서비스워커가 가로채지 않고 그대로 진행합니다.
 });
+
+// --- 4. PWA 푸시 알림 (Push) 이벤트 (새로 추가) ---
+// 백그라운드에서 FCM 메시지를 받았을 때 실행됩니다.
+self.addEventListener('push', event => {
+  console.log('[Service Worker] Push Received.');
+  
+  // 백엔드(scanner.py)가 보낸 'data' 페이로드를 꺼냅니다.
+  const data = event.data.json();
+  
+  const title = data.title || '새 알림';
+  const options = {
+    body: data.body || '새로운 내용이 있습니다.',
+    icon: data.icon || '/static/images/danso_logo.png', // 알림 아이콘
+    badge: '/static/images/danso_logo.png' // (안드로이드용 뱃지 아이콘)
+  };
+
+  // 알림을 화면에 띄웁니다.
+  event.waitUntil(self.registration.showNotification(title, options));
+});
