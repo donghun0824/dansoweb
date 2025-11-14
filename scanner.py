@@ -11,7 +11,7 @@ import time
 import httpx 
 import firebase_admin # ✅ 1. firebase-admin 임포트
 from firebase_admin import credentials, messaging # ✅ 2. 관련 모듈 임포트
-
+import sys
 # --- (v12.0) API 키 설정 (보안) ---
 # 3. Render 환경 변수에서 API 키를 읽어옵니다.
 POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
@@ -774,7 +774,26 @@ async def main():
 if __name__ == "__main__":
     init_db() 
     init_firebase() # ✅ Firebase 초기화 호출 추가
-    try: 
-        asyncio.run(main())
-    except KeyboardInterrupt: 
-        print("\n[메인] 사용자에 의해 프로그램이 종료되었습니다.")
+    
+    # ✅ [수정] 'test' 인자가 있는지 확인
+    if len(sys.argv) > 1 and sys.argv[1] == 'test':
+        print("--- [TEST MODE] ---")
+        print("DB와 Firebase 초기화 완료. 3초 후 테스트 알림을 발송합니다...")
+        time.sleep(3) # (로그 볼 시간)
+        
+        # 테스트 알림 강제 발송
+        send_fcm_notification(
+            ticker="TEST", 
+            price=123.45, 
+            probability_score=99
+        )
+        
+        print("--- [TEST MODE] 테스트 완료. 스크립트를 종료합니다. ---")
+    
+    else:
+        # 'test' 인자가 없으면, (기존) 스캐너를 실행합니다.
+        try: 
+            print("--- [LIVE MODE] 스캐너를 시작합니다... ---")
+            asyncio.run(main()) # ✅ asyncio 오타 수정
+        except KeyboardInterrupt: 
+            print("\n[메인] 사용자에 의해 프로그램이 종료되었습니다.")
