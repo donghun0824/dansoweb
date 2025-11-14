@@ -298,7 +298,7 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.9) 튜닝: FCM 푸시 알림 발송 함수 (data 페이로드 사용) ---
+# --- (v16.10 추천) 튜닝: FCM 푸시 알림 발송 함수 (구조화된 data 페이로드 사용) ---
 def send_fcm_notification(ticker, price, probability_score):
     """DB의 모든 문자열 토큰에 FCM 'data' 푸시 알림을 '1개씩' 발송합니다."""
     
@@ -309,6 +309,7 @@ def send_fcm_notification(ticker, price, probability_score):
     conn = None
     try:
         conn = get_db_connection()
+        # ... (토큰 가져오는 로직은 동일) ...
         cursor = conn.cursor()
         cursor.execute("SELECT token FROM fcm_tokens")
         tokens_list = [token[0] for token in cursor.fetchall() if token[0]] 
@@ -321,13 +322,20 @@ def send_fcm_notification(ticker, price, probability_score):
 
         print(f"🔔 [FCM] {len(tokens_list)}명의 구독자에게 {ticker} 알림 '1개씩' 발송 시도...")
         
-        # 1. ✅ [수정] 'notification' 대신 'data' 페이로드를 정의합니다.
-        # sw.js가 이 데이터를 받아서 알림을 직접 만듭니다.
+        # --- ✅ 여기가 핵심 수정 사항 ---
+        # 1. 'body' 대신 PWA(sw.js)가 사용할 원본 데이터를 보냅니다.
         data_payload = {
-            'title': f"🚀 AI Signal: {ticker} @ ${price:.4f}",
-            'body': f"New setup detected (AI Score: {probability_score}%)",
-            'icon': '/static/images/danso_logo.png' # (알림 아이콘)
+            'title': "Danso AI 신호", # PWA에서 덮어쓸 수 있지만 기본 title
+            
+            # PWA(sw.js)에서 조립할 수 있도록 원본 데이터를 전달
+            'ticker': ticker,
+            'price': f"{price:.4f}", # JSON은 숫자가 꼬일 수 있으니 문자열로 통일
+            'probability': str(probability_score) # 이것도 문자열로 통일
+            
+            # 'icon'은 sw.js가 기본값을 가지고 있으므로 생략 가능
+            # 'icon': '/static/images/danso_logo.png' 
         }
+        # --- ✅ 수정 완료 ---
         
         success_count = 0
         failure_count = 0
@@ -335,11 +343,10 @@ def send_fcm_notification(ticker, price, probability_score):
 
         for token in tokens_list:
             try:
-                # 2. ✅ [수정] 'notification=' 대신 'data='를 사용합니다.
+                # 2. 'data='를 사용하는 것은 현재 코드와 동일 (아주 잘 되어 있음)
                 message = messaging.Message(
                     token=token,
-                    data=data_payload,
-                    # (WebpushConfig를 추가하여 우선순위를 높일 수 있습니다)
+                    data=data_payload, 
                     webpush=messaging.WebpushConfig(
                         headers={'Urgency': 'high'}
                     )
@@ -349,6 +356,7 @@ def send_fcm_notification(ticker, price, probability_score):
                 success_count += 1
                 
             except Exception as e:
+                # ... (이하 동일) ...
                 print(f"❌ [FCM] 토큰 전송 실패: {token} (이유: {e})")
                 failure_count += 1
                 if "Requested entity was not found" in str(e):
