@@ -68,15 +68,19 @@ self.addEventListener('fetch', event => {
   // 외부 도메인 요청은 서비스워커가 가로채지 않고 그대로 진행합니다.
 });
 
-// --- ✅ 4. PWA 푸시 알림 (Push) 이벤트 (v3 - 조립 방식) ---
+// --- ✅ 4. PWA 푸시 알림 (Push) 이벤트 (v4 - 진짜 최종) ---
 // 백그라운드에서 FCM 메시지를 받았을 때 실행됩니다.
 self.addEventListener('push', event => {
   console.log('[Service Worker] Push Received.');
   
+  // 1. 전체 페이로드를 먼저 받음
+  // payload는 {'title': '...', 'ticker': '...', 'price': '...'} 형태입니다.
   const payload = event.data.json();
-  const data = payload.data; // 서버(Python)가 보낸 data_payload 객체
+  
+  // 2. ✅ [수정] payload 자체가 data 객체입니다. (payload.data가 아님)
+  const data = payload; 
 
-  // --- 👇 여기가 핵심 수정 사항입니다 ---
+  // --- 👇 이제 data.ticker 등을 정상적으로 읽을 수 있습니다 ---
   let title;
   let body_message;
 
@@ -86,14 +90,14 @@ self.addEventListener('push', event => {
     title = `🚀 ${data.ticker} AI 신호`;
     body_message = `가격: $${data.price}, AI 확률: ${data.probability}%`;
   } else {
-    // 2. 데이터가 없으면 (혹은 예전 방식이면) 기본값을 사용합니다.
+    // 2. (혹시 모를 예외) 데이터가 없으면 기본값을 사용합니다.
     title = data.title || 'Danso 알림';
     body_message = data.body || '새로운 내용이 있습니다.';
   }
   // --- 👆 수정 완료 ---
 
   const options = {
-    body: body_message, // 👈 위에서 조립한 body_message를 사용
+    body: body_message,
     icon: data.icon || '/static/images/danso_logo.png', // 아이콘
     badge: '/static/images/danso_logo.png' // (안드로이드용 뱃지 아이콘)
   };
