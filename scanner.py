@@ -20,7 +20,6 @@ DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 # ✅ 3. Firebase Admin SDK 환경 변수
 FIREBASE_ADMIN_SDK_JSON_STR = os.environ.get('FIREBASE_ADMIN_SDK_JSON')
-FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID')
 
 # --- (v15.3) Vertex AI 설정 (us-central1 복귀) ---
 GCP_PROJECT_ID = "gen-lang-client-0379169283" 
@@ -79,10 +78,10 @@ def init_firebase():
         
         # 이미 초기화되었는지 확인 (Render가 재시작할 때 오류 방지)
         if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred, {
-                'projectId': FIREBASE_PROJECT_ID
-            })
-        print(f"✅ [FCM] Firebase Admin SDK 초기화 성공 (Project ID: {FIREBASE_PROJECT_ID})")
+            # ✅ [수정] .json 파일에 projectId가 이미 있으므로, 딕셔너리 덮어쓰기 제거
+            firebase_admin.initialize_app(cred)
+            
+        print(f"✅ [FCM] Firebase Admin SDK 초기화 성공 (Project ID: {sdk_json_dict.get('project_id')})")
         return True
     except Exception as e:
         print(f"❌ [FCM] Firebase Admin SDK 초기화 실패: {e}")
@@ -722,12 +721,12 @@ async def main():
         return
     
     # ✅ (수정) Firebase Admin SDK 키 확인
-    if not FIREBASE_ADMIN_SDK_JSON_STR or not FIREBASE_PROJECT_ID:
-        print("⚠️ [메인] FIREBASE_ADMIN_SDK_JSON 또는 FIREBASE_PROJECT_ID가 설정되지 않았습니다. FCM 푸시 알림이 비활성화됩니다.")
+    if not FIREBASE_ADMIN_SDK_JSON_STR:
+        print("⚠️ [메인] FIREBASE_ADMIN_SDK_JSON이 설정되지 않았습니다. FCM 푸시 알림이 비활성화됩니다.")
 
 
     # ✅ (튜닝) 버전 정보 수정
-    print("스캐너 V16.3 (FCM-Admin SDK)을 시작합니다...") 
+    print("스캐너 V16.7 (FCM-Admin SDK)을 시작합니다...") 
     uri = "wss://socket.polygon.io/stocks"
     
     while True:
