@@ -68,15 +68,17 @@ self.addEventListener('fetch', event => {
   // 외부 도메인 요청은 서비스워커가 가로채지 않고 그대로 진행합니다.
 });
 
-// --- 4. PWA 푸시 알림 (Push) 이벤트 (v3 - 최종 수정) ---
+// --- 4. PWA 푸시 알림 (Push) 이벤트 (v2 - 이게 진짜 최종) ---
 // 백그라운드에서 FCM 메시지를 받았을 때 실행됩니다.
 self.addEventListener('push', event => {
   console.log('[Service Worker] Push Received.');
   
-  // 1. ✅ [수정] payload 자체가 data이므로, 변수 이름을 data로 바로 받습니다.
-  const data = event.data.json();
+  // 1. 전체 페이로드를 먼저 받음
+  const payload = event.data.json();
   
-  // 2. data.title을 바로 사용합니다.
+  // 2. ✅ [수정] Firebase 'data' 메시지는 'data' 객체 안에 중첩되어 옴
+  const data = payload.data; 
+
   const title = data.title || '새 알림';
   const options = {
     body: data.body || '새로운 내용이 있습니다.',
