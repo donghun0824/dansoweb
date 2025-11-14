@@ -68,33 +68,32 @@ self.addEventListener('fetch', event => {
   // 외부 도메인 요청은 서비스워커가 가로채지 않고 그대로 진행합니다.
 });
 
-// --- ✅ 4. PWA 푸시 알림 (Push) 이벤트 (v4 - 진짜 최종) ---
+// --- ✅ 4. PWA 푸시 알림 (Push) 이벤트 (v5 - 진짜진짜 최종) ---
 // 백그라운드에서 FCM 메시지를 받았을 때 실행됩니다.
 self.addEventListener('push', event => {
   console.log('[Service Worker] Push Received.');
   
-  // 1. 전체 페이로드를 먼저 받음
-  // payload는 {'title': '...', 'ticker': '...', 'price': '...'} 형태입니다.
+  // 1. 전체 페이로드를 받음 ( { "data": { "ticker": ... } } )
   const payload = event.data.json();
   
-  // 2. ✅ [수정] payload 자체가 data 객체입니다. (payload.data가 아님)
-  const data = payload; 
+  // 2. ✅ [수정] Firebase Admin SDK는 'data' 객체 안에 중첩해서 보냅니다!
+  // (v4에서 payload.data를 쓰지 않은 게 버그였습니다.)
+  const data = payload.data; 
 
-  // --- 👇 이제 data.ticker 등을 정상적으로 읽을 수 있습니다 ---
+  // --- 👇 이제 data.ticker를 정상적으로 읽을 수 있습니다 ---
   let title;
   let body_message;
 
-  // Python에서 보낸 'ticker', 'price', 'probability'가 있는지 확인
+  // 3. Python에서 보낸 'ticker', 'price', 'probability'가 있는지 확인
   if (data.ticker && data.price && data.probability) {
-    // 1. 데이터가 있으면 원하는 형식으로 알림을 조립합니다.
+    // 4. 데이터가 있으면 원하는 형식으로 알림을 조립합니다.
     title = `🚀 ${data.ticker} AI 신호`;
     body_message = `가격: $${data.price}, AI 확률: ${data.probability}%`;
   } else {
-    // 2. (혹시 모를 예외) 데이터가 없으면 기본값을 사용합니다.
+    // 5. (예외)
     title = data.title || 'Danso 알림';
     body_message = data.body || '새로운 내용이 있습니다.';
   }
-  // --- 👆 수정 완료 ---
 
   const options = {
     body: body_message,
