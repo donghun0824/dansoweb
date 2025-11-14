@@ -298,9 +298,10 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.6) 튜닝: FCM 푸시 알림 발송 함수 (send_all 사용) ---
+# --- (v16.8) 튜닝: FCM 푸시 알림 발송 함수 (send_all -> 1개씩 send로 변경) ---
+# ✅ 7번 지적 사항 반영 (404 우회)
 def send_fcm_notification(ticker, price, probability_score):
-    """DB의 모든 문자열 토큰에 FCM 푸시 알림을 발송합니다."""
+    """DB의 모든 문자열 토큰에 FCM 푸시 알림을 '1개씩' 발송합니다."""
     
     if not firebase_admin._apps:
         print("🔔 [FCM] Firebase Admin SDK가 초기화되지 않아 알림을 건너뜁니다.")
@@ -319,7 +320,7 @@ def send_fcm_notification(ticker, price, probability_score):
             print("🔔 [FCM] DB에 등록된 알림 구독자가 없습니다.")
             return
 
-        print(f"🔔 [FCM] {len(tokens_list)}명의 구독자에게 {ticker} 알림 발송 시도...")
+        print(f"🔔 [FCM] {len(tokens_list)}명의 구독자에게 {ticker} 알림 '1개씩' 발송 시도...")
         
         # 1. 알림 내용 정의
         notification_payload = messaging.Notification(
@@ -327,27 +328,31 @@ def send_fcm_notification(ticker, price, probability_score):
             body=f"New setup detected (AI Score: {probability_score}%)",
         )
         
-        # 2. ✅ [수정] send_all을 위해, "메시지(Message) 객체 리스트"를 만듭니다.
-        messages = [
-            messaging.Message(
-                token=token,
-                notification=notification_payload,
-            ) for token in tokens_list
-        ]
+        success_count = 0
+        failure_count = 0
+        failed_tokens = []
 
-        # 3. ✅ [수정] send_multicast 대신 send_all을 사용합니다.
-        response = messaging.send_all(messages)
+        # 2. ✅ 100개를 묶어보내는 대신, 1개씩 루프를 돌며 발송
+        for token in tokens_list:
+            try:
+                # 3. ✅ 1명에게만 보내는 Message 객체 생성
+                message = messaging.Message(
+                    token=token,
+                    notification=notification_payload,
+                )
+                
+                # 4. ✅ 단일 발송 함수인 send() 사용
+                response = messaging.send(message)
+                success_count += 1
+                
+            except Exception as e:
+                # 5. 개별 발송 실패 시
+                print(f"❌ [FCM] 토큰 전송 실패: {token} (이유: {e})")
+                failure_count += 1
+                failed_tokens.append(token)
         
-        # 4. 결과 로깅
-        print(f"✅ [FCM] {response.success_count}명에게 발송 완료, {response.failure_count}명 실패.")
-
-        if response.failure_count > 0:
-            failed_tokens = []
-            for idx, resp in enumerate(response.responses):
-                if not resp.success:
-                    token = tokens_list[idx]
-                    print(f"❌ [FCM] 토큰 전송 실패: {token} (이유: {resp.exception})")
-                    failed_tokens.append(token)
+        # 6. 최종 결과 로깅
+        print(f"✅ [FCM] {success_count}명에게 발송 완료, {failure_count}명 실패.")
 
     except Exception as e:
         if conn: conn.close()
@@ -425,7 +430,7 @@ def find_active_tickers():
     return tickers_to_watch
 
 # --- 2단계 로직: "v5.1 느슨한 통합 엔진" (5분) ---
-async def handle_msg(msg_list):
+async def handle_msg(msg_data):
     global ticker_minute_history, ticker_tick_history
     m_fast, m_slow, m_sig = WAE_MACD; bb_len, bb_std = WAE_BB
     T, K, S = ICHIMOKU_SHORT
@@ -436,6 +441,12 @@ async def handle_msg(msg_list):
     SENKOU_B_COL = f"ISB_{K}"
     CHIKOU_COL = f"ICS_{K}"
     
+    # ✅ 2번 지적 사항 반영: msg_data가 dict이면 list로 감싸서 크래시 방지
+    if isinstance(msg_data, dict):
+        msg_list = [msg_data]
+    else:
+        msg_list = msg_data
+
     minute_data = []
     for msg in msg_list:
         ticker = msg.get('sym')
