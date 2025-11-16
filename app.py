@@ -21,10 +21,18 @@ def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
-# --- 1. 메인 페이지 라우트 ---
+# --- 1. 메인 페이지 라우트 (겉지/랜딩 페이지) ---
 @app.route('/')
+def landing_page():
+    # 'index.html' -> 'landing.html'로 변경
+    return render_template('landing.html') 
+
+# --- (NEW) 대시보드 라우트 (속지/스캐너) ---
+@app.route('/dashboard') 
 def dashboard_page():
-    return render_template('index.html')
+    # (나중에 여기에 @login_required 같은 인증을 추가합니다)
+    # 'index.html' -> 'dashboard.html'로 변경
+    return render_template('dashboard.html')
 
 # --- 2. PWA 파일 서빙 라우트 ---
 @app.route('/sw.js')

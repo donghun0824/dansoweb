@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <meta name="naver-site-verification" content="eb8016dc00057f4fdb6cb38e81cb7e507a4e1886" />
+    <meta name="google-site-verification" content="rrMaS_Uo8i_SC9M4XfatAMijOT2vpn7vkm1x6FKuQbk" />
+    
+    <title>Danso AI - AI Powered Scalping Signals</title>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+    
+    <style>
+        /* 기본 설정 */
+        body {
+            margin: 0;
+            background-color: #0b0c10; /* 어두운 배경색 */
+            color: #c5c6c7;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden; /* 스크롤바 임시 숨김 */
+        }
+
+        /* 1. 인트로 영상 컨테이너 (화면 꽉 채우기) */
+        #video-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh; /* 뷰포트 높이 100% */
+            z-index: 9999;
+            background-color: #0b0c10;
+            
+            /* 부드럽게 사라지는 효과 */
+            transition: opacity 0.8s ease-out;
+            opacity: 1; /* 기본값 (보임) */
+        }
+        
+        #video-container.fade-out {
+            opacity: 0;
+            pointer-events: none; /* 사라진 후 클릭 방지 */
+        }
+
+        /* 1-2. 인트로 영상 스타일 */
+        #intro-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* 화면 비율 유지하며 꽉 채우기 */
+        }
+
+        /* 2. 메인 콘텐츠 (영상 끝나고 나옴) */
+        #main-content {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 2rem;
+            
+            /* 부드럽게 나타나는 효과 */
+            opacity: 0; /* 기본값 (숨김) */
+            transition: opacity 1.5s ease-in 0.5s; /* 0.5초 뒤에 나타남 */
+        }
+        
+        #main-content.visible {
+            opacity: 1;
+        }
+
+        /* (임시) 겉지 디자인 요소 */
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            color: #66fcf1; /* 포인트 색상 */
+            margin-bottom: 0.5rem;
+        }
+        
+        p.subtitle {
+            font-size: 1.25rem;
+            color: #c5c6c7;
+            margin-bottom: 2rem;
+        }
+        
+        .cta-button {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #0b0c10;
+            background-color: #66fcf1; /* 포인트 색상 */
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            text-decoration: none;
+            cursor: pointer;
+            margin: 0 0.5rem;
+            transition: transform 0.2s ease;
+        }
+        .cta-button:hover {
+            transform: scale(1.05);
+        }
+        .cta-button.secondary {
+            background-color: transparent;
+            color: #66fcf1;
+            border: 2px solid #66fcf1;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="video-container">
+        <video id="intro-video" 
+               src="{{ url_for('static', filename='videos/danso_promo.mp4') }}" 
+               autoplay 
+               muted 
+               playsinline>
+            </video>
+    </div>
+
+    <div id="main-content">
+        <h1>DANSO AI</h1>
+        <p class="subtitle">AI-Powered Scalping Signals. Trade Smarter.</p>
+        <div>
+            <a href="/dashboard" class="cta-button">Access Dashboard</a>
+            
+            </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            const videoContainer = document.getElementById('video-container');
+            const video = document.getElementById('intro-video');
+            const mainContent = document.getElementById('main-content');
+
+            // (중요) 영상이 끝나면 실행될 함수
+            video.onended = () => {
+                // 1. 영상을 부드럽게 숨김
+                videoContainer.classList.add('fade-out');
+                // 2. 메인 콘텐츠를 부드럽게 표시
+                mainContent.classList.add('visible');
+                // 3. 스크롤바 다시 보이게 함
+                document.body.style.overflow = 'auto';
+            };
+
+            // (예외 처리) 영상 재생에 실패하면 바로 콘텐츠 표시
+            video.onerror = () => {
+                videoContainer.classList.add('fade-out');
+                mainContent.classList.add('visible');
+                document.body.style.overflow = 'auto';
+            };
+            
+            // (예외 처리) 6초 이상 영상이 안 끝나면 강제 종료 (혹시 모르니)
+            setTimeout(() => {
+                if (!mainContent.classList.contains('visible')) {
+                    videoContainer.classList.add('fade-out');
+                    mainContent.classList.add('visible');
+                    document.body.style.overflow = 'auto';
+                }
+            }, 6000); 
+        });
+    </script>
+</body>
+</html>
