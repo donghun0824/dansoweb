@@ -286,5 +286,25 @@ body {
     font-size: 14px;
     border-top: 1px solid var(--border-primary);
 }
+/* (NEW) 👇 v16.21 층 분리 스타일 (여기에 추가) */
+
+/* (이 래퍼에 흰색 배경을 줍니다) */
+.lower-content-wrapper {
+    background-color: var(--bg-card); /* style.css의 흰색 변수 */
+    padding-top: 1px; /* (기술적 수정) 마진 병합 방지 */
+    margin-top: 40px; /* 히어로 섹션과의 간격 */
+}
+
+/* 래퍼가 흰색 배경과 상단 마진을 담당하므로, 
+   features-section 자체의 마진/패딩/테두리를 조정합니다 
+*/
+.features-section {
+    margin-top: 0; /* 래퍼가 마진을 대신 가짐 */
+    margin-bottom: 100px;
+    padding-top: 60px;
+    border-top: 1px solid var(--border-primary); 
+}
+/* (NEW) 👆 여기까지 추가 */
+
 
 /* --- (겉지 스타일 끝) --- */
