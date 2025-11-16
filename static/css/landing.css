@@ -52,13 +52,7 @@ body {
     max-width: 120px; /* 새 로고 크기 */
     height: auto;
 }
-.header-logo strong {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
-    padding-left: 12px;
-    border-left: 1px solid var(--border-primary);
-}
+
 .header-nav {
     display: flex;
     gap: 12px;
