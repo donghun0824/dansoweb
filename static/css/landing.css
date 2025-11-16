@@ -262,8 +262,9 @@ body {
     font-size: 12px;
 }
 .feature-card h3 {
-    font-size: 1.25rem;
-    font-weight: 600;
+    font-family: 'Merriweather', serif; /* (NEW) 세리프 폰트 적용 */
+    font-size: 1.3rem; /* (NEW) 폰트 살짝 키움 */
+    font-weight: 700; /* (NEW) 굵게 */
     color: var(--text-primary);
     margin-top: 8px;
     margin-bottom: 1rem;
