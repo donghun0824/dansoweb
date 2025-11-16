@@ -1,4 +1,4 @@
-/* --- (v16.19) LANDING PAGE STYLES (Pro Design) --- */
+/* --- (v16.20) LANDING PAGE STYLES (Pro Design + Vertical Ticker) --- */
 
 /* (NEW) 1. 전문적인 폰트 임포트 */
 @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&display=swap');
@@ -103,7 +103,7 @@ body {
     text-transform: uppercase;
 }
 
-/* (NEW) 7. "깔끔한" 폰트 스타일 (시안 적용) */
+/* 7. "깔끔한" 폰트 스타일 (시안 적용) */
 .hero-title {
     font-family: 'Merriweather', serif; /* (중요) 새 폰트 적용 */
     font-size: 3.2rem; /* 52px */
@@ -155,60 +155,74 @@ body {
     box-shadow: var(--shadow-hover);
 }
 
-/* (NEW) 8. 히어로 피드 (4개 박스 그리드 - 시안 적용) */
-.hero-feed {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
+/* (NEW) 8. 히어로 피드 (세로 스크롤 박스) */
+@keyframes scroll-up {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-50%); } /* 리스트의 절반만큼 이동 */
 }
-.feed-card {
+.hero-feed-vertical {
     background-color: var(--bg-card);
-    padding: 16px;
     border-radius: var(--radius-main);
     box-shadow: var(--shadow-primary);
     border: 1px solid var(--border-primary);
-    transition: all 0.2s ease;
-    min-height: 120px; /* 최소 높이 */
+    height: 450px; /* (중요) 박스 고정 높이 */
+    display: flex;
+    flex-direction: column;
 }
-.feed-card:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-hover);
-    border-color: var(--accent-primary);
+.widget-title { /* 박스 제목 */
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    padding: 20px 20px 0 20px;
+    margin-bottom: 16px;
+    flex-shrink: 0;
 }
-.feed-card p {
-    font-size: 14px;
+.vertical-scroll-container {
+    flex-grow: 1; /* 남은 공간 꽉 채우기 */
+    overflow: hidden; /* (중요) 스크롤바 숨김 */
+    position: relative;
+    border-top: 1px solid var(--border-primary);
+}
+#vertical-ticker-list {
+    position: absolute;
+    width: 100%;
+    /* (중요) 애니메이션: 30초 동안 리스트 1회 스크롤 */
+    animation: scroll-up 30s linear infinite; 
+}
+#vertical-ticker-list:hover {
+    animation-play-state: paused;
+}
+.loading-text {
+    padding: 20px;
     color: var(--text-tertiary);
 }
-.feed-card-header {
+.v-ticker-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-secondary);
 }
-.feed-card-header strong {
-    font-size: 18px;
+.v-ticker-item .name {
     font-family: var(--font-mono);
-    color: var(--text-primary);
-}
-.feed-card-header span {
-    font-size: 13px;
     font-weight: 600;
-    font-family: var(--font-mono);
-    color: var(--accent-primary);
+    color: var(--text-primary);
+    font-size: 15px;
 }
-.feed-card-price {
-    font-size: 16px;
+.v-ticker-item .price {
     font-family: var(--font-mono);
     color: var(--text-secondary);
-    font-weight: 500;
-    margin: 4px 0 0 0;
+    font-size: 14px;
 }
-.feed-card-time {
-    font-size: 12px;
-    color: var(--text-tertiary);
-    display: block;
-    margin-top: 10px;
+.v-ticker-item .font-mono { /* (공통) */
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 15px;
 }
+/* (style.css의 변수를 그대로 사용) */
+.v-ticker-item .change-positive { color: var(--accent-positive); }
+.v-ticker-item .change-negative { color: var(--accent-negative); }
+.v-ticker-item .change-zero { color: var(--text-secondary); }
 
 
 /* 9. 기능 소개 섹션 (시안 적용) */
@@ -222,7 +236,7 @@ body {
     font-size: 2.5rem; /* 40px */
     font-weight: 700;
     color: var(--text-primary);
-    text-align: left;
+    text-align: left; /* 시안처럼 왼쪽 정렬 */
     margin-bottom: 3rem;
     border: none;
     padding: 0;
