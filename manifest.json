@@ -1,6 +1,6 @@
 {
-  "name": "MyWebSite",
-  "short_name": "MySite",
+  "name": "Danso",
+  "short_name": "Danso",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",
