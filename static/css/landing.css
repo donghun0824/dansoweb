@@ -1,56 +1,65 @@
-/* --- (v16.16) LANDING PAGE STYLES --- */
+/* --- (v16.18) LANDING PAGE STYLES (New Design) --- */
 /* (이 파일은 style.css의 변수를 사용합니다) */
 
 /* 1. 인트로 영상 스타일 */
 body {
-    /* (중요) 영상 재생 중 스크롤 방지 */
-    /* JS가 영상 종료 후 'auto'로 변경해 줌 */
-    overflow: hidden; 
+    overflow: hidden; /* JS가 'auto'로 변경 */
 }
-
 #video-container {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100vh;
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100vh;
     z-index: 9999;
-    background-color: var(--bg-body); /* style.css의 변수 사용 */
+    background-color: var(--bg-body);
     transition: opacity 0.8s ease-out;
     opacity: 1;
 }
-#video-container.fade-out {
-    opacity: 0;
-    pointer-events: none;
-}
-#intro-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover; /* 화면 꽉 채우기 */
-}
+#video-container.fade-out { opacity: 0; pointer-events: none; }
+#intro-video { width: 100%; height: 100%; object-fit: cover; }
 
 /* 2. 메인 콘텐츠 (초기 숨김) */
 #main-content {
     opacity: 0;
     transition: opacity 1.5s ease-in 0.5s;
-    overflow-x: hidden; /* 가로 스크롤 방지 */
+    overflow-x: hidden;
+    background-color: var(--bg-body); /* 흰색 배경 */
 }
-#main-content.visible {
-    opacity: 1;
+#main-content.visible { opacity: 1; }
+
+/* 3. 공용 컨테이너 */
+.landing-container {
+     max-width: 1100px; /* 시안에 맞게 너비 조정 */
+     margin: 0 auto;
+     padding: 0 24px;
 }
 
-/* 3. 네비게이션 헤더 */
+/* 4. 네비게이션 헤더 (시안 적용) */
 .landing-header {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 20px 24px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding-top: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-primary);
+}
+.header-logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 .header-logo img {
-    max-width: 120px;
+    max-width: 120px; /* 새 로고 크기 */
     height: auto;
+}
+.header-logo strong {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    padding-left: 12px;
+    border-left: 1px solid var(--border-primary);
+}
+.header-nav {
+    display: flex;
+    gap: 12px;
 }
 .nav-button {
     font-size: 14px;
@@ -59,52 +68,66 @@ body {
     padding: 8px 16px;
     border-radius: var(--radius-sub);
     transition: all 0.2s ease;
-    margin-left: 10px;
-    background-color: var(--accent-primary); /* style.css의 변수 사용 */
+}
+.nav-button.primary {
+    background-color: var(--accent-primary);
     color: white;
 }
-.nav-button:hover {
-    filter: brightness(1.1);
-}
+.nav-button.primary:hover { filter: brightness(1.1); }
 .nav-button.secondary {
-    background-color: transparent;
-    color: var(--accent-primary);
-    border: 1px solid var(--border-primary);
+    background-color: var(--bg-interactive);
+    color: var(--text-secondary);
 }
-.nav-button.secondary:hover {
-    background-color: var(--bg-interactive-hover);
-}
+.nav-button.secondary:hover { background-color: var(--bg-interactive-hover); }
 
-/* 4. 히어로 섹션 (메인) */
+/* 5. 히어로 섹션 (시안 적용) */
 .hero-section {
-    max-width: 1000px;
-    margin: 80px auto;
-    padding: 0 24px;
-    text-align: center;
+    display: grid;
+    grid-template-columns: 1.2fr 1fr; /* 왼쪽 1.2, 오른쪽 1 비율 */
+    gap: 32px;
+    align-items: start; /* 위쪽 정렬 */
+    padding-top: 80px;
+    padding-bottom: 80px;
+}
+.hero-content {
+    display: flex;
+    flex-direction: column;
+}
+.hero-subtitle-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
 }
 .hero-title {
-    font-size: 3.5rem; /* 56px */
+    font-size: 3.2rem; /* 52px */
     font-weight: 700;
     color: var(--text-primary);
     line-height: 1.2;
-    margin-bottom: 1rem;
-    border: none; /* style.css의 h1 스타일 덮어쓰기 */
+    margin: 0;
     padding: 0;
+    border: none;
 }
-.hero-subtitle {
-    font-size: 1.25rem; /* 20px */
+.hero-description {
+    font-size: 1.1rem; /* 18px */
     color: var(--text-secondary);
-    max-width: 600px;
-    margin: 0 auto 2.5rem auto;
+    max-width: 500px;
+    margin-top: 20px;
+    margin-bottom: 30px;
+    line-height: 1.6;
+}
+.hero-cta-buttons {
+    display: flex;
+    gap: 12px;
 }
 .cta-button {
     font-size: 1rem;
     font-weight: 600;
     text-decoration: none;
-    padding: 14px 28px;
+    padding: 12px 24px;
     border-radius: var(--radius-sub);
     transition: all 0.2s ease;
-    margin: 0 0.5rem;
     display: inline-block;
 }
 .cta-button.primary {
@@ -127,30 +150,97 @@ body {
     box-shadow: var(--shadow-hover);
 }
 
-/* 5. 기능 소개 섹션 */
+/* 6. 히어로 위젯 (오른쪽 2개 박스) */
+.hero-widget-grid {
+    display: grid;
+    grid-template-rows: auto auto; /* 2열 */
+    gap: 24px;
+}
+.widget-card {
+    background-color: var(--bg-card);
+    padding: 24px;
+    border-radius: var(--radius-main);
+    box-shadow: var(--shadow-primary);
+    border: 1px solid var(--border-primary);
+    transition: all 0.2s ease;
+}
+.widget-card:hover {
+    box-shadow: var(--shadow-hover);
+    border-color: var(--accent-primary);
+}
+.widget-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 16px 0;
+}
+.widget-card p {
+    font-size: 15px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 0 0 20px 0;
+}
+/* 박스 1: 티커 스크롤 스타일 */
+.scroller-widget {
+    min-height: 180px; /* 높이 확보 */
+}
+.scrolling-bar-container-landing {
+    width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.scrolling-bar-track-landing {
+    display: inline-block;
+    animation: scroll-left 40s linear infinite; /* 속도 조절 */
+}
+.scrolling-bar-container-landing:hover .scrolling-bar-track-landing {
+    animation-play-state: paused;
+}
+.scroll-item-landing {
+    display: inline-block;
+    padding: 8px 16px;
+    margin-right: 10px;
+    font-family: var(--font-mono);
+    border-radius: var(--radius-sub);
+    background-color: var(--bg-interactive);
+}
+.scroll-item-landing .name { color: var(--text-primary); font-weight: 600; margin-right: 8px; }
+.scroll-item-landing .value { color: var(--text-secondary); margin-right: 6px; }
+.scroll-item-landing .positive { color: var(--accent-positive); }
+.scroll-item-landing .negative { color: var(--accent-negative); }
+.scroll-item-landing .zero { color: var(--text-secondary); }
+
+/* (스크롤 애니메이션) */
+@keyframes scroll-left {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); } 
+}
+
+
+/* 7. 기능 소개 섹션 (시안 적용) */
 .features-section {
-    max-width: 1000px;
-    margin: 100px auto;
-    padding: 0 24px;
+    margin-top: 40px;
+    margin-bottom: 100px;
+    padding-top: 60px;
+    border-top: 1px solid var(--border-primary);
 }
 .section-title {
     font-size: 2.5rem; /* 40px */
     font-weight: 700;
     color: var(--text-primary);
-    text-align: center;
+    text-align: left;
     margin-bottom: 3rem;
-    border: none; /* style.css의 h2 스타일 덮어쓰기 */
+    border: none;
     padding: 0;
 }
 .features-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 24px;
 }
 .feature-card {
-    /* "속지"의 .status-card 스타일과 유사하게 */
     background-color: var(--bg-card);
-    padding: 24px;
+    padding: 24px 24px 32px 24px; /* 아래쪽 여백 더 줌 */
     border-radius: var(--radius-main);
     box-shadow: var(--shadow-primary);
     border: 1px solid var(--border-primary);
@@ -163,8 +253,8 @@ body {
 .feature-card h3 {
     font-size: 1.25rem;
     font-weight: 600;
-    color: var(--accent-primary); /* 강조색 */
-    margin-top: 0;
+    color: var(--text-primary);
+    margin-top: 8px;
     margin-bottom: 1rem;
 }
 .feature-card p {
@@ -174,11 +264,11 @@ body {
     margin-bottom: 0;
 }
 
-/* 6. 푸터 */
+/* 8. 푸터 */
 .landing-footer {
-    max-width: 1000px;
-    margin: 100px auto 40px auto;
-    padding: 24px;
+    margin-top: 100px;
+    margin-bottom: 40px;
+    padding-top: 24px;
     text-align: center;
     color: var(--text-tertiary);
     font-size: 14px;

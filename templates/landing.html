@@ -10,244 +10,8 @@
     <title>Danso AI - AI Powered Scalping Signals</title>
     
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
     
-    <style>
-        /* CSS 변수 (light mode)를 사용하기 위해 :root 정의를 재정의합니다. */
-        /* 이 변수들은 landing.html에서 직접 사용될 것이며, style.css의 변수와 동기화됩니다. */
-        :root {
-            /* 1. 컬러 팔레트 (Light Mode) - style.css에서 가져온 값들 */
-            --bg-body: #f7f9fb;
-            --bg-card: #ffffff;
-            --bg-card-secondary: #f9fafb;
-            --bg-interactive: #f2f4f6;
-            --bg-interactive-hover: #e8f3ff;
-            
-            --border-primary: #eef1f5;
-            --border-secondary: #f2f4f6;
-
-            --text-primary: #191f28;
-            --text-secondary: #5a6573;
-            --text-tertiary: #8b95a1;
-
-            --accent-primary: #4464a1; /* Soft Navy */
-            --accent-primary-light: #e8f3ff;
-            --accent-primary-text: #0056b3;
-            
-            --accent-positive: #4a7c59; /* Sage Green */
-            --accent-positive-bg: #eafbf0;
-            --accent-negative: #5a8bde; /* Toned-down Blue */
-            --accent-negative-bg: #e8f3ff;
-
-            /* 3. 그림자 및 테두리 */
-            --shadow-primary: 0 2px 4px rgba(0,0,0,0.04);
-            --shadow-hover: 0 4px 10px rgba(0,0,0,0.06);
-            --radius-main: 12px;
-            --radius-sub: 8px;
-            --radius-full: 50px;
-
-            /* 2. 글꼴 */
-            --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            --font-mono: 'Roboto Mono', 'Menlo', 'Monaco', monospace;
-        }
-
-        /* 폰트 임포트 (style.css에서 이미 되어 있지만 명시적으로 한 번 더) */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;600&display=swap');
-
-
-        /* --- 1. Base & Video Styles --- */
-        body {
-            margin: 0;
-            background-color: var(--bg-body); /* 흰색 배경 */
-            color: var(--text-secondary); /* 기본 텍스트 색상 */
-            font-family: var(--font-primary); /* 속지 폰트 */
-            overflow-x: hidden; /* 가로 스크롤 방지 */
-            overflow-y: hidden; /* 영상 재생 중 스크롤 숨김 */
-            transition: background-color 0.3s ease, color 0.3s ease; /* 다크 모드 전환 부드럽게 */
-        }
-
-        #video-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100vh;
-            z-index: 9999;
-            background-color: var(--bg-body); /* 로딩 중 배경도 흰색 */
-            transition: opacity 0.8s ease-out;
-            opacity: 1;
-        }
-        
-        #video-container.fade-out {
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        #intro-video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        /* --- 2. Main Content Wrapper --- */
-        #main-content {
-            opacity: 0;
-            transition: opacity 1.5s ease-in 0.5s;
-        }
-        
-        #main-content.visible {
-            opacity: 1;
-            /* 영상 끝나면 스크롤 허용 */
-            overflow-y: auto; 
-        }
-        
-        /* 모든 섹션의 최대 너비 및 중앙 정렬 */
-        .landing-container {
-             max-width: 1000px;
-             margin: 0 auto;
-             padding: 0 24px;
-        }
-
-        /* --- 3. Header/Nav Bar Styles --- */
-        .landing-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px 24px; /* 양쪽에 여백 추가 */
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        .header-logo img {
-            max-width: 120px;
-            height: auto;
-            /* 로고 배경이 흰색으로 바뀌었으니, 이제 이미지 자체를 바꿀 필요 없이 style.css의 .app-logo img에 있는 필터 등을 사용하거나,
-               아니면 로고 이미지를 흰 배경에 파란 글씨로 새로 만들어서 교체해야 합니다.
-               현재는 임시로 style.css에 있는 .app-logo img 필터를 제거하고 이미지가 잘 보이도록 합니다. */
-        }
-        .nav-button {
-            font-size: 14px;
-            font-weight: 600;
-            text-decoration: none;
-            padding: 8px 16px;
-            border-radius: var(--radius-sub);
-            transition: all 0.2s ease;
-            margin-left: 10px;
-            background-color: var(--accent-primary); /* Soft Navy */
-            color: white;
-        }
-        .nav-button:hover {
-            filter: brightness(1.1);
-        }
-
-        /* --- 4. Hero Section Styles --- */
-        .hero-section {
-            min-height: 80vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            padding: 2rem;
-        }
-
-        .hero-title {
-            font-size: 3.5rem; /* 56px */
-            font-weight: 700;
-            color: var(--text-primary); /* 검정색 */
-            line-height: 1.2;
-            margin-bottom: 1rem;
-        }
-        
-        .hero-subtitle {
-            font-size: 1.25rem;
-            color: var(--text-secondary); /* 부드러운 회색 */
-            margin-bottom: 2rem;
-            max-width: 600px;
-        }
-        
-        .cta-button {
-            font-size: 1rem;
-            font-weight: 600;
-            color: white; /* 버튼 텍스트는 흰색 */
-            background-color: var(--accent-primary); /* Soft Navy */
-            border: none;
-            padding: 14px 28px;
-            border-radius: var(--radius-sub);
-            text-decoration: none;
-            cursor: pointer;
-            margin: 0 0.5rem;
-            transition: transform 0.2s ease, background-color 0.2s ease;
-        }
-        .cta-button:hover {
-            transform: scale(1.05);
-            background-color: #3a568a; /* Soft Navy Hover */
-        }
-        .cta-button.secondary {
-            background-color: transparent;
-            color: var(--accent-primary); /* Soft Navy 테두리 */
-            border: 2px solid var(--accent-primary);
-        }
-        .cta-button.secondary:hover {
-            background-color: var(--bg-interactive-hover);
-            color: var(--accent-primary);
-        }
-
-        /* --- 5. Features Section Styles --- */
-        .features-section {
-            padding: 80px 24px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        .section-title {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: var(--text-primary); /* 검정색 */
-            text-align: center;
-            margin-bottom: 3rem;
-        }
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-        }
-        .feature-card {
-            background-color: var(--bg-card); /* 흰색 카드 배경 */
-            padding: 24px;
-            border-radius: var(--radius-main);
-            box-shadow: var(--shadow-primary);
-            border: 1px solid var(--border-primary);
-            transition: all 0.2s ease;
-        }
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--shadow-hover);
-            border-color: var(--accent-primary); /* Soft Navy */
-        }
-        .feature-card h3 {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--accent-primary); /* Soft Navy */
-            margin-top: 0;
-            margin-bottom: 1rem;
-        }
-        .feature-card p {
-            font-size: 1rem;
-            color: var(--text-secondary); /* 부드러운 회색 */
-            line-height: 1.6;
-            margin-bottom: 0;
-        }
-
-        /* --- 6. Footer Styles --- */
-        .landing-footer {
-            max-width: 1000px;
-            margin: 80px auto 40px auto;
-            padding: 24px;
-            text-align: center;
-            color: var(--text-tertiary); /* 연한 회색 */
-            font-size: 14px;
-            border-top: 1px solid var(--border-primary);
-        }
-
-    </style>
 </head>
 <body>
 
@@ -257,47 +21,78 @@
                autoplay 
                muted 
                playsinline>
-            </video>
+        </video>
     </div>
 
     <div id="main-content">
         
-        <header class="landing-header">
+        <header class="landing-header landing-container">
             <div class="header-logo">
                 <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
+                <strong>Danso AI</strong>
             </div>
             <nav class="header-nav">
-                <a href="/dashboard" class="nav-button">Access Dashboard</a>
+                <a href="/login" class="nav-button secondary">Login</a> 
+                 <a href="/signup" class="nav-button primary">Sign Up</a> 
             </nav>
         </header>
 
-        <section class="hero-section">
-            <h1 class="hero-title">DANSO AI</h1>
-            <p class="hero-subtitle">AI-Powered Scalping Signals. Trade Smarter.</p>
-            <div class="hero-cta">
-                <a href="/dashboard" class="cta-button primary">Access Dashboard</a>
+        <section class="hero-section landing-container">
+            <div class="hero-content">
+                <span class="hero-subtitle-text">HERO SECTION</span>
+                <h1 class="hero-title">Danso AI -<br>AI Powered Scalping Signals</h1>
+                <p class="hero-description">The AI watcher monitors the market for high-probability signals, so you don't have to.</p>
+                <div class="hero-cta-buttons">
+                    <a href="/signup" class="cta-button primary">Start for Free</a>
+                    </div>
+            </div>
+            
+            <div class="hero-widget-grid">
+                
+                <div class="widget-card scroller-widget">
+                    <h3 class="widget-title">Live Top Gainers</h3>
+                    <div class="scrolling-bar-container-landing">
+                        <div class="scrolling-bar-track-landing" id="hero-ticker-track">
+                            <p>Loading gainers...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="widget-card link-widget">
+                    <h3 class="widget-title">Access Your Dashboard</h3>
+                    <p>Already a member? Jump right back into the action.</p>
+                    <a href="/dashboard" class="cta-button primary">Access Dashboard</a>
+                </div>
+
             </div>
         </section>
 
-        <section class="features-section">
+        <section class="features-section landing-container">
             <h2 class="section-title">Why Danso?</h2>
             <div class="features-grid">
+                
                 <div class="feature-card">
+                    <span class="hero-subtitle-text">AI-DRIVEN WATCHER</span>
                     <h3>AI-Driven Watcher</h3>
-                    <p>Our core AI ("The Watcher") filters market noise to find high-probability scalping opportunities based on your strategy.</p>
+                    <p>Our core AI ("The Watcher") filters market noise to find high-probability scalping opportunities (Pattern A/B).</p>
                 </div>
+                
                 <div class="feature-card">
+                    <span class="hero-subtitle-text">REAL-TIME SIGNALS</span>
                     <h3>Real-Time Signals</h3>
-                    <p>No delays. Get instant push notifications the moment a pattern (Pattern A or B) is detected by the engine.</p>
+                    <p>No delays. Get instant push notifications the moment a high-probability signal is detected by the engine.</p>
                 </div>
+                
                 <div class="feature-card">
+                    <span class="hero-subtitle-text">COMMUNITY INSIGHTS</span>
                     <h3>Community Insights</h3>
                     <p>Share feedback, discuss signals, and grow with a community of traders all focused on the same goal.</p>
                 </div>
+
             </div>
         </section>
         
-        <footer class="landing-footer">
+        <footer class="landing-footer landing-container">
             <p>© 2025 Danso. All rights reserved.</p>
         </footer>
 
@@ -314,12 +109,51 @@
                     videoContainer.classList.add('fade-out');
                     mainContent.classList.add('visible');
                     document.body.style.overflowY = 'auto'; // 스크롤바 다시 보이기
+                    
+                    // (중요!) 메인 콘텐츠가 보일 때 API 호출
+                    loadDynamicTicker(); 
                 }
             }
 
             video.onended = () => { showMainContent(); };
             video.onerror = () => { showMainContent(); };
-            setTimeout(() => { showMainContent(); }, 6000); 
+            setTimeout(() => { showMainContent(); }, 6000); // 6초 후 강제 실행
+
+            // (NEW) /api/market_overview를 호출해서 오른쪽 박스 1을 채우는 함수
+            function loadDynamicTicker() {
+                const track = document.getElementById('hero-ticker-track');
+                fetch('/api/market_overview')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'OK' && data.gainers && data.gainers.length > 0) {
+                            track.innerHTML = ''; // "Loading" 제거
+                            
+                            // 원본 + 복사본 (무한 스크롤용)
+                            const tickers = [...data.gainers, ...data.gainers]; 
+                            
+                            tickers.forEach(ticker => {
+                                const item = document.createElement('div');
+                                item.className = 'scroll-item-landing';
+                                
+                                const change = ticker.todaysChangePerc || 0;
+                                const changeClass = change > 0 ? 'positive' : (change < 0 ? 'negative' : 'zero');
+                                
+                                item.innerHTML = `
+                                    <span class="name">${ticker.ticker}</span>
+                                    <span class="value $">${parseFloat(ticker.lastTrade.p).toFixed(2)}</span>
+                                    <span class="${changeClass}">(${change.toFixed(2)}%)</span>
+                                `;
+                                track.appendChild(item);
+                            });
+                        } else {
+                            track.innerHTML = '<p>No market data available.</p>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error("Error loading dynamic ticker:", error);
+                        track.innerHTML = '<p>Error loading feed.</p>';
+                    });
+            }
         });
     </script>
 </body>
