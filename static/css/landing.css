@@ -1,7 +1,9 @@
-/* --- (v16.18) LANDING PAGE STYLES (New Design) --- */
-/* (이 파일은 style.css의 변수를 사용합니다) */
+/* --- (v16.19) LANDING PAGE STYLES (Pro Design) --- */
 
-/* 1. 인트로 영상 스타일 */
+/* (NEW) 1. 전문적인 폰트 임포트 */
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&display=swap');
+
+/* 2. 인트로 영상 스타일 */
 body {
     overflow: hidden; /* JS가 'auto'로 변경 */
 }
@@ -16,23 +18,23 @@ body {
 #video-container.fade-out { opacity: 0; pointer-events: none; }
 #intro-video { width: 100%; height: 100%; object-fit: cover; }
 
-/* 2. 메인 콘텐츠 (초기 숨김) */
+/* 3. 메인 콘텐츠 (초기 숨김) */
 #main-content {
     opacity: 0;
     transition: opacity 1.5s ease-in 0.5s;
     overflow-x: hidden;
-    background-color: var(--bg-body); /* 흰색 배경 */
+    background-color: var(--bg-body);
 }
 #main-content.visible { opacity: 1; }
 
-/* 3. 공용 컨테이너 */
+/* 4. 공용 컨테이너 */
 .landing-container {
      max-width: 1100px; /* 시안에 맞게 너비 조정 */
      margin: 0 auto;
      padding: 0 24px;
 }
 
-/* 4. 네비게이션 헤더 (시안 적용) */
+/* 5. 네비게이션 헤더 (시안 적용) */
 .landing-header {
     display: flex;
     justify-content: space-between;
@@ -80,7 +82,7 @@ body {
 }
 .nav-button.secondary:hover { background-color: var(--bg-interactive-hover); }
 
-/* 5. 히어로 섹션 (시안 적용) */
+/* 6. 히어로 섹션 (시안 적용) */
 .hero-section {
     display: grid;
     grid-template-columns: 1.2fr 1fr; /* 왼쪽 1.2, 오른쪽 1 비율 */
@@ -100,11 +102,14 @@ body {
     margin-bottom: 12px;
     text-transform: uppercase;
 }
+
+/* (NEW) 7. "깔끔한" 폰트 스타일 (시안 적용) */
 .hero-title {
+    font-family: 'Merriweather', serif; /* (중요) 새 폰트 적용 */
     font-size: 3.2rem; /* 52px */
-    font-weight: 700;
+    font-weight: 900; /* 굵게 */
     color: var(--text-primary);
-    line-height: 1.2;
+    line-height: 1.3; /* 줄 간격 조정 */
     margin: 0;
     padding: 0;
     border: none;
@@ -150,74 +155,63 @@ body {
     box-shadow: var(--shadow-hover);
 }
 
-/* 6. 히어로 위젯 (오른쪽 2개 박스) */
-.hero-widget-grid {
+/* (NEW) 8. 히어로 피드 (4개 박스 그리드 - 시안 적용) */
+.hero-feed {
     display: grid;
-    grid-template-rows: auto auto; /* 2열 */
-    gap: 24px;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
 }
-.widget-card {
+.feed-card {
     background-color: var(--bg-card);
-    padding: 24px;
+    padding: 16px;
     border-radius: var(--radius-main);
     box-shadow: var(--shadow-primary);
     border: 1px solid var(--border-primary);
     transition: all 0.2s ease;
+    min-height: 120px; /* 최소 높이 */
 }
-.widget-card:hover {
+.feed-card:hover {
+    transform: translateY(-4px);
     box-shadow: var(--shadow-hover);
     border-color: var(--accent-primary);
 }
-.widget-title {
+.feed-card p {
+    font-size: 14px;
+    color: var(--text-tertiary);
+}
+.feed-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.feed-card-header strong {
     font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin: 0 0 16px 0;
-}
-.widget-card p {
-    font-size: 15px;
-    color: var(--text-secondary);
-    line-height: 1.6;
-    margin: 0 0 20px 0;
-}
-/* 박스 1: 티커 스크롤 스타일 */
-.scroller-widget {
-    min-height: 180px; /* 높이 확보 */
-}
-.scrolling-bar-container-landing {
-    width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-}
-.scrolling-bar-track-landing {
-    display: inline-block;
-    animation: scroll-left 40s linear infinite; /* 속도 조절 */
-}
-.scrolling-bar-container-landing:hover .scrolling-bar-track-landing {
-    animation-play-state: paused;
-}
-.scroll-item-landing {
-    display: inline-block;
-    padding: 8px 16px;
-    margin-right: 10px;
     font-family: var(--font-mono);
-    border-radius: var(--radius-sub);
-    background-color: var(--bg-interactive);
+    color: var(--text-primary);
 }
-.scroll-item-landing .name { color: var(--text-primary); font-weight: 600; margin-right: 8px; }
-.scroll-item-landing .value { color: var(--text-secondary); margin-right: 6px; }
-.scroll-item-landing .positive { color: var(--accent-positive); }
-.scroll-item-landing .negative { color: var(--accent-negative); }
-.scroll-item-landing .zero { color: var(--text-secondary); }
-
-/* (스크롤 애니메이션) */
-@keyframes scroll-left {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); } 
+.feed-card-header span {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--accent-primary);
+}
+.feed-card-price {
+    font-size: 16px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    font-weight: 500;
+    margin: 4px 0 0 0;
+}
+.feed-card-time {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    display: block;
+    margin-top: 10px;
 }
 
 
-/* 7. 기능 소개 섹션 (시안 적용) */
+/* 9. 기능 소개 섹션 (시안 적용) */
 .features-section {
     margin-top: 40px;
     margin-bottom: 100px;
@@ -250,6 +244,9 @@ body {
     transform: translateY(-5px);
     box-shadow: var(--shadow-hover);
 }
+.feature-card .hero-subtitle-text { /* 상단 텍스트 재사용 */
+    font-size: 12px;
+}
 .feature-card h3 {
     font-size: 1.25rem;
     font-weight: 600;
@@ -264,7 +261,7 @@ body {
     margin-bottom: 0;
 }
 
-/* 8. 푸터 */
+/* 10. 푸터 */
 .landing-footer {
     margin-top: 100px;
     margin-bottom: 40px;
