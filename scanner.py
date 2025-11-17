@@ -126,7 +126,7 @@ PATTERN B: "DIP & RIP SPIKE" (Profit Pattern 2)
 
 PATTERN C: "Trap Zone" (Loss pattern)
 * Conditions: NOT Pattern A AND NOT Pattern B.
-* Base Score Range: **20~55** (Range widened to allow higher scores) 
+* Base Score Range: **20~50** (CRITICAL: Max score lowered to 50 for safety)
 
 ---
 STEP 3: Apply Risk Adjustment (Fine Control) - Score Differentiation
@@ -138,12 +138,13 @@ The final base score must be chosen within the assigned range based on the follo
     * RSI > 80 OR cloud_distance > 25%: Choose a score from the **HIGH range (90~95)**.
 
 2.  **For PATTERN B (70~85):** The score MUST reflect confirmation strength.
-    * If volume_ok = true AND chikou_ok = true: Choose the **HIGH range (80~85)**.
-    * Otherwise: Choose the **LOW range (70~80)**.
+    * If volume_ok = true AND chikou_ok = true: Choose a score from the **HIGH range (80~85)**.
+    * Otherwise: Choose a score from the **LOW range (70~80)**.
 
-3.  **For PATTERN C (20~55):** The score MUST reflect the potential for a rare explosion.
-    * If **engine_1_pass = true** AND **volume_ok = true**: Choose the **HIGH range (45~55)**. (Turning the 25% outlier into a 50%+ score)
-    * Otherwise: Choose the **LOW range (20~45)**.
+3.  **For PATTERN C (20~50):** The score MUST reflect the potential for a rare explosion.
+    * If **engine_1_pass = true** AND **volume_ok = true**: Choose a score from the **HIGH range (45~50)**.
+    * Otherwise: Choose a score from the **LOW range (20~45)**.
+    * **Crucial Command: Do NOT assign a score above 50 for Pattern C before final weighting.**
 
 ---
 STEP 4: Final Lightweight Weighting
