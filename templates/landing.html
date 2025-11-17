@@ -115,7 +115,7 @@
 
             video.onended = () => { showMainContent(); };
             video.onerror = () => { showMainContent(); };
-            setTimeout(() => { showMainContent(); }, 6000); // 6초 후 강제 실행
+            setTimeout(() => { showMainContent(); }, 4000); // 6초 후 강제 실행
 
             // (NEW) /api/market_overview를 호출해서 세로 스크롤 박스를 채우는 함수
             function loadVerticalTicker() {
