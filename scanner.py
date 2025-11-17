@@ -100,7 +100,7 @@ async def get_gemini_probability(ticker, conditions_data):
         return 50
 
     system_prompt = """
-You are a specialized scalping AI. Your task is to evaluate engine-qualified signals and return a "probability_score" (0~100) for short-term spikes (1~30 min).
+You are a specialized scalping AI. Your task is to evaluate engine-qualified signals and return a "probability_score" (0–100) for short-term explosive spikes (1–30 min).
 
 ---
 STEP 1: Mandatory Engine Filter (MUST PASS)
@@ -112,46 +112,57 @@ STEP 1: Mandatory Engine Filter (MUST PASS)
     → Invalid signal. Assign 10~20 and stop.
 
 ---
-STEP 2: SCORING MODEL (v16.15) - Find the TWO "Good" Patterns
--------------------------------------------------------------
-Check if the signal matches one of the two user-validated profitable patterns.
+STEP 2: Identify Spike Pattern (A or B or C)
+-------------------------------------------
+Check if the signal matches one of the user-validated profitable patterns.
 
 PATTERN A: "OVEREXTENSION SPIKE" (Profit Pattern 1)
---------------------------------------------------
-* Conditions: The signal is "overextended" (high RSI or far above cloud).
-  - RSI ≥ 72 OR cloud_distance ≥ 15%
-* Score:
-  → 85~95 (This is a primary buy signal)
+* Conditions: RSI ≥ 72 OR cloud_distance ≥ 15%
+* Base Score Range: **85~95**
 
 PATTERN B: "DIP & RIP SPIKE" (Profit Pattern 2)
-------------------------------------------------
-* Conditions: The signal is dipping *below* the cloud (like the chart).
-  - cloud_distance < 0%
-* Score:
-  → 80~90 (This is the *other* primary buy signal)
+* Conditions: cloud_distance < 0%
+* Base Score Range: **70~85**
 
-PATTERN C: "THE TRAP" (Loss Pattern)
------------------------------------
-* Conditions: If the signal is NOT Pattern A and NOT Pattern B.
-  (This is the "safe" middle ground: RSI < 72 AND cloud_distance is 0~15%)
-* User confirmed these signals DROP (-15%).
-* Score:
-  → 20~40 (This is a trap. Strongly avoid.)
+PATTERN C: "Trap Zone" (Loss pattern)
+* Conditions: NOT Pattern A AND NOT Pattern B.
+* Base Score Range: **20~55** (Range widened to allow higher scores) 
 
 ---
-STEP 3: FINAL WEIGHTING
-------------------------
-* Apply bonuses to the score from STEP 2.
-* Engine 1 (Explosion) → add +3 to final score
-* Volume_ok → +2
-* Chikou_ok → +2
+STEP 3: Apply Risk Adjustment (Fine Control) - Score Differentiation
+----------------------------------------------------------------------
+The final base score must be chosen within the assigned range based on the following rules:
+
+1.  **For PATTERN A (85~95):** The score MUST reflect the extremity of the signal.
+    * RSI 72~78 OR cloud_distance 15%~25%: Choose a score from the **LOW range (85~89)**.
+    * RSI > 80 OR cloud_distance > 25%: Choose a score from the **HIGH range (90~95)**.
+
+2.  **For PATTERN B (70~85):** The score MUST reflect confirmation strength.
+    * If volume_ok = true AND chikou_ok = true: Choose the **HIGH range (80~85)**.
+    * Otherwise: Choose the **LOW range (70~80)**.
+
+3.  **For PATTERN C (20~55):** The score MUST reflect the potential for a rare explosion.
+    * If **engine_1_pass = true** AND **volume_ok = true**: Choose the **HIGH range (45~55)**. (Turning the 25% outlier into a 50%+ score)
+    * Otherwise: Choose the **LOW range (20~45)**.
+
+---
+STEP 4: Final Lightweight Weighting
+-----------------------------------
+After the base score is chosen:
+
+* If engine_1_pass = true → +3
+* If volume_ok = true → +2
+* If chikou_ok = true → +2
 
 CAP final score at 97.
 
-You must respond ONLY with the JSON schema:
+---
+OUTPUT FORMAT
+---
+Respond ONLY using this JSON schema:
 {
   "probability_score": <int>,
-  "reasoning": "<short explanation, mention Pattern A, B, or C>"
+  "reasoning": "<short explanation, mention Pattern A, B, or C, and state why the low or high range was chosen in Step 3.>"
 }
 """
     user_prompt = f"""
@@ -685,7 +696,7 @@ async def periodic_scanner(websocket):
     
     while True:
         try:
-            print(f"\n[사냥꾼] (v16.2) 7분 주기 시작. '신호 피드' (signals, recommendations) DB를 청소합니다...")
+            print(f"\n[사냥꾼] (v16.2) 3분 주기 시작. '신호 피드' (signals, recommendations) DB를 청소합니다...")
             conn = get_db_connection()
             cursor = conn.cursor()
             # 10. PostgreSQL은 TRUNCATE가 더 빠름 (DELETE도 작동은 함)
@@ -756,9 +767,10 @@ async def periodic_scanner(websocket):
         except Exception as e:
             print(f"❌ [DB] 'status' 저장 실패: {e}")
             
-        # ✅ (튜닝 1) 1분(60초) -> 7분(420초)로 복귀
-        print(f"\n[사냥꾼] 7분(420초) 후 다음 스캔을 시작합니다...")
-        await asyncio.sleep(420) 
+        # ✅ (튜닝 1) 7분(420초) -> 3분(180초)로 변경
+        # API 한도 및 서버 부하에 주의해야 합니다.
+        print(f"\n[사냥꾼] 3분(180초) 후 다음 스캔을 시작합니다...")
+        await asyncio.sleep(180)
 
 # --- (v8.1) "수동 Keepalive" 로봇 ---
 async def manual_keepalive(websocket):
