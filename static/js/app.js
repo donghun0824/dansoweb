@@ -114,8 +114,11 @@ onMessage(messaging, (payload) => {
 // --- (기존 app.js 코드 시작) ---
 document.addEventListener('DOMContentLoaded', function() {
     
-    // 9. (수정 2) 페이지 로드 시 바로 호출하던 코드를 주석 처리 (너무 빠름)
-    // requestNotificationPermission();
+    // 9. (NEW) 👇 알림 버튼 이벤트 리스너 연결
+    const subscribeBtn = document.getElementById('subscribe-btn');
+    if (subscribeBtn) {
+        subscribeBtn.addEventListener('click', requestNotificationPermission);
+    }
 
     // --- 1. DOM 요소 가져오기 (v11.0) ---
     const scanStatusEl = document.getElementById('scan-status-text');
@@ -558,7 +561,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     fetchDashboardData();
     fetchCommunityPosts();
-    
+
     // --- PWA 서비스 워커 등록 ---
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -566,8 +569,7 @@ document.addEventListener('DOMContentLoaded', function() {
           .then(registration => {
             console.log('✅ ServiceWorker registration successful:', registration.scope);
             
-            // ✅ 서비스워커가 '등록'된 직후에 새로 수정한 함수를 호출합니다.
-            requestNotificationPermission(); // <--- 이 부분이 수정된 강화된 함수를 호출합니다.
+            // (requestNotificationPermission() 호출 코드는 수동 버튼 리스너로 대체되었습니다.)
 
           })
           .catch(err => {
@@ -576,4 +578,4 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
 
-});
+}); // <--- DOMContentLoaded 함수가 끝나는 지점입니다.
