@@ -1,7 +1,7 @@
 // 이 파일은 "최상위(Root)" 폴더에 있어야 합니다. (현재 위치가 맞습니다)
 
 // 1. Firebase "compat" (v8) 라이브러리를 importScripts로 가져옵니다.
-// 'import' (v9) 문법은 서비스 워커 루트에서 작동하지 않습니다.
+// (Service Worker에서 호환성을 위해 이 import 방식이 필요합니다.)
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 
@@ -27,12 +27,18 @@ messaging.onBackgroundMessage((payload) => {
     payload
   );
 
-  // 알림을 커스터마이징합니다.
-  const notificationTitle = payload.notification.title;
+  // ✅ [CRITICAL FIX] 서버가 보낸 'data' 페이로드를 사용합니다.
+  const data = payload.data || {};
+  
+  // 알림 제목과 내용을 서버가 보낸 구조화된 데이터(ticker, price, probability)로 설정합니다.
+  const notificationTitle = data.title || 'Danso AI Signal';
+  const notificationBody = `가격: $${data.price || 'N/A'}, AI 확률: ${data.probability || 'N/A'}%`;
+
   const notificationOptions = {
-    body: payload.notification.body,
-    icon: "/static/images/danso_logo.png", // (Flask의 static 경로)
-    badge: "/static/images/danso_logo.png" // (안드로이드용 배지 아이콘 예시)
+    // ✅ [FIX] body를 payload.data 기반으로 커스터마이징
+    body: notificationBody, 
+    icon: "/static/images/danso_logo.png",
+    badge: "/static/images/danso_logo.png" 
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);

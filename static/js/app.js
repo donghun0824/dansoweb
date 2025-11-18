@@ -19,19 +19,38 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const messaging = getMessaging(app);
 
-// 4. FCM 함수 정의
+// app.js (약 18번째 줄, 기존 requestNotificationPermission 함수 교체)
+
+// 4. FCM 함수 정의 (강화된 로직으로 교체)
 function requestNotificationPermission() {
     console.log("Requesting notification permission...");
+
+    if (!('Notification' in window)) {
+        console.warn("[FCM] Notifications not supported in this browser.");
+        return;
+    }
     
-    Notification.requestPermission().then((permission) => {
-        if (permission === "granted") {
-            console.log("Notification permission granted.");
-            // 권한이 승인되면 토큰 가져오기 실행
-            getFCMToken();
-        } else {
-            console.log("Notification permission denied.");
-        }
-    });
+    // 1. 이미 허용됨: 바로 getFCMToken 실행
+    if (Notification.permission === 'granted') {
+        console.log("[FCM] Permission already granted. Retrieving token.");
+        getFCMToken();
+        return;
+    }
+
+    // 2. 권한 요청 팝업 띄우기
+    if (Notification.permission === 'default') {
+        Notification.requestPermission().then((permission) => {
+            if (permission === "granted") {
+                console.log("Notification permission granted.");
+                getFCMToken(); // 권한 획득 시 토큰 가져오기 실행
+            } else {
+                console.log("Notification permission denied.");
+            }
+        });
+    } else {
+        // 3. 차단됨 (denied) 상태.
+        console.warn("[FCM] Permission permanently denied. User must change settings.");
+    }
 }
 
 // (수정 1) 서비스워커가 'active' 될 때까지 기다리도록 수정
@@ -541,15 +560,14 @@ document.addEventListener('DOMContentLoaded', function() {
     fetchCommunityPosts();
     
     // --- PWA 서비스 워커 등록 ---
-    // (수정 3) 'register' 성공 직후에 알림 권한을 요청하도록 수정
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js') // sw.js 파일 경로
           .then(registration => {
             console.log('✅ ServiceWorker registration successful:', registration.scope);
             
-            // ✅ 서비스워커가 '등록'된 직후에 알림 권한을 요청합니다.
-            requestNotificationPermission(); 
+            // ✅ 서비스워커가 '등록'된 직후에 새로 수정한 함수를 호출합니다.
+            requestNotificationPermission(); // <--- 이 부분이 수정된 강화된 함수를 호출합니다.
 
           })
           .catch(err => {
