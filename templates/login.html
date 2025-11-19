@@ -96,7 +96,7 @@
 </head>
 <body>
 
-    <div class="login-container">
+  <div class="login-container">
         <div class="login-logo">
             <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso">
         </div>
@@ -105,7 +105,7 @@
         <p>Sign in to access your AI dashboard</p>
 
         <a href="{{ url_for('google_login') }}" class="google-btn">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="Google">
+            <img src="{{ url_for('static', filename='images/google_g_logo.png') }}" alt="Google">
             Sign in with Google
         </a>
 
