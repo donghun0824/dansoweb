@@ -89,7 +89,12 @@ def dashboard_page():
 @app.route('/auth/google')
 def google_login():
     redirect_uri = url_for('google_callback', _external=True)
-    return oauth.google.authorize_redirect(redirect_uri)
+    # 🟢 FIX: access_type='offline' 및 prompt='consent' 인수를 추가하여 nonce 요구를 보강합니다.
+    return oauth.google.authorize_redirect(
+        redirect_uri,
+        access_type='offline',
+        prompt='consent'
+    )
 
 # 구글 로그인 콜백
 @app.route('/auth/google/callback')
@@ -125,8 +130,9 @@ def google_callback():
         return redirect(url_for('dashboard_page'))
         
     except Exception as e:
+        # 이전에 발생했던 nonce 에러를 포함하여 모든 OAuth 에러를 여기서 포착합니다.
         print(f"OAuth Error: {e}")
-        return "Google Login Failed. Please try again.", 400
+        return "Google Login Failed. Please try again. (Check server logs for details)", 400
 
 # 로그아웃
 @app.route('/logout')
