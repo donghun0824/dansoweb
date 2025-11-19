@@ -84,23 +84,21 @@ self.addEventListener('push', event => {
   let title;
   let body_message;
 
-  // 3. Python에서 보낸 'ticker', 'price', 'probability'가 있는지 확인
   if (data.ticker && data.price && data.probability) {
-    // 4. 데이터가 있으면 원하는 형식으로 알림을 조립합니다.
-    title = `🚀 ${data.ticker} AI 신호`;
-    body_message = `가격: $${data.price}, AI 확률: ${data.probability}%`;
+    // ✅ [수정] 로켓 이모지 삭제 & 영문으로 변경
+    title = `${data.ticker} AI Signal`;
+    body_message = `Price: $${data.price}, AI Probability: ${data.probability}%`;
   } else {
-    // 5. (예외)
-    title = data.title || 'Danso 알림';
-    body_message = data.body || '새로운 내용이 있습니다.';
+    // 기본 메시지도 영문으로 변경
+    title = data.title || 'Danso Alert';
+    body_message = data.body || 'New content available.';
   }
 
   const options = {
     body: body_message,
-    icon: data.icon || '/static/images/danso_logo.png', // 아이콘
-    badge: '/static/images/danso_logo.png' // (안드로이드용 뱃지 아이콘)
+    icon: data.icon || '/static/images/danso_logo.png',
+    badge: '/static/images/danso_logo.png'
   };
 
-  // 알림을 화면에 띄웁니다.
   event.waitUntil(self.registration.showNotification(title, options));
 });
