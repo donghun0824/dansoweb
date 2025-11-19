@@ -3,6 +3,9 @@
 // 1. Firebase 모듈 가져오기 (CDN에서 바로 가져옴)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
+import { createChart } from 'https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.production.mjs';
+
+
 
 // 2. ✅ 사용자님의 firebaseConfig
 const firebaseConfig = {
@@ -427,7 +430,8 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        const { createChart } = window.LightweightCharts;
+        // ❌ [삭제] 기존 코드: window 객체에서 가져오는 부분 삭제
+        // const { createChart } = window.LightweightCharts; 
 
         // (v11.0) CSS 변수에서 차트 색상 가져오기
         const style = getComputedStyle(document.body);
@@ -437,25 +441,26 @@ document.addEventListener('DOMContentLoaded', function() {
         const chartUpColor = style.getPropertyValue('--accent-positive').trim() || '#4a7c59';
         const chartDownColor = style.getPropertyValue('--accent-negative').trim() || '#5a8bde';
 
-
+        // ✅ [수정] import한 createChart 함수를 바로 사용
         lightweightChart = createChart(chartContainer, {
             width: chartContainer.clientWidth, 
             height: 350,
             layout: { 
-                backgroundColor: chartBackgroundColor, // (v11.0) CSS 변수
-                textColor: chartTextColor // (v11.0) CSS 변수
+                backgroundColor: chartBackgroundColor, 
+                textColor: chartTextColor
             },
             grid: { 
-                vertLines: { color: chartGridColor }, // (v11.0) CSS 변수
-                horzLines: { color: chartGridColor }  // (v11.0) CSS 변수
+                vertLines: { color: chartGridColor },
+                horzLines: { color: chartGridColor }
             },
             timeScale: { timeVisible: true, secondsVisible: false },
-            attribution: { enabled: false }
+            attribution: { enabled: false } // (무료 버전 로고 숨김 옵션은 버전에 따라 다를 수 있음)
         });
 
+        // 이제 addCandlestickSeries가 정상적으로 작동할 것입니다.
         candleSeries = lightweightChart.addCandlestickSeries({
-            upColor: chartUpColor, // (v11.0) CSS 변수 (Sage Green)
-            downColor: chartDownColor, // (v11.0) CSS 변수 (Soft Blue)
+            upColor: chartUpColor,
+            downColor: chartDownColor,
             borderVisible: false,
             wickUpColor: chartUpColor,
             wickDownColor: chartDownColor
@@ -464,6 +469,7 @@ document.addEventListener('DOMContentLoaded', function() {
         candleSeries.setData(chartData.results);
         lightweightChart.timeScale().fitContent();
     }
+
     
     // --- (v3.0) 호가 탭 렌더링 ---
     function renderQuoteTab(quoteData) {
