@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Danso AI</title>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Merriweather:wght@700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            background-color: var(--bg-body);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+        }
+        
+        .login-container {
+            background-color: var(--bg-card);
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            border: 1px solid var(--border-primary);
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+        }
+
+        .login-logo img {
+            width: 80px;
+            height: auto;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-family: 'Merriweather', serif;
+            font-size: 24px;
+            color: var(--text-primary);
+            margin: 0 0 10px 0;
+            border: none;
+            padding: 0;
+        }
+
+        p {
+            color: var(--text-secondary);
+            font-size: 15px;
+            margin: 0 0 30px 0;
+        }
+
+        /* 구글 로그인 버튼 스타일 */
+        .google-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-secondary);
+            border-radius: 8px;
+            background-color: white;
+            color: #3c4043;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            box-sizing: border-box; /* 패딩 포함 너비 계산 */
+        }
+        
+        .google-btn:hover {
+            background-color: #f8f9fa;
+            border-color: #dadce0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .google-btn img {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+        }
+
+        .back-link {
+            margin-top: 25px;
+            display: block;
+            font-size: 13px;
+            color: var(--text-tertiary);
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-container">
+        <div class="login-logo">
+            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso">
+        </div>
+        
+        <h1>Welcome Back</h1>
+        <p>Sign in to access your AI dashboard</p>
+
+        <a href="{{ url_for('google_login') }}" class="google-btn">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="Google">
+            Sign in with Google
+        </a>
+
+        <a href="/" class="back-link">← Back to Home</a>
+    </div>
+
+</body>
+</html>
