@@ -32,7 +32,7 @@ VAPID_EMAIL = "mailto:cbvkqtm98@gmail.com" # (이제 pywebpush용이라 사용 �
 
 # --- (v16.2) 튜닝 되돌리기 (API 한도 문제 해결) ---
 MAX_PRICE = 10
-TOP_N = 50
+TOP_N = 100
 MIN_DATA_REQ = 6
 
 # --- (v16.2) 튜닝 되돌리기 ---
