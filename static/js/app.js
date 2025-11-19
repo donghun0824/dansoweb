@@ -3,7 +3,7 @@
 // 1. Firebase 모듈 가져오기 (CDN에서 바로 가져옴)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
-import { createChart } from 'https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.production.mjs';
+import { createChart } from 'https://esm.sh/lightweight-charts@4.1.1';
 
 
 
