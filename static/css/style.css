@@ -526,3 +526,45 @@ h2 { font-size: 20px; margin-top: 40px; }
     font-size: 15px; 
     line-height: 1.6;
 }
+/* --- (v16.25) FINAL NOTIFICATION BUTTON STYLE --- */
+
+.notification-button {
+    /* 배경/텍스트: 흰색 배경에 검은 텍스트 (시안) */
+    background-color: var(--bg-card); 
+    color: var(--text-primary); 
+    
+    /* 패딩 및 모양: 캡슐(Pill) 형태 */
+    padding: 10px 24px; 
+    border: 1px solid var(--border-primary); 
+    border-radius: var(--radius-full); /* Pill shape (50px) */
+    
+    /* 폰트 및 레이아웃 */
+    font-family: var(--font-primary);
+    font-weight: 600;
+    font-size: 16px; 
+    cursor: pointer;
+    text-decoration: none;
+    
+    /* 아이콘과 텍스트 정렬 및 간격 */
+    display: inline-flex;
+    align-items: center;
+    gap: 12px; 
+
+    /* 그림자 및 트랜지션 */
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-primary); /* 은은한 그림자 (시안과 유사) */
+}
+
+.notification-button:hover {
+    /* 마우스 올렸을 때 살짝 뜨고 경계선 강조 */
+    background-color: var(--bg-interactive-hover); 
+    border-color: var(--accent-primary);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-hover);
+}
+
+/* 벨 아이콘 색상: 메인 강조색 (Soft Navy) */
+.notification-button i.fas {
+    color: var(--accent-primary); 
+    font-size: 18px;
+}
