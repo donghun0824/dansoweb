@@ -1,21 +1,23 @@
-from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session # Flask에서 session을 사용하기 위해 추가
+from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from authlib.integrations.flask_client import OAuth
-from authlib.oauth2.rfc6749.util import generate_nonce
+# 🟢 수정됨: generate_nonce 임포트 제거하고 secrets 추가
+import secrets 
 import json
-import os # 'osf' -> 'os' (오타 수정)
+import os
 import requests
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
 app = Flask(__name__)
 
-# --- 1. 설정 및 환경 변수 (가장 먼저 설정) ---
+# --- 1. 설정 및 환경 변수 ---
 app.secret_key = os.environ.get('SECRET_KEY', 'dev_key_for_session')
 API_KEY = os.environ.get('POLYGON_API_KEY')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# --- 2. DB 연결 함수 (필수!) ---
+# --- 2. DB 연결 함수 ---
 def get_db_connection():
     """PostgreSQL DB 연결을 생성합니다."""
     if not DATABASE_URL:
@@ -90,15 +92,15 @@ def dashboard_page():
 def google_login():
     redirect_uri = url_for('google_callback', _external=True)
     
-    # 🟢 FIX 1: Nonce 생성 및 세션에 저장
-    nonce = generate_nonce()
+    # 🟢 수정됨: secrets 모듈을 사용하여 안전한 nonce 생성
+    nonce = secrets.token_urlsafe(16)
     session['google_auth_nonce'] = nonce
     
     return oauth.google.authorize_redirect(
         redirect_uri,
         access_type='offline',
         prompt='consent',
-        nonce=nonce # <-- 생성된 nonce를 Google에 전달
+        nonce=nonce # 생성된 nonce를 Google에 전달
     )
 
 # 구글 로그인 콜백
@@ -107,7 +109,7 @@ def google_callback():
     try:
         token = oauth.google.authorize_access_token()
         
-        # 🟢 FIX 2: 세션에 저장된 nonce를 가져와 토큰 파싱에 사용
+        # 세션에 저장된 nonce를 가져와 토큰 파싱에 사용
         nonce = session.pop('google_auth_nonce', None) 
         user_info = oauth.google.parse_id_token(token, nonce=nonce)
         email = user_info['email']
@@ -138,7 +140,6 @@ def google_callback():
         return redirect(url_for('dashboard_page'))
         
     except Exception as e:
-        # 이전에 발생했던 nonce 에러를 포함하여 모든 OAuth 에러를 여기서 포착합니다.
         print(f"OAuth Error: {e}")
         return "Google Login Failed. Please try again. (Check server logs for details)", 400
 
