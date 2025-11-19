@@ -1,6 +1,7 @@
-from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for
+from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session # 👈 session import 추가
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from authlib.integrations.flask_client import OAuth
+from authlib.common.security import generate_nonce # 👈 NEW: generate_nonce import 추가
 import json
 import os
 import requests
@@ -89,11 +90,16 @@ def dashboard_page():
 @app.route('/auth/google')
 def google_login():
     redirect_uri = url_for('google_callback', _external=True)
-    # 🟢 FIX: access_type='offline' 및 prompt='consent' 인수를 추가하여 nonce 요구를 보강합니다.
+    
+    # 🟢 FIX 1: Nonce 생성 및 세션에 저장
+    nonce = generate_nonce()
+    session['google_auth_nonce'] = nonce
+    
     return oauth.google.authorize_redirect(
         redirect_uri,
         access_type='offline',
-        prompt='consent'
+        prompt='consent',
+        nonce=nonce # <-- 생성된 nonce를 Google에 전달
     )
 
 # 구글 로그인 콜백
@@ -101,7 +107,10 @@ def google_login():
 def google_callback():
     try:
         token = oauth.google.authorize_access_token()
-        user_info = oauth.google.parse_id_token(token)
+        
+        # 🟢 FIX 2: 세션에 저장된 nonce를 가져와 토큰 파싱에 사용
+        nonce = session.pop('google_auth_nonce', None) 
+        user_info = oauth.google.parse_id_token(token, nonce=nonce)
         email = user_info['email']
 
         conn = get_db_connection()
