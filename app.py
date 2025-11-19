@@ -1,14 +1,13 @@
-from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session # 👈 session import 추가
+from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session # Flask에서 session을 사용하기 위해 추가
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from authlib.integrations.flask_client import OAuth
-from authlib.common.security import generate_nonce # 👈 NEW: generate_nonce import 추가
+from authlib.oauth2.rfc6749.util import generate_nonce
 import json
-import os
+import os # 'osf' -> 'os' (오타 수정)
 import requests
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
-
 app = Flask(__name__)
 
 # --- 1. 설정 및 환경 변수 (가장 먼저 설정) ---
