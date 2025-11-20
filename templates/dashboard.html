@@ -27,89 +27,77 @@
 </head>
 <body>
     
+    <canvas id="dashboardCanvas"></canvas>
+
     <div class="scrolling-bar-container">
         <div class="scrolling-bar-track" id="scrolling-bar-track">
             </div>
     </div>
 
-    <div class="dashboard-container">
+    <div class="wide-dashboard-wrapper"> 
 
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="danso Logo" class="sidebar-logo">
-                <span class="sidebar-title">DANSO AI</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-top: 60px;">
+            <div class="app-logo" style="display: flex; align-items: center; gap: 12px;">
+                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="danso Logo" style="width: 40px; height: auto;">
+                <span style="font-family: 'Inter', sans-serif; font-weight: 800; font-size: 1.5rem; color: white; letter-spacing: -0.02em;">Danso AI</span>
+            </div>
+
+            <button id="subscribe-btn" class="btn-primary" style="padding: 10px 20px; border-radius: 12px; font-size: 0.95rem; font-weight: 600;">
+                <i class="fas fa-bell"></i> Enable Notifications
+            </button>
+        </div>
+
+        <div class="card settings-card">
+            <div class="card-header" style="border:none; padding-bottom:0;">
+                <h3 style="font-size:1.1rem; margin:0; font-weight: 700;">🔔 AI Alert Sensitivity</h3>
+            </div>
+            <div class="settings-body" style="flex-direction: row; align-items: center; justify-content: space-between; margin-top:15px;">
+                <p class="description" style="margin:0;">Only receive alerts with an AI Score <strong>above</strong> this threshold.</p>
+                <div class="control-group">
+                    <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
+                    <span class="unit" style="font-size:0.9rem; margin-right:10px; font-weight: 500;">or higher</span>
+                    <button id="save-score-btn">Save</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-card">
+            <h2>Scanner Status</h2>
+            <div class="status-header">
+                 <div id="scan-status-text">Scanner Scan: N/A</div> 
+                <div id="scan-watching-count">Watching: 0 tickers</div> 
             </div>
             
-            <nav class="sidebar-menu">
-                <a href="/dashboard" class="active">
-                    <i class="fas fa-chart-line"></i> Dashboard
-                </a>
-                <a href="#">
-                    <i class="fas fa-globe"></i> Market Overview
-                </a>
-                <a href="#">
-                    <i class="fas fa-robot"></i> AI Analysis
-                </a>
-                
-                <a href="/logout" style="margin-top: auto; color: #ff4d4d;">
-                    <i class="fas fa-sign-out-alt"></i> Logout
-                </a>
-            </nav>
-        </aside>
-
-        <main class="main-content">
-
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 20px; gap: 10px;">
-                <button id="subscribe-btn" class="btn-primary" style="padding: 8px 16px; border-radius: 8px; font-size: 0.9rem;">
-                    <i class="fas fa-bell"></i> Enable Notifications
-                </button>
+            <h3 style="font-size: 0.95rem; margin-top: 20px; margin-bottom: 12px; font-weight: 600;">Currently Watching</h3>
+            <div class="ticker-list" id="ticker-list-container">
+                 <p>Loading scanner...</p> 
             </div>
+        </div>
 
-            <div class="card settings-card">
-                <div class="card-header" style="border:none; padding-bottom:0;">
-                    <h3 style="font-size:1rem; margin:0; color:var(--text-sub);">🔔 AI Alert Sensitivity</h3>
-                </div>
-                <div class="settings-body" style="flex-direction: row; align-items: center; justify-content: space-between; margin-top:10px;">
-                    <p class="description">Minimum AI Score to trigger alerts (0-100)</p>
-                    <div class="control-group">
-                        <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
-                        <span class="unit" style="font-size:0.9rem; color:var(--text-sub); margin-right:10px;">or higher</span>
-                        <button id="save-score-btn">Save</button>
-                    </div>
-                </div>
+        <h2 style="color: white; margin-top: 40px; border-bottom: none;">Signal Feed</h2>
+        <div class="signal-feed" id="signal-feed-container">
+            <div class="empty-state" style="text-align:center; padding:40px;">Waiting for AI Signals...</div> 
+        </div>
+        
+        <div class="community-section" style="margin-top: 40px;">
+            <h2>Community Insights</h2>
+            <form id="post-form" onsubmit="return false;">
+                <input type="text" name="author" placeholder="Username" required> 
+                <textarea name="content" placeholder="Share your trading insights..." rows="1" required></textarea> 
+                <button type="button" id="post-submit-btn"><i class="fas fa-paper-plane"></i></button> 
+            </form>
+            <div class="post-feed" id="community-feed-container">
+                 <div class="empty-state" style="text-align:center; padding:20px;">Loading Posts...</div> 
             </div>
+        </div>
+        
+        <div style="text-align: center; margin-top: 60px; margin-bottom: 40px;">
+            <a href="/logout" style="color: #ff4d4d; text-decoration: none; font-weight: 600; font-size: 0.9rem;">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+        </div>
             
-            <div class="status-card">
-                <h2>Scanner Status</h2>
-                <div class="status-header">
-                     <div id="scan-status-text">Scanner Scan: N/A</div> 
-                    <div id="scan-watching-count">Watching: 0 tickers</div> 
-                </div>
-                
-                <h3 style="font-size: 0.9rem; color: var(--text-sub); margin-top: 15px; margin-bottom: 10px;">Currently Watching</h3>
-                <div class="ticker-list" id="ticker-list-container">
-                     <p style="color: #8b95a1;">Loading scanner...</p> 
-                </div>
-            </div>
-
-            <h2>Signal Feed</h2>
-            <div class="signal-feed" id="signal-feed-container">
-                <div class="empty-state" style="text-align:center; padding:40px; color:var(--text-sub);">Waiting for AI Signals...</div> 
-            </div>
-            
-            <div class="community-section">
-                <h2>Community Insights</h2>
-                <form id="post-form" onsubmit="return false;">
-                    <input type="text" name="author" placeholder="Username" required> 
-                    <textarea name="content" placeholder="Share your trading insights..." rows="1" required></textarea> 
-                    <button type="button" id="post-submit-btn"><i class="fas fa-paper-plane"></i></button> 
-                </form>
-                <div class="post-feed" id="community-feed-container">
-                     <div class="empty-state" style="text-align:center; padding:20px; color:var(--text-sub);">Loading Posts...</div> 
-                </div>
-            </div>
-            
-        </main> </div> <div id="ticker-modal" class="modal-overlay">
+    </div> <div id="ticker-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modal-ticker-name">Loading...</h2>
