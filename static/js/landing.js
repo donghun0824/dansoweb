@@ -1,4 +1,4 @@
-// static/js/landing.js (Interactive Financial Motion Hero Effect)
+// static/js/landing.js (Interactive Financial Motion Hero Effect - V2: Line Stroke Added)
 
 const canvas = document.getElementById('heroCanvas');
 const ctx = canvas.getContext('2d');
@@ -13,14 +13,15 @@ canvas.height = height;
 // 창 크기 변경 시 캔버스 크기 자동 조정
 window.addEventListener('resize', () => {
     width = window.innerWidth;
-    height = window.innerHeight;
+    height = height;
     canvas.width = width;
     canvas.height = height;
-    initParticles(); // 크기 변경 시 파티클 재배치
+    initParticles(); 
 });
 
 // 마우스 위치 추적
 let mouse = { x: width / 2, y: height / 2 };
+let trendPathPoints = []; // ✅ [NEW] 우상향 라인의 고정 경로를 저장할 배열
 
 // 마우스/터치 이동 이벤트 리스너
 const handleMove = (e) => {
@@ -85,17 +86,9 @@ class Particle {
         else {
             const dx = this.targetX - this.x;
             const dy = this.targetY - this.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            // 서서히 목표에 접근
+            // 이동 속도 조절 (부드럽게)
             this.x += dx * 0.05; 
             this.y += dy * 0.05;
-            
-            // 목표 도달 시 (불필요한 미세 움직임 제거)
-            if (distance < 0.5) {
-                this.x = this.targetX;
-                this.y = this.targetY;
-            }
         }
         
         this.draw();
@@ -103,7 +96,7 @@ class Particle {
 }
 
 // --- 애니메이션 제어 ---
-const numberOfParticles = 200; // 파티클 개수 (성능에 따라 조정)
+const numberOfParticles = 200; // 파티클 개수
 let particles = [];
 let animationPhase = 0; // 0: 감시, 1: 신호 수집, 2: 우상향
 
@@ -113,6 +106,41 @@ function initParticles() {
         particles.push(new Particle());
     }
 }
+
+// ✅ [NEW FUNCTION] 우상향 라인 경로를 그리는 함수 (굵고 빛나는 라인)
+function drawUpwardTrendLine() {
+    if (trendPathPoints.length === 0) return;
+
+    // 1. 네온 글로우 효과
+    ctx.strokeStyle = '#00ff64'; // 밝은 녹색
+    ctx.lineWidth = 4; // 선 두께
+    ctx.shadowBlur = 15; // 그림자 번짐 정도
+    ctx.shadowColor = 'rgba(0, 255, 100, 1)'; // 그림자 색상 (네온 효과)
+
+    ctx.beginPath();
+    // 시작점 설정
+    ctx.moveTo(trendPathPoints[0].x, trendPathPoints[0].y);
+
+    // 모든 경로를 연결하여 선을 그립니다.
+    for (let i = 1; i < trendPathPoints.length; i++) {
+        // 캔버스 API를 사용하여 부드러운 곡선을 그릴 수도 있지만, 여기서는 직선 연결로 역동적인 차트 모양을 만듭니다.
+        ctx.lineTo(trendPathPoints[i].x, trendPathPoints[i].y);
+    }
+    ctx.stroke();
+
+    // 2. 그림자(글로우) 효과를 다음 요소들에 영향 주지 않도록 초기화
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+    
+    // 3. (선택 사항) 라인 아래 영역을 채워 차트의 '볼륨'을 표현 (스크린샷 참고)
+    // 그라데이션을 사용하거나 단색 채우기를 할 수 있습니다.
+    ctx.fillStyle = 'rgba(0, 255, 100, 0.1)'; // 투명한 초록색
+    ctx.lineTo(width, height); // 우측 하단
+    ctx.lineTo(trendPathPoints[0].x, height); // 좌측 하단 (라인 시작점 X축)
+    ctx.closePath();
+    ctx.fill();
+}
+
 
 function animate() {
     // 이전 프레임 지우기 (투명도 조절로 잔상 효과 부여)
@@ -124,6 +152,11 @@ function animate() {
         particles[i].update();
     }
     
+    // ✅ [MODIFIED] 우상향 상태일 때만 굵은 라인을 그립니다.
+    if (animationPhase === 2) {
+        drawUpwardTrendLine();
+    }
+    
     requestAnimationFrame(animate);
 }
 
@@ -133,11 +166,10 @@ function animate() {
 function startSignalCollection() {
     if (animationPhase === 0) {
         animationPhase = 1;
-        const targetPoint = { x: width * 0.7, y: height * 0.5 }; // 화면 우측 중앙
+        // 신호 수집 목표 지점 (화면 중앙 우측)
+        const targetPoint = { x: width * 0.7, y: height * 0.5 }; 
         
-        // 모든 파티클의 목표 위치를 설정
         particles.forEach(p => {
-            // 중앙 목표 지점 주변에 무작위로 모이도록 설정
             p.targetX = targetPoint.x + (Math.random() - 0.5) * 50;
             p.targetY = targetPoint.y + (Math.random() - 0.5) * 50;
             p.state = 'signal';
@@ -155,23 +187,45 @@ function startUpwardTrend() {
     animationPhase = 2;
     console.log("-> Phase 2: Upward Trend started.");
 
-    // 파티클을 우상향 차트 라인 모양으로 재배치
-    const lineStart = { x: width * 0.55, y: height * 0.8 };
-    const lineEnd = { x: width * 0.85, y: height * 0.2 };
+    // ✅ [MODIFIED] 고정된 라인 경로 포인트를 미리 정의합니다.
+    trendPathPoints = [];
+    const pointsCount = 7; // 라인의 굴곡점 개수
+
+    const startX = width * 0.45;
+    const endX = width * 0.85;
+    const baseY = height * 0.9;
+    const peakY = height * 0.15;
     
+    // 라인 경로 생성 (W자나 M자처럼 굴곡진 우상향 패턴)
+    for (let i = 0; i < pointsCount; i++) {
+        const x = startX + (endX - startX) * (i / (pointsCount - 1));
+        let y = baseY - (baseY - peakY) * (i / (pointsCount - 1)); // 기본 선형 상승
+        
+        // 역동적인 차트 굴곡 추가
+        if (i % 2 === 0) {
+            y += Math.sin(i * 1.5) * 50; // 깊은 골
+        } else {
+            y -= Math.cos(i * 1.5) * 80; // 높은 봉우리
+        }
+        
+        // 최종적으로는 우상향하도록 보정
+        y = Math.min(y, baseY - 50); // 너무 아래로 내려가지 않게 보정
+
+        trendPathPoints.push({ x: x, y: y });
+    }
+
     // 파티클을 라인 모양으로 흩뿌림
     particles.forEach((p, index) => {
-        const t = index / numberOfParticles; // 0에서 1 사이의 값
+        // 파티클을 7개의 고정점 근처에 배치
+        const segment = Math.floor(index / (numberOfParticles / pointsCount));
+        const pointIndex = Math.min(segment, pointsCount - 1);
         
-        // 1차 함수로 라인 위치 계산 (y = mx + c)
-        p.targetX = lineStart.x + (lineEnd.x - lineStart.x) * t;
-        p.targetY = lineStart.y + (lineEnd.y - lineStart.y) * t;
+        const targetPoint = trendPathPoints[pointIndex];
         
-        // 라인 주변에 약간의 무작위성 추가
-        p.targetX += (Math.random() - 0.5) * 10;
-        p.targetY += (Math.random() - 0.5) * 10;
+        p.targetX = targetPoint.x + (Math.random() - 0.5) * 40; // 무작위성 추가
+        p.targetY = targetPoint.y + (Math.random() - 0.5) * 40;
         p.state = 'trend';
-        p.color = `rgba(0, 255, 0, ${Math.random() * 0.8 + 0.5})`; // 밝은 초록색으로 강조
+        p.color = `rgba(0, 255, 0, ${Math.random() * 0.8 + 0.5})`;
     });
 
     // 4초 후 애니메이션 초기화 (다시 감시 모드로)
@@ -185,13 +239,14 @@ function resetAnimation() {
         // 기존의 불규칙한 위치로 돌아가도록 목표 재설정
         p.targetX = Math.random() * width;
         p.targetY = Math.random() * height;
-        p.x = p.targetX; // 즉시 위치 초기화
+        p.x = p.targetX; 
         p.y = p.targetY;
         p.state = 'watch';
         p.color = `rgba(0, 255, 100, ${Math.random() * 0.5 + 0.2})`;
         p.speedX = Math.random() * 0.2 - 0.1;
         p.speedY = Math.random() * 0.2 - 0.1;
     });
+    trendPathPoints = []; // ✅ [NEW] 라인 경로 초기화
     console.log("-> Phase 3: Animation reset. Back to Watch mode.");
 }
 
@@ -199,6 +254,7 @@ function resetAnimation() {
 
 // 마우스 클릭 시 신호 발생을 테스트하는 트리거
 window.addEventListener('click', () => {
+    // 신호가 없을 때만 트리거
     if (animationPhase === 0) {
         startSignalCollection();
     }
