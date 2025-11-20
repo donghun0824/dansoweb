@@ -3,27 +3,37 @@
    기반: 랜딩 페이지 스타일 + 기존 대시보드 기능
 ========================================= */
 
-/* 1. 핵심 디자인 변수 선언 (랜딩 페이지 통일) */
+/* 1. 핵심 디자인 변수 선언 (화이트 글래스 테마) */
 :root {
-    /* [Color Palette] 랜딩 페이지와 정확히 일치 */
-    --bg-deep-navy: #0A0F1F;       /* 메인 배경색 */
-    --neon-green: #8BFFB0;         /* 핵심 강조/글로우 색상 */
-    --neon-blue: #8BFFB0;     /* 보조 강조 색상 */
+    /* [Background] 배경은 우주색 유지 */
+    --bg-deep-navy: #0A0F1F;
     
-    --text-bright: #FFFFFF;        /* 기본 텍스트 */
-    --text-muted: #94A3B8;         /* 보조 텍스트 */
+    /* [Card] 완전한 흰색 유리 스타일 (투명도 95%) */
+    --glass-bg: rgba(255, 255, 255, 0.95); 
     
-    /* [Glassmorphism] 유리 카드 스타일 정의 */
-    --glass-bg: rgba(255, 255, 255, 0.03); /* 매우 투명한 유리 배경 */
-    --glass-border: rgba(255, 255, 255, 0.15); /* 얇고 밝은 테두리 */
-    --glass-blur: blur(30px); /* 강력한 배경 블러 효과 */
-    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.36); /* 깊이감을 주는 그림자 */
+    /* [Border] 흰색 카드에 어울리는 연한 회색 테두리 */
+    --glass-border: rgba(255, 255, 255, 0.8);
     
-    /* [UI Elements] */
-    --card-radius: 24px; /* 더 둥글고 현대적인 모서리 */
+    /* [Text] 흰색 카드 안에서는 '검은색' 글씨를 써야 함 */
+    --text-main: #1a1a1a;   /* 제목용 진한 검정 */
+    --text-sub: #555555;    /* 설명용 진회색 */
+    --text-bright: #FFFFFF; /* (배경 위 로고 등) 흰색 텍스트 유지용 */
+    
+    /* [Shadow] 흰색 카드를 띄워줄 부드러운 그림자 */
+    --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    
+    /* [Blur] 배경이 거의 안 보이므로 블러는 약하게 */
+    --glass-blur: blur(10px);
+    
+    /* [Neon] 네온 포인트 컬러 유지 */
+    --neon-green: #00E396;
+    --neon-blue: #8BFFB0;
+    
+    /* [UI] */
+    --card-radius: 24px;
     --btn-radius: 12px;
     
-    /* [Fonts] Outfit을 메인으로 사용하여 넓고 현대적인 느낌 강조 */
+    /* [Fonts] */
     --font-main: 'Outfit', 'Inter', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
 }
@@ -78,17 +88,39 @@ h2 {
 /* =========================================
    [핵심 컴포넌트] Glass Card 재정의
 ========================================= */
+/* [수정] 화이트 글래스 카드 스타일 */
 .glass-card {
-    background: var(--glass-bg) !important; /* 기존 색상 덮어쓰기 */
+    background: var(--glass-bg) !important; /* 흰색 배경 적용 */
     box-shadow: var(--glass-shadow);
     backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur); /* Safari 지원 */
-    border: 1px solid var(--glass-border);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid rgba(0,0,0,0.05); /* 테두리를 아주 연한 회색으로 */
     border-radius: var(--card-radius);
     padding: 30px;
+    
+    /* [중요] 카드 내부의 모든 글씨를 검정색으로 변경 */
+    color: var(--text-main); 
+    
     transition: all 0.3s ease;
-    position: relative;
-    overflow: hidden;
+}
+
+/* [추가] 카드 내부의 제목들이 흰색으로 상속되지 않도록 강제 설정 */
+.glass-card h1, 
+.glass-card h2, 
+.glass-card h3, 
+.glass-card h4, 
+.glass-card p, 
+.glass-card span {
+    color: var(--text-main); /* 검정색 */
+}
+
+/* [추가] 카드 내부의 아이콘과 보조 텍스트 색상 */
+.glass-card i.fas {
+    color: var(--neon-green); /* 아이콘은 네온색 유지 */
+}
+.glass-card .description,
+.glass-card .unit {
+    color: var(--text-sub); /* 설명은 진회색 */
 }
 
 /* 카드 호버 효과: 네온 테두리와 빛 번짐 */
