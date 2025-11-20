@@ -1,189 +1,375 @@
-/* static/css/style.css - (Unified Sci-Fi Dashboard Theme) */
+/* --- (Unified v4.0) Final Merged Style: Functionality + Sci-Fi Design --- */
 
-/* 1. 폰트 및 변수 설정 */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;700&display=swap');
+/* 1. 폰트 및 기본 변수 설정 (랜딩 페이지와 통일) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
 
 :root {
-    /* Palette - Landing Page와 100% 일치 */
-    --bg-deep-space: #0A0F1F;
-    --neon-green: #8BFFB0;
-    --neon-cyan: #4C9FFF;
-    --text-main: #ffffff;
-    --text-muted: #94a3b8;
+    /* [NEW] 다크 네온 테마 팔레트 */
+    --bg-deep-space: #05070a;     /* 배경: 깊은 우주색 */
+    --bg-glass: rgba(13, 18, 30, 0.75); /* 카드: 반투명 어두운 유리 */
+    --bg-glass-hover: rgba(255, 255, 255, 0.05);
     
-    /* Glassmorphism Tokens */
-    --glass-bg: rgba(255, 255, 255, 0.03);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-highlight: rgba(255, 255, 255, 0.15);
-    --glass-blur: blur(24px);
+    --border-glass: rgba(255, 255, 255, 0.1); /* 유리 테두리 */
+    --border-highlight: rgba(255, 255, 255, 0.2); /* 상단 빛 반사 */
+
+    --neon-green: #00ff9d;  /* 강조: 네온 그린 */
+    --neon-cyan: #00e0ff;   /* 강조: 네온 시안 */
+    --neon-red: #ff4d4d;    /* 강조: 네온 레드 */
+
+    --text-primary: #ffffff;      /* 본문: 흰색 */
+    --text-secondary: #94a3b8;    /* 부가: 회색 */
+    --text-tertiary: #64748b;     /* 흐린: 진회색 */
+
+    /* 기존 기능 유지를 위한 레이아웃 변수 */
+    --radius-main: 20px;
+    --radius-sub: 12px;
+    --radius-full: 50px;
     
-    /* Spacing & Radius */
-    --radius-card: 24px;
-    --radius-btn: 12px;
+    --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.5);
+    --shadow-neon: 0 0 15px rgba(0, 255, 157, 0.2);
+    
+    --font-primary: 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
 }
 
-/* 2. 기본 레이아웃 */
+/* 2. 기본 바디 & 배경 (캔버스 대응) */
 body {
+    font-family: var(--font-primary);
+    line-height: 1.6;
     margin: 0;
     padding: 0;
-    font-family: 'Inter', sans-serif;
-    background-color: var(--bg-deep-space);
-    color: var(--text-main);
+    background-color: var(--bg-deep-space); /* 배경색 변경 */
+    color: var(--text-primary);
     overflow-x: hidden;
-    min-height: 100vh;
 }
 
-/* 배경 캔버스 (가장 뒤) */
-#dashboard-canvas {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    z-index: -1;
-    background: radial-gradient(circle at 50% -20%, #1a233a 0%, #0A0F1F 80%);
+/* 배경 캔버스 스타일 (JS 연동용) */
+#dashboardCanvas {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    z-index: -1; 
+    background-color: var(--bg-deep-space);
 }
 
-/* 메인 래퍼 */
-.dashboard-wrapper {
-    max-width: 1400px;
+/* 레이아웃 컨테이너 (사이드바 제거 버전) */
+.main-container {
+    max-width: 1200px; /* 넓이 확장 */
     margin: 0 auto;
     padding: 40px 24px;
     position: relative;
     z-index: 1;
 }
 
-/* 3. 타이포그래피 */
-h1, h2, h3 {
-    font-family: 'Outfit', sans-serif; /* SF 느낌의 헤드라인 폰트 */
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin-top: 0;
+/* 로고 스타일 */
+.app-logo {
+    margin-bottom: 30px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border-glass);
+    text-align: center; /* 중앙 정렬 */
 }
-
-h2 {
-    font-size: 1.5rem;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-h2::before {
-    content: '';
-    display: block;
-    width: 4px; height: 24px;
-    background: var(--neon-green);
-    box-shadow: 0 0 10px var(--neon-green);
-    border-radius: 2px;
-}
-
-/* 4. Glass Card (핵심 디자인 요소) */
-.glass-card {
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    border-top: 1px solid var(--glass-highlight); /* 상단 빛 반사 */
-    border-radius: var(--radius-card);
-    padding: 32px;
-    margin-bottom: 32px;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
-    transition: transform 0.3s ease, border-color 0.3s ease;
-}
-
-.glass-card:hover {
-    transform: translateY(-5px);
-    border-color: rgba(139, 255, 176, 0.3); /* 호버 시 네온 그린 틴트 */
-}
-
-/* 5. Components: Buttons */
-.btn-neon {
-    background: linear-gradient(135deg, var(--neon-green), #4ade80);
-    color: #05070a; /* 어두운 텍스트로 가독성 확보 */
-    font-weight: 700;
-    padding: 12px 24px;
-    border-radius: var(--radius-btn);
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 0 15px rgba(139, 255, 176, 0.4);
-    transition: all 0.2s ease;
-    display: inline-flex; align-items: center; gap: 8px;
-}
-
-.btn-neon:hover {
-    filter: brightness(1.1);
-    transform: scale(1.02);
-    box-shadow: 0 0 25px rgba(139, 255, 176, 0.6);
-}
-
-/* 6. Components: Inputs */
-input, textarea {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-btn);
-    padding: 14px;
-    color: white;
-    font-family: 'Inter', sans-serif;
-    width: 100%;
-    box-sizing: border-box;
-    transition: border-color 0.3s;
-}
-
-input:focus, textarea:focus {
-    outline: none;
-    border-color: var(--neon-green);
-    box-shadow: 0 0 10px rgba(139, 255, 176, 0.1);
-}
-
-/* 7. Data Elements (Scanner Tags) */
-.ticker-tag {
+.app-logo img {
+    max-width: 140px;
+    height: auto;
     display: inline-block;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--glass-border);
-    padding: 8px 16px;
-    border-radius: 50px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.9rem;
-    color: var(--text-main);
-    margin-right: 8px; margin-bottom: 8px;
-    transition: all 0.2s;
-}
-.ticker-tag:hover {
-    background: rgba(139, 255, 176, 0.1);
-    border-color: var(--neon-green);
-    color: var(--neon-green);
-    box-shadow: 0 0 10px rgba(139, 255, 176, 0.2);
 }
 
-/* 8. Signal Feed Items */
-.signal-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px;
-    border-bottom: 1px solid var(--glass-border);
-    transition: background 0.2s;
-}
-.signal-item:last-child { border-bottom: none; }
-.signal-item:hover { background: rgba(255, 255, 255, 0.02); }
-
-.signal-ticker { font-size: 1.2rem; font-weight: 700; font-family: 'Outfit', sans-serif; }
-.signal-meta { font-size: 0.9rem; color: var(--text-muted); }
-.signal-score {
-    font-family: 'JetBrains Mono', monospace;
+/* 헤딩 스타일 */
+h1, h2 {
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-glass);
+    padding-bottom: 12px;
     font-weight: 700;
-    color: var(--neon-green);
-    text-shadow: 0 0 8px rgba(139, 255, 176, 0.5);
 }
+h1 { font-size: 28px; }
+h2 { font-size: 1.5rem; margin-top: 40px; }
 
-/* 9. Header & Scrolling Bar */
-.dashboard-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 40px;
+
+/* --- [기존 기능 보존 1] 스크롤링 티커 바 --- */
+@keyframes scroll-left {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); } 
 }
 .scrolling-bar-container {
-    background: rgba(10, 15, 31, 0.8);
-    border-bottom: 1px solid var(--glass-border);
-    height: 40px; width: 100%;
-    display: flex; align-items: center; overflow: hidden;
+    width: 100%;
+    background-color: rgba(13, 18, 30, 0.9); /* 다크 배경 */
+    border-bottom: 1px solid var(--border-glass);
+    backdrop-filter: blur(10px);
+    padding: 10px 0;
+    overflow: hidden;      
+    white-space: nowrap;
+    position: sticky; top: 0; z-index: 100; /* 상단 고정 */
 }
-/* (스크롤 애니메이션은 기존 유지) */
+.scrolling-bar-track {
+    display: inline-block; 
+    animation: scroll-left 60s linear infinite; 
+}
+.scrolling-bar-container:hover .scrolling-bar-track {
+    animation-play-state: paused; 
+}
+.scroll-item {
+    display: inline-block; 
+    padding: 0 20px;
+    font-size: 14px;
+    font-weight: 500; 
+    font-family: var(--font-mono); 
+    border-right: 1px solid var(--border-glass);
+}
+.scroll-item .name { color: var(--text-secondary); margin-right: 10px; }
+.scroll-item .value { color: var(--text-primary); margin-right: 6px; }
+/* 색상 변경: 네온 테마 적용 */
+.scroll-item .change-positive { color: var(--neon-green); }
+.scroll-item .change-negative { color: var(--neon-red); }
+.scroll-item .change-zero { color: var(--text-secondary); }
+
+
+/* --- [기존 기능 보존 2] 상태 카드 (Scanner Status) --- */
+.status-card {
+    background-color: var(--bg-glass); /* 글래스 적용 */
+    backdrop-filter: blur(16px);
+    padding: 24px;
+    border-radius: var(--radius-main); 
+    border: 1px solid var(--border-glass);
+    border-top: 1px solid var(--border-highlight);
+    box-shadow: var(--shadow-card); 
+    margin-bottom: 30px;
+}
+.status-card h2 { border-bottom-color: var(--border-glass); }
+.status-card .sidebar-h2 {
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-glass);
+}
+.status-header {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; color: var(--text-secondary);
+}
+/* 강조 텍스트를 네온 시안으로 변경 */
+.status-header div:first-child { 
+    font-weight: 600; 
+    color: var(--neon-cyan); 
+    font-family: var(--font-mono);
+    font-size: 15px; 
+}
+.status-header .timer { color: var(--text-primary); font-family: var(--font-mono); }
+
+/* 티커 리스트 태그 스타일 */
+.ticker-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.ticker-list span {
+    background-color: rgba(255, 255, 255, 0.05); /* 반투명 흰색 */
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    border-radius: var(--radius-full);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    transition: all 0.2s ease;
+    border: 1px solid var(--border-glass);
+    cursor: pointer;
+}
+.ticker-list span:hover { 
+    background-color: rgba(0, 255, 157, 0.1); 
+    border-color: var(--neon-green);
+    color: var(--neon-green);
+    box-shadow: var(--shadow-neon);
+}
+.ticker-list span.new-ticker {
+    background-color: rgba(0, 224, 255, 0.1);
+    color: var(--neon-cyan);
+    border-color: var(--neon-cyan);
+}
+
+
+/* --- [기존 기능 보존 3] 신호 피드 (Signal Feed) --- */
+.signal-feed { display: flex; flex-direction: column; gap: 15px; }
+
+.signal-card {
+    background-color: var(--bg-glass);
+    border-radius: var(--radius-main); 
+    border: 1px solid var(--border-glass); 
+    box-shadow: var(--shadow-card);
+    display: flex; align-items: center; padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.signal-card:hover {
+    border-color: var(--neon-green); 
+    background-color: var(--bg-glass-hover);
+    transform: translateX(5px);
+}
+
+/* 아이콘 래퍼 (배경색 제거하고 네온 테두리로 변경) */
+.signal-icon-wrapper {
+    flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    margin-right: 20px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border-glass);
+}
+.signal-icon-wrapper svg { width: 22px; height: 22px; }
+
+/* 색상 매핑 */
+.signal-card.signal .signal-icon-wrapper { color: var(--neon-green); border-color: var(--neon-green); box-shadow: 0 0 10px rgba(0,255,157,0.2); }
+.signal-card.recommendation .signal-icon-wrapper { color: var(--neon-cyan); border-color: var(--neon-cyan); box-shadow: 0 0 10px rgba(0,224,255,0.2); }
+
+.signal-card .info { flex-grow: 1; display: flex; flex-direction: column; gap: 6px; }
+.signal-card .ticker {
+    font-size: 1.2rem; font-weight: 700; 
+    color: var(--text-primary); font-family: var(--font-primary); 
+}
+
+/* 옵션 라벨 (Pill shape) */
+.signal-card .option-label {
+    font-size: 10px; font-weight: 700; margin-left: 10px;
+    padding: 3px 8px; border-radius: 4px; text-transform: uppercase;
+}
+.signal-card.signal .option-label { background: rgba(0, 255, 157, 0.15); color: var(--neon-green); }
+.signal-card.recommendation .option-label { background: rgba(0, 224, 255, 0.15); color: var(--neon-cyan); }
+
+.signal-card .price { font-size: 15px; color: var(--text-secondary); font-family: var(--font-mono); }
+
+/* AI Score 스타일 */
+.signal-details { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.ai-score {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+    color: var(--neon-green);
+    text-shadow: 0 0 5px rgba(0,255,157,0.3);
+}
+.ai-score svg { width: 16px; height: 16px; color: var(--neon-green); }
+
+.signal-card .time {
+    font-size: 12px; color: var(--text-tertiary); 
+    text-align: right; min-width: 100px; font-family: var(--font-mono);
+}
+.empty-state {
+    background-color: var(--bg-glass);
+    border: 1px dashed var(--border-glass);
+    color: var(--text-secondary);
+    border-radius: var(--radius-main);
+    padding: 40px; text-align: center;
+}
+
+
+/* --- [기존 기능 보존 4] 모달 (Popup) --- */
+/* 여기는 랜딩 페이지 느낌과 동일하게 Dark Glass로 변경 */
+.modal-overlay {
+    display: none; position: fixed; z-index: 2000; left: 0; top: 0;
+    width: 100%; height: 100%; overflow: auto;
+    background-color: rgba(0,0,0,0.8); /* 더 어둡게 */
+    backdrop-filter: blur(8px);
+}
+.modal-content {
+    background-color: #0f1522; /* 짙은 남색 솔리드 배경 (가독성 위함) */
+    margin: 5% auto; padding: 0;
+    border: 1px solid var(--border-glass); 
+    width: 90%; max-width: 700px;
+    border-radius: var(--radius-main); 
+    box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+    color: var(--text-primary);
+}
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border-glass); 
+    padding: 20px 24px;
+    background: rgba(255,255,255,0.02);
+}
+.close-button { color: var(--text-secondary); font-size: 28px; transition: color 0.2s; }
+.close-button:hover { color: var(--text-primary); }
+
+.modal-tabs { display: flex; border-bottom: 1px solid var(--border-glass); background-color: transparent; }
+.tab-button {
+    padding: 16px 20px; cursor: pointer; border: none; background: none;
+    font-size: 15px; font-weight: 600; color: var(--text-secondary);
+    border-bottom: 2px solid transparent; transition: all 0.2s; flex: 1;
+}
+.tab-button.active { 
+    color: var(--neon-cyan); border-bottom-color: var(--neon-cyan); 
+    background: rgba(0, 224, 255, 0.05);
+}
+
+.modal-body { padding: 24px; font-size: 15px; } 
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.company-details h3 { color: var(--text-primary); font-weight: 700; }
+.company-details .industry { color: var(--text-secondary); }
+.quote-line { border-bottom: 1px solid var(--border-glass); }
+.quote-line span:first-child { color: var(--text-secondary); }
+.quote-line span:last-child { color: var(--neon-green); font-family: var(--font-mono); }
+#chart-container { width: 100%; height: 350px; } /* 차트 라이브러리 대응 */
+
+
+/* --- [기존 기능 보존 5] 커뮤니티 섹션 --- */
+.community-section {
+    background-color: var(--bg-glass);
+    padding: 24px; border-radius: var(--radius-main); 
+    border: 1px solid var(--border-glass);
+    margin-top: 40px;
+}
+#post-form { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+#post-form input, #post-form textarea {
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sub); 
+    padding: 12px 16px;
+    font-size: 15px; color: white;
+    transition: border-color 0.2s;
+}
+#post-form input:focus, #post-form textarea:focus {
+    outline: none; border-color: var(--neon-green);
+}
+#post-form button {
+    border: none; background: linear-gradient(135deg, var(--neon-green), #00c853);
+    color: #05070a; font-weight: 700; padding: 10px 24px;
+    border-radius: var(--radius-sub); cursor: pointer;
+}
+
+.post-feed { margin-top: 25px; display: flex; flex-direction: column; gap: 15px; max-height: 400px; overflow-y: auto; }
+.post-card {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sub); padding: 16px;
+}
+.post-card-header .author { color: var(--neon-cyan); font-weight: 600; }
+.post-card-content { color: var(--text-primary); margin-top: 6px; }
+
+
+/* --- [기존 기능 보존 6] 설정 카드 & 알림 버튼 --- */
+/* Notification Settings Card (Dark Glass) */
+.settings-card {
+    background-color: var(--bg-glass);
+    border-radius: var(--radius-main);
+    border: 1px solid var(--border-glass);
+    padding: 24px; margin-bottom: 20px;
+    box-shadow: var(--shadow-card);
+}
+.settings-card .card-header h3 { color: var(--neon-green); font-size: 16px; margin: 0; }
+.settings-body .description { font-size: 14px; color: var(--text-secondary); margin-bottom: 15px; }
+
+#min-score-input {
+    background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border-glass);
+    color: var(--neon-green); font-weight: 700; text-align: center;
+    padding: 8px; border-radius: 8px; width: 60px;
+}
+#save-score-btn {
+    background-color: var(--neon-cyan); color: #05070a; font-weight: 700;
+    padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; margin-left: 10px;
+}
+
+/* Notification Toggle Button (Pill Shape, Glowing) */
+.notification-button {
+    background-color: rgba(255, 255, 255, 0.05); 
+    color: var(--text-primary); 
+    padding: 10px 24px; 
+    border: 1px solid var(--border-glass); 
+    border-radius: var(--radius-full);
+    font-family: var(--font-primary);
+    font-weight: 600; font-size: 15px; 
+    cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 10px; 
+    transition: all 0.2s ease;
+}
+.notification-button:hover {
+    background-color: rgba(255, 255, 255, 0.1); 
+    border-color: var(--neon-green);
+    box-shadow: 0 0 15px rgba(0, 255, 157, 0.3);
+    transform: translateY(-1px);
+}
+.notification-button i.fas { color: var(--neon-green); }
