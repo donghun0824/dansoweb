@@ -10,13 +10,9 @@
     <title>Danso AI - AI Powered Scalping Signals</title>
 
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
-    
     <link rel="manifest" href="/manifest.json">
-    
     <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
-    
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
-    
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -25,79 +21,84 @@
 </head>
 <body>
 
-    <div id="video-container">
-        <video id="intro-video" 
-               src="{{ url_for('static', filename='videos/danso_promo.mp4') }}" 
-               autoplay 
-               muted 
-               playsinline>
-        </video>
-    </div>
+    <canvas id="heroCanvas"></canvas>
 
-    <div id="main-content">
-        
-        <header class="landing-header landing-container">
-            <div class="header-logo">
-                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
-            </div>
-            <nav class="header-nav">
-                 <a href="/login" class="nav-button secondary">Login</a> 
-                 <a href="/signup" class="nav-button primary">Sign Up</a> 
-            </nav>
-        </header>
+    <div class="content-wrapper">
 
-        <section class="hero-section landing-container">
-            <div class="hero-content">
-                <span class="hero-subtitle-text">HERO SECTION</span>
-                <h1 class="hero-title">Danso AI -<br>AI Powered Scalping Signals</h1>
-                <p class="hero-description">The AI watcher monitors the market for high-probability signals, so you don't have to.</p>
-                <div class="hero-cta-buttons">
-                    <a href="/dashboard" class="cta-button primary">Access Dashboard</a>
-                    <a href="#features" class="cta-button secondary">Learn More</a>
-                </div>
-            </div>
+        <div id="video-container">
+            <video id="intro-video" 
+                   src="{{ url_for('static', filename='videos/danso_promo.mp4') }}" 
+                   autoplay 
+                   muted 
+                   playsinline>
+            </video>
+        </div>
+
+        <div id="main-content">
             
-            <div class="hero-feed-vertical">
-                <h3 class="widget-title">Live Top Gainers</h3>
-                <div class="vertical-scroll-container">
-                    <div id="vertical-ticker-list">
-                        <p class_="loading-text">Loading signals...</p>
+            <header class="landing-header landing-container">
+                <div class="header-logo">
+                    <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
+                </div>
+                <nav class="header-nav">
+                     <a href="/login" class="nav-button secondary">Login</a> 
+                     <a href="/signup" class="nav-button primary">Sign Up</a> 
+                </nav>
+            </header>
+
+            <section class="hero-section landing-container">
+                <div class="hero-content">
+                    <span class="hero-subtitle-text">HERO SECTION</span>
+                    <h1 class="hero-title">Danso AI -<br>AI Powered Scalping Signals</h1>
+                    <p class="hero-description">The AI watcher monitors the market for high-probability signals, so you don't have to.</p>
+                    <div class="hero-cta-buttons">
+                        <a href="/dashboard" class="cta-button primary">Access Dashboard</a>
+                        <a href="#features" class="cta-button secondary">Learn More</a>
                     </div>
                 </div>
-            </div>
-        </section>
-
-        <div class="lower-content-wrapper">
-
-            <section class="features-section landing-container" id="features">
-                <h2 class="section-title">Why Danso?</h2>
-                <div class="features-grid">
-                    
-                    <div class="feature-card">
-                        <span class="hero-subtitle-text">AI-DRIVEN WATCHER</span>
-                        <h3>AI-Driven Watcher</h3>
-                        <p>Our core AI ("The Watcher") filters market noise to find high-probability scalping opportunities (Pattern A/B).</p>
+                
+                <div class="hero-feed-vertical">
+                    <h3 class="widget-title">Live Top Gainers</h3>
+                    <div class="vertical-scroll-container">
+                        <div id="vertical-ticker-list">
+                            <p class_="loading-text">Loading signals...</p>
+                        </div>
                     </div>
-                    
-                    <div class="feature-card">
-                        <span class="hero-subtitle-text">REAL-TIME SIGNALS</span>
-                        <h3>Real-Time Signals</h3>
-                        <p>No delays. Get instant push notifications the moment a high-probability signal is detected by the engine.</p>
-                    </div>
-                    
-                    <div class="feature-card">
-                        <span class="hero-subtitle-text">COMMUNITY INSIGHTS</span>
-                        <h3>Community Insights</h3>
-                        <p>Share feedback, discuss signals, and grow with a community of traders all focused on the same goal.</p>
-                    </div>
-
                 </div>
             </section>
-            
-            <footer class="landing-footer landing-container">
-                <p>© 2025 Danso. All rights reserved.</p>
-            </footer>
 
+            <div class="lower-content-wrapper">
+
+                <section class="features-section landing-container" id="features">
+                    <h2 class="section-title">Why Danso?</h2>
+                    <div class="features-grid">
+                        
+                        <div class="feature-card">
+                            <span class="hero-subtitle-text">AI-DRIVEN WATCHER</span>
+                            <h3>AI-Driven Watcher</h3>
+                            <p>Our core AI ("The Watcher") filters market noise to find high-probability scalping opportunities (Pattern A/B).</p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <span class="hero-subtitle-text">REAL-TIME SIGNALS</span>
+                            <h3>Real-Time Signals</h3>
+                            <p>No delays. Get instant push notifications the moment a high-probability signal is detected by the engine.</p>
+                        </div>
+                        
+                        <div class="feature-card">
+                            <span class="hero-subtitle-text">COMMUNITY INSIGHTS</span>
+                            <h3>Community Insights</h3>
+                            <p>Share feedback, discuss signals, and grow with a community of traders all focused on the same goal.</p>
+                        </div>
+
+                    </div>
+                </section>
+                
+                <footer class="landing-footer landing-container">
+                    <p>© 2025 Danso. All rights reserved.</p>
+                </footer>
+
+            </div> 
         </div> </div> <script>
         document.addEventListener('DOMContentLoaded', (event) => {
             const videoContainer = document.getElementById('video-container');
@@ -108,28 +109,23 @@
                 if (!mainContent.classList.contains('visible')) {
                     videoContainer.classList.add('fade-out');
                     mainContent.classList.add('visible');
-                    document.body.style.overflowY = 'auto'; // 스크롤바 다시 보이기
-                    loadVerticalTicker(); // (중요!) 메인 콘텐츠가 보일 때 API 호출
+                    document.body.style.overflowY = 'auto'; 
+                    loadVerticalTicker(); 
                 }
             }
 
             video.onended = () => { showMainContent(); };
             video.onerror = () => { showMainContent(); };
-            setTimeout(() => { showMainContent(); }, 4000); // 6초 후 강제 실행
+            setTimeout(() => { showMainContent(); }, 4000); 
 
-            // (NEW) /api/market_overview를 호출해서 세로 스크롤 박스를 채우는 함수
             function loadVerticalTicker() {
                 const list = document.getElementById('vertical-ticker-list');
                 fetch('/api/market_overview')
                     .then(response => response.json())
                     .then(data => {
                         if (data.status === 'OK' && data.gainers && data.gainers.length > 0) {
-                            list.innerHTML = ''; // "Loading" 제거
-                            
-                            // (API 응답에서 상위 15개만 사용)
+                            list.innerHTML = ''; 
                             const gainers = data.gainers.slice(0, 15);
-                            
-                            // (무한 스크롤을 위해 리스트를 복제)
                             const fullList = [...gainers, ...gainers]; 
                             
                             fullList.forEach(ticker => {
@@ -139,7 +135,6 @@
                                 const change = ticker.todaysChangePerc || 0;
                                 const changeVal = parseFloat(change).toFixed(2);
                                 
-                                // (style.css의 변수를 사용하기 위해 클래스 이름 변경)
                                 let changeClass = 'change-zero';
                                 if (change > 0) changeClass = 'change-positive';
                                 if (change < 0) changeClass = 'change-negative';
@@ -162,5 +157,7 @@
             }
         });
     </script>
+
+    <script src="{{ url_for('static', filename='js/landing.js') }}" defer></script>
 </body>
 </html>

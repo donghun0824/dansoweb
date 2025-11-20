@@ -1,0 +1,1 @@
+// static/js/landing.js - 다음 단계에서 여기에 코드를 작성합니다.

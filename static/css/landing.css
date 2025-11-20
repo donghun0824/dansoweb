@@ -298,7 +298,70 @@ body {
     padding-top: 60px;
     border-top: 1px solid var(--border-primary); 
 }
-/* (NEW) 👆 여기까지 추가 */
+/* static/css/landing.css */
 
+#heroCanvas {
+    position: fixed; /* 페이지 전체를 덮음 */
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0; /* 가장 뒤에 배치 */
+    background-color: #191f28; /* 어두운 배경색 */
+}
 
-/* --- (겉지 스타일 끝) --- */
+.content-wrapper {
+    position: relative; /* 캔버스 위에 배치 */
+    z-index: 1; /* 캔버스보다 앞에 배치 */
+    min-height: 100vh; /* 콘텐츠가 캔버스만큼 높이를 가지도록 */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center; /* 내용을 중앙에 배치 (선택 사항) */
+    color: white; /* 캔버스 위의 텍스트 색상 */
+}
+
+/* 기존 landing.html의 header, main 등도 필요에 따라 조정 */
+.content-wrapper header {
+    position: absolute; /* header를 content-wrapper 안에 독립적으로 배치 */
+    top: 0;
+    width: 100%;
+    padding: 20px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.content-wrapper .hero-section {
+    text-align: center;
+    padding-top: 100px; /* 헤더와 겹치지 않도록 조정 */
+}
+
+.content-wrapper h1 {
+    font-size: 3.5em; /* 폰트 크기 조정 */
+    margin-bottom: 20px;
+    font-weight: 700;
+}
+
+.content-wrapper p {
+    font-size: 1.2em;
+    margin-bottom: 30px;
+    max-width: 600px;
+    line-height: 1.6;
+}
+
+.content-wrapper .btn-primary-large {
+    display: inline-block;
+    padding: 15px 30px;
+    background-color: #007bff; /* 기존 버튼 색상 */
+    color: white;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 1.1em;
+    font-weight: 600;
+    transition: background-color 0.3s ease;
+}
+
+.content-wrapper .btn-primary-large:hover {
+    background-color: #0056b3;
+}
