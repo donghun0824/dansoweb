@@ -1,375 +1,314 @@
-/* --- (Unified v4.0) Final Merged Style: Functionality + Sci-Fi Design --- */
+/* =========================================
+   Danso Unified Design System (Sci-Fi Neon)
+   기반: 랜딩 페이지 스타일 + 기존 대시보드 기능
+========================================= */
 
-/* 1. 폰트 및 기본 변수 설정 (랜딩 페이지와 통일) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
-
+/* 1. 핵심 디자인 변수 선언 (랜딩 페이지 통일) */
 :root {
-    /* [NEW] 다크 네온 테마 팔레트 */
-    --bg-deep-space: #05070a;     /* 배경: 깊은 우주색 */
-    --bg-glass: rgba(13, 18, 30, 0.75); /* 카드: 반투명 어두운 유리 */
-    --bg-glass-hover: rgba(255, 255, 255, 0.05);
+    /* [Color Palette] 랜딩 페이지와 정확히 일치 */
+    --bg-deep-navy: #0A0F1F;       /* 메인 배경색 */
+    --neon-green: #8BFFB0;         /* 핵심 강조/글로우 색상 */
+    --neon-blue: #8BFFB0;     /* 보조 강조 색상 */
     
-    --border-glass: rgba(255, 255, 255, 0.1); /* 유리 테두리 */
-    --border-highlight: rgba(255, 255, 255, 0.2); /* 상단 빛 반사 */
-
-    --neon-green: #00ff9d;  /* 강조: 네온 그린 */
-    --neon-cyan: #00e0ff;   /* 강조: 네온 시안 */
-    --neon-red: #ff4d4d;    /* 강조: 네온 레드 */
-
-    --text-primary: #ffffff;      /* 본문: 흰색 */
-    --text-secondary: #94a3b8;    /* 부가: 회색 */
-    --text-tertiary: #64748b;     /* 흐린: 진회색 */
-
-    /* 기존 기능 유지를 위한 레이아웃 변수 */
-    --radius-main: 20px;
-    --radius-sub: 12px;
-    --radius-full: 50px;
+    --text-bright: #FFFFFF;        /* 기본 텍스트 */
+    --text-muted: #94A3B8;         /* 보조 텍스트 */
     
-    --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.5);
-    --shadow-neon: 0 0 15px rgba(0, 255, 157, 0.2);
+    /* [Glassmorphism] 유리 카드 스타일 정의 */
+    --glass-bg: rgba(255, 255, 255, 0.03); /* 매우 투명한 유리 배경 */
+    --glass-border: rgba(255, 255, 255, 0.15); /* 얇고 밝은 테두리 */
+    --glass-blur: blur(30px); /* 강력한 배경 블러 효과 */
+    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.36); /* 깊이감을 주는 그림자 */
     
-    --font-primary: 'Inter', sans-serif;
+    /* [UI Elements] */
+    --card-radius: 24px; /* 더 둥글고 현대적인 모서리 */
+    --btn-radius: 12px;
+    
+    /* [Fonts] Outfit을 메인으로 사용하여 넓고 현대적인 느낌 강조 */
+    --font-main: 'Outfit', 'Inter', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
 }
 
-/* 2. 기본 바디 & 배경 (캔버스 대응) */
+/* 2. 기본 설정 및 배경 */
 body {
-    font-family: var(--font-primary);
-    line-height: 1.6;
+    font-family: var(--font-main);
+    background-color: var(--bg-deep-navy);
+    /* JS 캔버스 로드 전 기본 배경 그래디언트 (랜딩 페이지 느낌) */
+    background-image: radial-gradient(circle at 50% 0%, rgba(76, 159, 255, 0.2) 0%, var(--bg-deep-navy) 60%);
+    color: var(--text-bright);
     margin: 0;
     padding: 0;
-    background-color: var(--bg-deep-space); /* 배경색 변경 */
-    color: var(--text-primary);
+    min-height: 100vh;
     overflow-x: hidden;
 }
 
-/* 배경 캔버스 스타일 (JS 연동용) */
+/* 배경 입자 애니메이션 캔버스 스타일 (JS 연동 필수) */
 #dashboardCanvas {
-    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-    z-index: -1; 
-    background-color: var(--bg-deep-space);
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1; /* 컨텐츠 뒤로 배치 */
+    pointer-events: none;
 }
 
-/* 레이아웃 컨테이너 (사이드바 제거 버전) */
-.main-container {
-    max-width: 1200px; /* 넓이 확장 */
+/* 메인 레이아웃 래퍼 */
+.wide-dashboard-wrapper {
+    max-width: 1400px;
     margin: 0 auto;
-    padding: 40px 24px;
+    padding: 40px 30px;
     position: relative;
     z-index: 1;
 }
 
-/* 로고 스타일 */
-.app-logo {
-    margin-bottom: 30px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid var(--border-glass);
-    text-align: center; /* 중앙 정렬 */
-}
-.app-logo img {
-    max-width: 140px;
-    height: auto;
-    display: inline-block;
-}
-
-/* 헤딩 스타일 */
-h1, h2 {
-    color: var(--text-primary);
-    border-bottom: 1px solid var(--border-glass);
-    padding-bottom: 12px;
+/* 헤딩 타이포그래피 */
+h1, h2, h3 {
     font-weight: 700;
+    letter-spacing: -0.02em;
 }
-h1 { font-size: 28px; }
-h2 { font-size: 1.5rem; margin-top: 40px; }
-
-
-/* --- [기존 기능 보존 1] 스크롤링 티커 바 --- */
-@keyframes scroll-left {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); } 
+h2 {
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    /* 아이콘 색상을 네온으로 강제 적용 */
+    & i { filter: drop-shadow(0 0 8px currentColor); }
 }
+
+/* =========================================
+   [핵심 컴포넌트] Glass Card 재정의
+========================================= */
+.glass-card {
+    background: var(--glass-bg) !important; /* 기존 색상 덮어쓰기 */
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur); /* Safari 지원 */
+    border: 1px solid var(--glass-border);
+    border-radius: var(--card-radius);
+    padding: 30px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 카드 호버 효과: 네온 테두리와 빛 번짐 */
+.glass-card:hover {
+    border-color: rgba(139, 255, 176, 0.5);
+    box-shadow: 0 0 25px rgba(139, 255, 176, 0.2), inset 0 0 20px rgba(139, 255, 176, 0.05);
+    transform: translateY(-2px);
+}
+
+/* =========================================
+   [UI 요소] 버튼 및 입력창
+========================================= */
+
+/* 네온 그라데이션 버튼 (랜딩 페이지 스타일) */
+.btn-neon {
+    background: linear-gradient(135deg, var(--neon-blue), var(--neon-green));
+    border: none;
+    border-radius: 30px; /* 둥근 캡슐형 */
+    padding: 12px 28px;
+    color: #000; /* 어두운 텍스트로 대비 강조 */
+    font-weight: 700;
+    font-family: var(--font-main);
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(139, 255, 176, 0.5); /* 강력한 글로우 */
+    transition: all 0.3s ease;
+    display: inline-flex; align-items: center; gap: 10px;
+}
+
+.btn-neon:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 30px rgba(139, 255, 176, 0.8);
+    filter: brightness(1.1);
+}
+
+/* 입력창 스타일 (투명한 유리 스타일) */
+input[type="text"], input[type="number"], textarea {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--btn-radius);
+    padding: 14px 20px;
+    color: var(--text-bright);
+    font-family: var(--font-main);
+    transition: all 0.3s ease;
+}
+input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--neon-green);
+    box-shadow: 0 0 15px rgba(139, 255, 176, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* =========================================
+   [섹션별 스타일]
+========================================= */
+
+/* 1. 헤더 (Header) */
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 30px;
+    margin-bottom: 30px;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+/* 2. 스크롤링 티커 바 (투명하게 변경하여 배경 투과) */
 .scrolling-bar-container {
     width: 100%;
-    background-color: rgba(13, 18, 30, 0.9); /* 다크 배경 */
-    border-bottom: 1px solid var(--border-glass);
+    background: rgba(10, 15, 31, 0.8); /* 배경색 반투명 적용 */
     backdrop-filter: blur(10px);
-    padding: 10px 0;
-    overflow: hidden;      
+    border-bottom: 1px solid var(--glass-border);
+    padding: 12px 0;
+    overflow: hidden;
     white-space: nowrap;
-    position: sticky; top: 0; z-index: 100; /* 상단 고정 */
+    position: sticky; top: 0; z-index: 100;
 }
-.scrolling-bar-track {
-    display: inline-block; 
-    animation: scroll-left 60s linear infinite; 
-}
-.scrolling-bar-container:hover .scrolling-bar-track {
-    animation-play-state: paused; 
-}
+.scrolling-bar-track { display: inline-block; animation: scroll-left 60s linear infinite; }
+@keyframes scroll-left { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
 .scroll-item {
-    display: inline-block; 
-    padding: 0 20px;
-    font-size: 14px;
-    font-weight: 500; 
-    font-family: var(--font-mono); 
-    border-right: 1px solid var(--border-glass);
+    display: inline-block; padding: 0 25px;
+    font-family: var(--font-mono); font-size: 14px;
+    border-right: 1px solid rgba(255,255,255,0.1);
 }
-.scroll-item .name { color: var(--text-secondary); margin-right: 10px; }
-.scroll-item .value { color: var(--text-primary); margin-right: 6px; }
-/* 색상 변경: 네온 테마 적용 */
-.scroll-item .change-positive { color: var(--neon-green); }
-.scroll-item .change-negative { color: var(--neon-red); }
-.scroll-item .change-zero { color: var(--text-secondary); }
+/* 티커 색상 네온화 */
+.scroll-item .name { color: var(--text-muted); }
+.scroll-item .change-positive { color: var(--neon-green); text-shadow: 0 0 5px rgba(139, 255, 176, 0.5); }
+.scroll-item .change-negative { color: #FF4D4D; text-shadow: 0 0 5px rgba(255, 77, 77, 0.5); }
 
 
-/* --- [기존 기능 보존 2] 상태 카드 (Scanner Status) --- */
-.status-card {
-    background-color: var(--bg-glass); /* 글래스 적용 */
-    backdrop-filter: blur(16px);
-    padding: 24px;
-    border-radius: var(--radius-main); 
-    border: 1px solid var(--border-glass);
-    border-top: 1px solid var(--border-highlight);
-    box-shadow: var(--shadow-card); 
-    margin-bottom: 30px;
+/* 3. 설정 카드 (Settings Card) */
+.settings-card .card-header { border-bottom: 1px solid var(--glass-border); padding-bottom: 20px; margin-bottom: 20px; }
+.settings-card h2 i { color: var(--neon-blue) !important; }
+#min-score-input {
+    font-family: var(--font-mono);
+    color: var(--neon-green);
+    font-weight: 700;
+    text-align: center;
+    font-size: 1.1rem;
 }
-.status-card h2 { border-bottom-color: var(--border-glass); }
-.status-card .sidebar-h2 {
-    color: var(--text-primary);
-    border-bottom: 1px solid var(--border-glass);
-}
+
+/* 4. 라이브 스캐너 (Live Scanner) */
+.status-card h2 i { color: var(--neon-green) !important; }
 .status-header {
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 14px; color: var(--text-secondary);
-}
-/* 강조 텍스트를 네온 시안으로 변경 */
-.status-header div:first-child { 
-    font-weight: 600; 
-    color: var(--neon-cyan); 
     font-family: var(--font-mono);
-    font-size: 15px; 
-}
-.status-header .timer { color: var(--text-primary); font-family: var(--font-mono); }
-
-/* 티커 리스트 태그 스타일 */
-.ticker-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
-.ticker-list span {
-    background-color: rgba(255, 255, 255, 0.05); /* 반투명 흰색 */
-    color: var(--text-secondary);
-    padding: 6px 14px;
-    border-radius: var(--radius-full);
-    font-size: 13px;
-    font-family: var(--font-mono);
-    transition: all 0.2s ease;
-    border: 1px solid var(--border-glass);
-    cursor: pointer;
-}
-.ticker-list span:hover { 
-    background-color: rgba(0, 255, 157, 0.1); 
-    border-color: var(--neon-green);
-    color: var(--neon-green);
-    box-shadow: var(--shadow-neon);
-}
-.ticker-list span.new-ticker {
-    background-color: rgba(0, 224, 255, 0.1);
-    color: var(--neon-cyan);
-    border-color: var(--neon-cyan);
-}
-
-
-/* --- [기존 기능 보존 3] 신호 피드 (Signal Feed) --- */
-.signal-feed { display: flex; flex-direction: column; gap: 15px; }
-
-.signal-card {
-    background-color: var(--bg-glass);
-    border-radius: var(--radius-main); 
-    border: 1px solid var(--border-glass); 
-    box-shadow: var(--shadow-card);
-    display: flex; align-items: center; padding: 20px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-.signal-card:hover {
-    border-color: var(--neon-green); 
-    background-color: var(--bg-glass-hover);
-    transform: translateX(5px);
-}
-
-/* 아이콘 래퍼 (배경색 제거하고 네온 테두리로 변경) */
-.signal-icon-wrapper {
-    flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    margin-right: 20px;
+    color: var(--text-muted);
     background: rgba(255,255,255,0.03);
-    border: 1px solid var(--border-glass);
+    padding: 15px;
+    border-radius: var(--btn-radius);
+    margin-bottom: 25px;
 }
-.signal-icon-wrapper svg { width: 22px; height: 22px; }
+#scan-status-text { color: var(--neon-green); font-weight: 700; }
 
-/* 색상 매핑 */
-.signal-card.signal .signal-icon-wrapper { color: var(--neon-green); border-color: var(--neon-green); box-shadow: 0 0 10px rgba(0,255,157,0.2); }
-.signal-card.recommendation .signal-icon-wrapper { color: var(--neon-cyan); border-color: var(--neon-cyan); box-shadow: 0 0 10px rgba(0,224,255,0.2); }
-
-.signal-card .info { flex-grow: 1; display: flex; flex-direction: column; gap: 6px; }
-.signal-card .ticker {
-    font-size: 1.2rem; font-weight: 700; 
-    color: var(--text-primary); font-family: var(--font-primary); 
-}
-
-/* 옵션 라벨 (Pill shape) */
-.signal-card .option-label {
-    font-size: 10px; font-weight: 700; margin-left: 10px;
-    padding: 3px 8px; border-radius: 4px; text-transform: uppercase;
-}
-.signal-card.signal .option-label { background: rgba(0, 255, 157, 0.15); color: var(--neon-green); }
-.signal-card.recommendation .option-label { background: rgba(0, 224, 255, 0.15); color: var(--neon-cyan); }
-
-.signal-card .price { font-size: 15px; color: var(--text-secondary); font-family: var(--font-mono); }
-
-/* AI Score 스타일 */
-.signal-details { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
-.ai-score {
-    display: flex; align-items: center; gap: 6px;
-    font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+/* 티커 태그: 빛나는 알약 형태로 변경 */
+.ticker-list { display: flex; flex-wrap: wrap; gap: 12px; }
+.ticker-tag {
+    background: rgba(139, 255, 176, 0.1);
+    border: 1px solid var(--neon-green);
     color: var(--neon-green);
-    text-shadow: 0 0 5px rgba(0,255,157,0.3);
+    padding: 8px 16px;
+    border-radius: 30px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 0 10px rgba(139, 255, 176, 0.2);
+    transition: all 0.2s;
+    cursor: default;
 }
-.ai-score svg { width: 16px; height: 16px; color: var(--neon-green); }
+.ticker-tag:hover {
+    background: var(--neon-green);
+    color: #000;
+    box-shadow: 0 0 20px rgba(139, 255, 176, 0.6);
+}
 
-.signal-card .time {
-    font-size: 12px; color: var(--text-tertiary); 
-    text-align: right; min-width: 100px; font-family: var(--font-mono);
+/* 5. 시그널 피드 (Signal Feed) */
+.signal-feed { display: flex; flex-direction: column; gap: 15px; }
+/* 피드 아이템을 얇은 유리 막대 형태로 디자인 */
+.signal-item {
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    padding: 15px 20px;
+    border-radius: var(--btn-radius);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+.signal-item:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: var(--neon-blue);
+}
+.signal-main { display: flex; align-items: center; gap: 15px; }
+.signal-ticker { font-weight: 700; font-size: 1.1rem; }
+.signal-score {
+    font-family: var(--font-mono);
+    color: var(--neon-green);
+    font-weight: 700;
+    text-shadow: 0 0 8px var(--neon-green);
 }
 .empty-state {
-    background-color: var(--bg-glass);
-    border: 1px dashed var(--border-glass);
-    color: var(--text-secondary);
-    border-radius: var(--radius-main);
-    padding: 40px; text-align: center;
+    text-align: center; padding: 40px; color: var(--text-muted); font-style: italic;
+    background: rgba(255,255,255,0.02); border-radius: var(--btn-radius);
 }
 
+/* 6. 커뮤니티 인텔 (Community Intel) */
+.community-section h2 i { color: var(--neon-blue) !important; }
+/* 포스트 카드 디자인 */
+.post-card {
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 3px solid var(--neon-blue); /* 왼쪽 네온 액센트 */
+    padding: 15px 20px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+.post-author { color: var(--neon-blue); font-weight: 700; margin-bottom: 5px; font-size: 0.9rem;}
+.post-content { color: var(--text-bright); line-height: 1.5; }
+.post-time { font-size: 0.8rem; color: var(--text-muted); text-align: right; margin-top: 5px;}
 
-/* --- [기존 기능 보존 4] 모달 (Popup) --- */
-/* 여기는 랜딩 페이지 느낌과 동일하게 Dark Glass로 변경 */
+
+/* =========================================
+   [모달 팝업] (Modal)
+========================================= */
 .modal-overlay {
-    display: none; position: fixed; z-index: 2000; left: 0; top: 0;
-    width: 100%; height: 100%; overflow: auto;
-    background-color: rgba(0,0,0,0.8); /* 더 어둡게 */
-    backdrop-filter: blur(8px);
+    display: none; /* JS로 제어 */
+    position: fixed; z-index: 2000; left: 0; top: 0;
+    width: 100%; height: 100%;
+    background-color: rgba(0, 0, 0, 0.8); /* 배경을 더 어둡게 눌러줌 */
+    backdrop-filter: blur(15px);
 }
-.modal-content {
-    background-color: #0f1522; /* 짙은 남색 솔리드 배경 (가독성 위함) */
-    margin: 5% auto; padding: 0;
-    border: 1px solid var(--border-glass); 
-    width: 90%; max-width: 700px;
-    border-radius: var(--radius-main); 
-    box-shadow: 0 20px 50px rgba(0,0,0,0.7);
-    color: var(--text-primary);
+
+/* 모달 컨텐츠도 Glass Card 스타일 적용하되, 가독성을 위해 조금 더 불투명하게 */
+.modal-content.glass-card {
+    background: rgba(10, 15, 31, 0.9) !important; /* 더 진한 배경 */
+    margin: 5vh auto;
+    width: 90%; max-width: 800px;
+    padding: 0; /* 패딩 초기화 후 내부에서 재설정 */
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
 }
 .modal-header {
+    padding: 25px 30px;
+    border-bottom: 1px solid var(--glass-border);
     display: flex; justify-content: space-between; align-items: center;
-    border-bottom: 1px solid var(--border-glass); 
-    padding: 20px 24px;
-    background: rgba(255,255,255,0.02);
 }
-.close-button { color: var(--text-secondary); font-size: 28px; transition: color 0.2s; }
-.close-button:hover { color: var(--text-primary); }
+.close-button { color: var(--text-muted); font-size: 2rem; cursor: pointer; transition: color 0.2s;}
+.close-button:hover { color: var(--neon-green); }
 
-.modal-tabs { display: flex; border-bottom: 1px solid var(--border-glass); background-color: transparent; }
+/* 모달 탭 스타일링 */
+.modal-tabs { display: flex; border-bottom: 1px solid var(--glass-border); background: rgba(0,0,0,0.2); }
 .tab-button {
-    padding: 16px 20px; cursor: pointer; border: none; background: none;
-    font-size: 15px; font-weight: 600; color: var(--text-secondary);
-    border-bottom: 2px solid transparent; transition: all 0.2s; flex: 1;
+    flex: 1; padding: 15px; cursor: pointer;
+    background: none; border: none;
+    color: var(--text-muted); font-weight: 600; font-family: var(--font-main);
+    transition: all 0.3s;
+    border-bottom: 3px solid transparent;
 }
-.tab-button.active { 
-    color: var(--neon-cyan); border-bottom-color: var(--neon-cyan); 
-    background: rgba(0, 224, 255, 0.05);
+.tab-button.active {
+    color: var(--neon-green);
+    border-bottom-color: var(--neon-green);
+    background: rgba(139, 255, 176, 0.05);
+    text-shadow: 0 0 10px rgba(139, 255, 176, 0.3);
 }
-
-.modal-body { padding: 24px; font-size: 15px; } 
+.modal-body { padding: 30px; min-height: 400px; }
 .tab-content { display: none; }
-.tab-content.active { display: block; }
-
-.company-details h3 { color: var(--text-primary); font-weight: 700; }
-.company-details .industry { color: var(--text-secondary); }
-.quote-line { border-bottom: 1px solid var(--border-glass); }
-.quote-line span:first-child { color: var(--text-secondary); }
-.quote-line span:last-child { color: var(--neon-green); font-family: var(--font-mono); }
-#chart-container { width: 100%; height: 350px; } /* 차트 라이브러리 대응 */
-
-
-/* --- [기존 기능 보존 5] 커뮤니티 섹션 --- */
-.community-section {
-    background-color: var(--bg-glass);
-    padding: 24px; border-radius: var(--radius-main); 
-    border: 1px solid var(--border-glass);
-    margin-top: 40px;
-}
-#post-form { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
-#post-form input, #post-form textarea {
-    background-color: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border-glass);
-    border-radius: var(--radius-sub); 
-    padding: 12px 16px;
-    font-size: 15px; color: white;
-    transition: border-color 0.2s;
-}
-#post-form input:focus, #post-form textarea:focus {
-    outline: none; border-color: var(--neon-green);
-}
-#post-form button {
-    border: none; background: linear-gradient(135deg, var(--neon-green), #00c853);
-    color: #05070a; font-weight: 700; padding: 10px 24px;
-    border-radius: var(--radius-sub); cursor: pointer;
-}
-
-.post-feed { margin-top: 25px; display: flex; flex-direction: column; gap: 15px; max-height: 400px; overflow-y: auto; }
-.post-card {
-    background-color: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border-glass);
-    border-radius: var(--radius-sub); padding: 16px;
-}
-.post-card-header .author { color: var(--neon-cyan); font-weight: 600; }
-.post-card-content { color: var(--text-primary); margin-top: 6px; }
-
-
-/* --- [기존 기능 보존 6] 설정 카드 & 알림 버튼 --- */
-/* Notification Settings Card (Dark Glass) */
-.settings-card {
-    background-color: var(--bg-glass);
-    border-radius: var(--radius-main);
-    border: 1px solid var(--border-glass);
-    padding: 24px; margin-bottom: 20px;
-    box-shadow: var(--shadow-card);
-}
-.settings-card .card-header h3 { color: var(--neon-green); font-size: 16px; margin: 0; }
-.settings-body .description { font-size: 14px; color: var(--text-secondary); margin-bottom: 15px; }
-
-#min-score-input {
-    background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border-glass);
-    color: var(--neon-green); font-weight: 700; text-align: center;
-    padding: 8px; border-radius: 8px; width: 60px;
-}
-#save-score-btn {
-    background-color: var(--neon-cyan); color: #05070a; font-weight: 700;
-    padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; margin-left: 10px;
-}
-
-/* Notification Toggle Button (Pill Shape, Glowing) */
-.notification-button {
-    background-color: rgba(255, 255, 255, 0.05); 
-    color: var(--text-primary); 
-    padding: 10px 24px; 
-    border: 1px solid var(--border-glass); 
-    border-radius: var(--radius-full);
-    font-family: var(--font-primary);
-    font-weight: 600; font-size: 15px; 
-    cursor: pointer; text-decoration: none;
-    display: inline-flex; align-items: center; gap: 10px; 
-    transition: all 0.2s ease;
-}
-.notification-button:hover {
-    background-color: rgba(255, 255, 255, 0.1); 
-    border-color: var(--neon-green);
-    box-shadow: 0 0 15px rgba(0, 255, 157, 0.3);
-    transform: translateY(-1px);
-}
-.notification-button i.fas { color: var(--neon-green); }
+.tab-content.active { display: block; animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
