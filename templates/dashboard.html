@@ -31,12 +31,11 @@
     
     <div class="scrolling-bar-container">
         <div class="scrolling-bar-track" id="scrolling-bar-track">
-            </div>
+        </div>
     </div>
 
     <div class="main-container">
 
-       <div class="main-container">
         <button id="subscribe-btn" class="notification-button" 
             style="float: right; margin: 0 0 20px 0;">
             <i class="fas fa-bell"></i> Enable Notifications
@@ -44,6 +43,20 @@
         
         <div class="app-logo">
             <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="danso Logo">
+        </div>
+
+        <div class="card settings-card" style="margin-top: 15px; clear: both;">
+            <div class="card-header">
+                <h3>🔔 Notification Sensitivity</h3>
+            </div>
+            <div class="settings-body">
+                <p class="description">Only receive alerts with an AI Score <strong>above</strong> this threshold. (0 = Receive All)</p>
+                <div class="control-group">
+                    <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
+                    <span class="unit">or higher</span>
+                    <button id="save-score-btn" class="btn-primary">Save</button>
+                </div>
+            </div>
         </div>
         
         <div class="status-card">
@@ -98,19 +111,7 @@
             </div>
         </div>
     </div>
-<div class="card settings-card">
-    <div class="card-header">
-        <h3>🔔 Notification Sensitivity</h3>
-    </div>
-    <div class="settings-body">
-        <p class="description">Only receive alerts with an AI Score <strong>above</strong> this threshold. (0 = Receive All)</p>
-        <div class="control-group">
-            <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
-            <span class="unit">or higher</span>
-            <button id="save-score-btn" class="btn-primary">Save</button>
-        </div>
-    </div>
-</div>
+
     <script src="{{ url_for('static', filename='js/app.js') }}" type="module" defer></script>
 </body>
 </html>
