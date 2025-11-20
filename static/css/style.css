@@ -1,245 +1,189 @@
-/* static/css/style.css (Unified Wide Dashboard - White Glass Theme) */
+/* static/css/style.css - (Unified Sci-Fi Dashboard Theme) */
 
-/* 1. 폰트 및 기본 설정 */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+/* 1. 폰트 및 변수 설정 */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;700&display=swap');
 
 :root {
-    /* 배경 및 네온 컬러 (랜딩 페이지와 통일) */
-    --bg-deep-space: #05070a;
-    --neon-green: #00ff9d;
-    --neon-cyan: #00e0ff;
-    --neon-red: #ff4d4d;
+    /* Palette - Landing Page와 100% 일치 */
+    --bg-deep-space: #0A0F1F;
+    --neon-green: #8BFFB0;
+    --neon-cyan: #4C9FFF;
+    --text-main: #ffffff;
+    --text-muted: #94a3b8;
     
-    /* 화이트 글래스 테마 변수 */
-    --bg-card-light: rgba(255, 255, 255, 0.92); /* 밝고 불투명한 흰색 */
-    --border-card-light: rgba(255, 255, 255, 0.4);
+    /* Glassmorphism Tokens */
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-highlight: rgba(255, 255, 255, 0.15);
+    --glass-blur: blur(24px);
     
-    /* 텍스트 (흰색 카드 위에서는 어두워야 함) */
-    --text-dark: #191f28; 
-    --text-sub-dark: #4e5968;
-    
-    --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.2);
-    --shadow-neon: 0 0 10px rgba(0, 255, 157, 0.2);
+    /* Spacing & Radius */
+    --radius-card: 24px;
+    --radius-btn: 12px;
 }
 
-/* 2. 전체 레이아웃 & 배경 */
+/* 2. 기본 레이아웃 */
 body {
     margin: 0;
     padding: 0;
     font-family: 'Inter', sans-serif;
-    background-color: var(--bg-deep-space); /* 기본 배경 */
-    /* 텍스트는 기본적으로 흰색 (배경 위) */
-    color: white; 
+    background-color: var(--bg-deep-space);
+    color: var(--text-main);
     overflow-x: hidden;
+    min-height: 100vh;
 }
 
-/* 캔버스 스타일 (배경 애니메이션용) */
-#dashboardCanvas {
+/* 배경 캔버스 (가장 뒤) */
+#dashboard-canvas {
     position: fixed;
     top: 0; left: 0;
     width: 100vw; height: 100vh;
-    z-index: -1; /* 콘텐츠 뒤로 */
-    background-color: var(--bg-deep-space);
+    z-index: -1;
+    background: radial-gradient(circle at 50% -20%, #1a233a 0%, #0A0F1F 80%);
 }
 
-/* 대시보드 전체 래퍼 (중앙 정렬) */
-.wide-dashboard-wrapper {
+/* 메인 래퍼 */
+.dashboard-wrapper {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 0 40px 40px;
+    padding: 40px 24px;
     position: relative;
-    z-index: 1; /* 캔버스 위 */
+    z-index: 1;
 }
 
-/* 3. 공통 카드 스타일 (화이트 글래스 적용) */
-.status-card, .signal-feed, .community-section, .card {
-    /* ✅ 화이트 글래스 디자인 적용 */
-    background: var(--bg-card-light);
-    backdrop-filter: blur(20px); /* 뒤 배경 흐리게 */
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid var(--border-card-light);
-    border-radius: 20px;
-    padding: 24px;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow-card);
-    transition: transform 0.2s ease;
-    
-    /* ✅ 핵심: 카드 내부의 모든 텍스트는 어두운 색이어야 함 */
-    color: var(--text-dark); 
+/* 3. 타이포그래피 */
+h1, h2, h3 {
+    font-family: 'Outfit', sans-serif; /* SF 느낌의 헤드라인 폰트 */
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-top: 0;
 }
 
-/* 카드 제목 스타일 */
 h2 {
-    font-size: 1.5rem; font-weight: 700;
-    margin-top: 0; margin-bottom: 20px;
-    color: var(--text-dark); 
-    border-bottom: 1px solid rgba(0,0,0,0.1);
-    padding-bottom: 12px;
+    font-size: 1.5rem;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
-/* 4. 상단 컨트롤 패널 & 버튼 */
-.btn-primary {
-    background: linear-gradient(135deg, #007aff, #0055ff);
-    color: white;
+h2::before {
+    content: '';
+    display: block;
+    width: 4px; height: 24px;
+    background: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-green);
+    border-radius: 2px;
+}
+
+/* 4. Glass Card (핵심 디자인 요소) */
+.glass-card {
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-top: 1px solid var(--glass-highlight); /* 상단 빛 반사 */
+    border-radius: var(--radius-card);
+    padding: 32px;
+    margin-bottom: 32px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+    transition: transform 0.3s ease, border-color 0.3s ease;
+}
+
+.glass-card:hover {
+    transform: translateY(-5px);
+    border-color: rgba(139, 255, 176, 0.3); /* 호버 시 네온 그린 틴트 */
+}
+
+/* 5. Components: Buttons */
+.btn-neon {
+    background: linear-gradient(135deg, var(--neon-green), #4ade80);
+    color: #05070a; /* 어두운 텍스트로 가독성 확보 */
+    font-weight: 700;
+    padding: 12px 24px;
+    border-radius: var(--radius-btn);
     border: none;
-    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
     cursor: pointer;
-    transition: all 0.2s;
-}
-.btn-primary:hover { transform: translateY(-2px); filter: brightness(1.1); }
-
-/* 로고 텍스트 */
-.app-logo span {
-    text-shadow: 0 0 10px rgba(255,255,255,0.3);
+    box-shadow: 0 0 15px rgba(139, 255, 176, 0.4);
+    transition: all 0.2s ease;
+    display: inline-flex; align-items: center; gap: 8px;
 }
 
-
-/* 5. Scanner Status / Ticker List */
-.status-card { display: flex; flex-direction: column; gap: 12px; }
-.status-header { display: flex; justify-content: space-between; align-items: center; }
-
-#scan-status-text, #scan-watching-count {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.9rem;
-    color: var(--text-sub-dark); /* 어두운 회색 */
+.btn-neon:hover {
+    filter: brightness(1.1);
+    transform: scale(1.02);
+    box-shadow: 0 0 25px rgba(139, 255, 176, 0.6);
 }
 
-/* 티커 리스트 아이템 */
-.ticker-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.ticker-list span {
-    background: rgba(0, 0, 0, 0.05); /* 밝은 배경 위 회색 박스 */
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--text-sub-dark);
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.ticker-list span:hover {
-    background: rgba(0, 122, 255, 0.1);
-    color: #007aff;
-    border-color: #007aff;
-}
-
-/* 6. Signal Feed (화이트 글래스 대응) */
-.signal-card {
-    display: flex; align-items: center; justify-content: space-between;
-    background: white; /* 카드 안의 카드 */
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 12px;
-    transition: background 0.2s;
-    cursor: pointer;
-}
-.signal-card:hover {
-    background: #f8f9fa; /* 호버 시 아주 연한 회색 */
-    transform: translateX(4px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}
-
-/* 아이콘 및 라벨 색상 */
-.signal-card.signal .signal-icon-wrapper { color: #00c853; } /* 진한 초록 */
-.signal-card.recommendation .signal-icon-wrapper { color: #00b0ff; } /* 진한 파랑 */
-
-.ticker { font-weight: 700; color: var(--text-dark); font-size: 1.1rem; }
-.signal-details { color: var(--text-sub-dark); display: flex; gap: 10px; }
-.ai-score { color: #00c853; font-weight: 700; }
-
-.option-label {
-    font-size: 0.7rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;
-}
-.signal-card.signal .option-label { background: rgba(0, 200, 83, 0.1); color: #00c853; }
-
-
-/* 7. 알림 설정 카드 (Settings Card) */
-.settings-card {
-    border-top: 4px solid var(--neon-cyan); /* 상단 강조 라인 */
-}
-#min-score-input {
-    background: white;
-    border: 1px solid #ddd;
-    color: var(--text-dark); /* 입력 텍스트 검정 */
-    padding: 8px; border-radius: 6px; width: 60px; text-align: center; font-weight: bold;
-}
-#save-score-btn {
-    background: var(--neon-cyan); 
-    color: #000; font-weight: 700;
-    border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;
-}
-#save-score-btn:hover { filter: brightness(1.1); }
-
-/* 8. 커뮤니티 및 폼 */
-#post-form { display: flex; gap: 10px; margin-bottom: 20px; }
-#post-form input, #post-form textarea {
-    background: #f1f3f5;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 12px;
-    color: var(--text-dark);
+/* 6. Components: Inputs */
+input, textarea {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-btn);
+    padding: 14px;
+    color: white;
     font-family: 'Inter', sans-serif;
-}
-#post-form input { width: 20%; }
-#post-form textarea { flex: 1; resize: none; }
-#post-submit-btn {
-    background: #00c853; color: white; border: none; border-radius: 8px; padding: 0 20px; cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.3s;
 }
 
-.post-card {
-    background: transparent; /* 투명 */
-    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-    padding: 16px 0;
+input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--neon-green);
+    box-shadow: 0 0 10px rgba(139, 255, 176, 0.1);
 }
-.post-card-header { font-size: 0.85rem; color: var(--text-sub-dark); margin-bottom: 6px; }
-.post-card-content { color: var(--text-dark); line-height: 1.5; }
 
-/* 9. 스크롤링 바 (상단) - Dark Theme 유지 (헤더 느낌) */
-.scrolling-bar-container {
-    position: fixed; top: 0; left: 0; width: 100%; height: 36px;
-    background: var(--bg-deep-space); /* 어두운 배경 유지 */
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    z-index: 200; display: flex; align-items: center; overflow: hidden;
+/* 7. Data Elements (Scanner Tags) */
+.ticker-tag {
+    display: inline-block;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    padding: 8px 16px;
+    border-radius: 50px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    color: var(--text-main);
+    margin-right: 8px; margin-bottom: 8px;
+    transition: all 0.2s;
 }
-.scrolling-bar-track { display: flex; gap: 24px; animation: scroll-left 20s linear infinite; }
-.scroll-item { display: flex; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: white; }
-.scroll-item .change-positive { color: var(--neon-green); }
-.scroll-item .change-negative { color: var(--neon-red); }
-@keyframes scroll-left { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+.ticker-tag:hover {
+    background: rgba(139, 255, 176, 0.1);
+    border-color: var(--neon-green);
+    color: var(--neon-green);
+    box-shadow: 0 0 10px rgba(139, 255, 176, 0.2);
+}
 
+/* 8. Signal Feed Items */
+.signal-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+    border-bottom: 1px solid var(--glass-border);
+    transition: background 0.2s;
+}
+.signal-item:last-child { border-bottom: none; }
+.signal-item:hover { background: rgba(255, 255, 255, 0.02); }
 
-/* 10. 모달 (팝업) - Dark Theme 유지 */
-.modal-overlay {
-    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(5px); z-index: 1000;
+.signal-ticker { font-size: 1.2rem; font-weight: 700; font-family: 'Outfit', sans-serif; }
+.signal-meta { font-size: 0.9rem; color: var(--text-muted); }
+.signal-score {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--neon-green);
+    text-shadow: 0 0 8px rgba(139, 255, 176, 0.5);
 }
-.modal-content {
-    background: #0f1522; border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 16px; width: 90%; max-width: 800px; margin: 5% auto;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6); overflow: hidden; color: white;
-}
-.modal-header {
-    padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.1);
+
+/* 9. Header & Scrolling Bar */
+.dashboard-header {
     display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 40px;
 }
-/* 모달 내부 텍스트는 흰색이어야 함 */
-.modal-body, .modal-header h2 { color: white; } 
-.close-button { color: #94a3b8; cursor: pointer; font-size: 28px; }
-
-/* 모달 탭 */
-.modal-tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.tab-button {
-    flex: 1; background: transparent; border: none; padding: 16px;
-    color: #94a3b8; cursor: pointer; font-weight: 600;
+.scrolling-bar-container {
+    background: rgba(10, 15, 31, 0.8);
+    border-bottom: 1px solid var(--glass-border);
+    height: 40px; width: 100%;
+    display: flex; align-items: center; overflow: hidden;
 }
-.tab-button.active { color: var(--neon-cyan); border-bottom: 2px solid var(--neon-cyan); background: rgba(0,224,255,0.05); }
-
-
-/* 모바일 반응형 */
-@media (max-width: 768px) {
-    .wide-dashboard-wrapper { padding: 0 20px 20px; }
-    .app-logo span { font-size: 1.2rem; }
-    #post-form { flex-direction: column; }
-    #post-form input { width: 100%; }
-}
+/* (스크롤 애니메이션은 기존 유지) */

@@ -644,3 +644,66 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
 }); // <--- DOMContentLoaded 함수가 끝나는 지점입니다.
+// --- [추가] Dashboard Background Animation (Vortex) ---
+function initDashboardBg() {
+    const canvas = document.getElementById('dashboard-canvas');
+    if (!canvas) return; // 캔버스가 없으면 중단
+
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    
+    // 리사이징 처리
+    function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // 파티클 클래스 (랜딩 페이지의 Vortex 축소판)
+    class Star {
+        constructor() {
+            this.reset();
+        }
+        reset() {
+            this.angle = Math.random() * Math.PI * 2;
+            this.radius = Math.random() * Math.max(width, height) * 0.7;
+            this.speed = (1 / (this.radius + 50)) * 20; // 중심일수록 빠름
+            this.size = Math.random() * 1.5;
+            this.opacity = Math.random() * 0.5 + 0.1;
+        }
+        update() {
+            this.angle += this.speed * 0.002; // 천천히 회전
+            this.radius -= 0.1; // 아주 천천히 중심으로 빨려듬
+            
+            if (this.radius < 10) this.reset(); // 블랙홀 흡수 후 재생성
+
+            this.x = width/2 + Math.cos(this.angle) * this.radius;
+            this.y = height/2 + Math.sin(this.angle) * this.radius;
+            this.draw();
+        }
+        draw() {
+            ctx.fillStyle = `rgba(139, 255, 176, ${this.opacity})`; // Neon Green Tint
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // 파티클 생성
+    const stars = [];
+    for(let i=0; i<600; i++) stars.push(new Star());
+
+    function animate() {
+        ctx.fillStyle = 'rgba(10, 15, 31, 0.2)'; // 잔상 효과 (Deep Navy)
+        ctx.fillRect(0, 0, width, height);
+        stars.forEach(star => star.update());
+        requestAnimationFrame(animate);
+    }
+    animate();
+}
+
+// DOM 로드 시 실행
+document.addEventListener('DOMContentLoaded', initDashboardBg);
