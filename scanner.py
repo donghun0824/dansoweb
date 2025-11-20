@@ -348,9 +348,9 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.10 추천) 튜닝: FCM 푸시 알림 발송 함수 (구조화된 data 페이로드 사용) ---
+# --- (v16.10 추천) 튜닝: FCM 푸시 알림 발송 함수 (구조화된 data 페이로드 + 점수 필터링) ---
 def send_fcm_notification(ticker, price, probability_score):
-    """DB의 모든 문자열 토큰에 FCM 'data' 푸시 알림을 '1개씩' 발송합니다."""
+    """DB의 min_score를 확인하여 조건에 맞는 사용자에게만 알림을 발송합니다."""
     
     if not firebase_admin._apps:
         print("🔔 [FCM] Firebase Admin SDK가 초기화되지 않아 알림을 건너뜁니다.")
@@ -359,41 +359,48 @@ def send_fcm_notification(ticker, price, probability_score):
     conn = None
     try:
         conn = get_db_connection()
-        # ... (토큰 가져오는 로직은 동일) ...
         cursor = conn.cursor()
-        cursor.execute("SELECT token FROM fcm_tokens")
-        tokens_list = [token[0] for token in cursor.fetchall() if token[0]] 
+        
+        # ✅ [수정 1] 토큰과 함께 'min_score' 설정값도 가져옵니다.
+        cursor.execute("SELECT token, min_score FROM fcm_tokens")
+        subscribers = cursor.fetchall() 
+        
         cursor.close()
         conn.close()
 
-        if not tokens_list:
+        if not subscribers:
             print("🔔 [FCM] DB에 등록된 알림 구독자가 없습니다.")
             return
 
-        print(f"🔔 [FCM] {len(tokens_list)}명의 구독자에게 {ticker} 알림 '1개씩' 발송 시도...")
+        print(f"🔔 [FCM] 총 {len(subscribers)}명의 구독자 확인. 필터링 및 발송 시작...")
         
-        # --- ✅ 여기가 핵심 수정 사항 ---
-        # 1. 'body' 대신 PWA(sw.js)가 사용할 원본 데이터를 보냅니다.
+        # 1. data 페이로드 구성 (동일)
         data_payload = {
-            'title': "Danso AI 신호", # PWA에서 덮어쓸 수 있지만 기본 title
-            
-            # PWA(sw.js)에서 조립할 수 있도록 원본 데이터를 전달
+            'title': "Danso AI 신호", 
             'ticker': ticker,
-            'price': f"{price:.4f}", # JSON은 숫자가 꼬일 수 있으니 문자열로 통일
-            'probability': str(probability_score) # 이것도 문자열로 통일
-            
-            # 'icon'은 sw.js가 기본값을 가지고 있으므로 생략 가능
-            # 'icon': '/static/images/danso_logo.png' 
+            'price': f"{price:.4f}",
+            'probability': str(probability_score)
         }
-        # --- ✅ 수정 완료 ---
         
         success_count = 0
         failure_count = 0
+        skipped_count = 0 # 필터링된 횟수 카운트
         failed_tokens = []
 
-        for token in tokens_list:
+        # ✅ [수정 2] 토큰과 최소 점수를 하나씩 꺼내서 확인
+        for row in subscribers:
+            token = row[0]
+            # DB 값이 NULL이면 0점으로 처리 (모두 받음)
+            user_min_score = row[1] if row[1] is not None else 0 
+            
+            if not token: continue
+
+            # ✅ [핵심 로직] 신호 점수가 사용자의 설정 점수보다 낮으면 건너뜀
+            if probability_score < user_min_score:
+                skipped_count += 1
+                continue 
+
             try:
-                # 2. 'data='를 사용하는 것은 현재 코드와 동일 (아주 잘 되어 있음)
                 message = messaging.Message(
                     token=token,
                     data=data_payload, 
@@ -402,19 +409,18 @@ def send_fcm_notification(ticker, price, probability_score):
                     )
                 )
                 
-                response = messaging.send(message)
+                messaging.send(message)
                 success_count += 1
                 
             except Exception as e:
-                # ... (이하 동일) ...
-                print(f"❌ [FCM] 토큰 전송 실패: {token} (이유: {e})")
+                # print(f"❌ [FCM] 토큰 전송 실패: {token[:10]}... (이유: {e})") # 로그 너무 많으면 주석 처리
                 failure_count += 1
-                if "Requested entity was not found" in str(e):
+                if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e):
                     failed_tokens.append(token)
         
-        print(f"✅ [FCM] {success_count}명에게 발송 완료, {failure_count}명 실패.")
+        print(f"✅ [FCM] 발송 결과: 성공 {success_count}명, 실패 {failure_count}명, (점수 미달 패스: {skipped_count}명)")
         
-        # 7. ✅ "Not Found" 토큰들을 DB에서 삭제
+        # 만료된 토큰 삭제 로직 (동일)
         if failed_tokens:
             try:
                 conn = get_db_connection()

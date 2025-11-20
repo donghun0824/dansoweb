@@ -568,3 +568,52 @@ h2 { font-size: 20px; margin-top: 40px; }
     color: var(--accent-primary); 
     font-size: 18px;
 }
+/* style.css 에 추가 */
+
+.settings-card {
+    background-color: #ffffff; /* 또는 기존 카드 배경색 */
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.settings-body .description {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 15px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#min-score-input {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    width: 80px;
+    font-size: 16px;
+    text-align: center;
+}
+
+.unit {
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+#save-score-btn {
+    padding: 10px 20px;
+    background-color: #007bff; /* 기존 버튼 색상 */
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+#save-score-btn:hover {
+    background-color: #0056b3;
+}

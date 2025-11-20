@@ -1,7 +1,6 @@
 from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from authlib.integrations.flask_client import OAuth
-# 🟢 수정됨: generate_nonce 임포트 제거하고 secrets 추가
 import secrets 
 import json
 import os
@@ -92,7 +91,6 @@ def dashboard_page():
 def google_login():
     redirect_uri = url_for('google_callback', _external=True)
     
-    # 🟢 수정됨: secrets 모듈을 사용하여 안전한 nonce 생성
     nonce = secrets.token_urlsafe(16)
     session['google_auth_nonce'] = nonce
     
@@ -100,7 +98,7 @@ def google_login():
         redirect_uri,
         access_type='offline',
         prompt='consent',
-        nonce=nonce # 생성된 nonce를 Google에 전달
+        nonce=nonce 
     )
 
 # 구글 로그인 콜백
@@ -109,7 +107,6 @@ def google_callback():
     try:
         token = oauth.google.authorize_access_token()
         
-        # 세션에 저장된 nonce를 가져와 토큰 파싱에 사용
         nonce = session.pop('google_auth_nonce', None) 
         user_info = oauth.google.parse_id_token(token, nonce=nonce)
         email = user_info['email']
@@ -319,6 +316,46 @@ def get_market_overview():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# --- (NEW) 알림 점수 기준 설정 API ---
+@app.route('/api/set_alert_threshold', methods=['POST'])
+def set_alert_threshold():
+    data = request.get_json()
+    token = data.get('token')
+    threshold = data.get('threshold')
+
+    if not token or threshold is None:
+        return jsonify({"status": "error", "message": "Missing token or threshold"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # min_score 업데이트
+        cursor.execute(
+            "UPDATE fcm_tokens SET min_score = %s WHERE token = %s",
+            (int(threshold), token)
+        )
+        
+        if cursor.rowcount == 0:
+            cursor.close()
+            conn.close()
+            return jsonify({"status": "error", "message": "Token not found"}), 404
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({"status": "OK", "message": "Threshold updated"}), 200
+
+    except Exception as e:
+        if conn: 
+            conn.rollback()
+            conn.close()
+        print(f"Error setting threshold: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/subscribe', methods=['POST'])
 def subscribe():
     data = request.json
@@ -328,6 +365,7 @@ def subscribe():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # min_score 기본값은 DB 레벨에서 처리됨 (DEFAULT 0)
         cursor.execute("INSERT INTO fcm_tokens (token) VALUES (%s) ON CONFLICT (token) DO NOTHING", (token,))
         conn.commit()
         cursor.close()
@@ -363,13 +401,23 @@ def init_db():
         """)
         conn.commit()
         
+        # 기존 테이블 컬럼 추가 (마이그레이션 대응)
         try:
             cursor.execute("ALTER TABLE recommendations ADD COLUMN probability_score INTEGER")
             conn.commit()
         except psycopg2.Error as e:
             conn.rollback()
-            if e.pgcode == '42701': pass
-            else: print(f"❌ [DB] ALTER TABLE error: {e}")
+            if e.pgcode == '42701': pass # duplicate_column 에러 무시
+            else: print(f"❌ [DB] ALTER TABLE recommendations error: {e}")
+
+        # (NEW) fcm_tokens 테이블에 min_score 컬럼 추가
+        try:
+            cursor.execute("ALTER TABLE fcm_tokens ADD COLUMN min_score INTEGER DEFAULT 0")
+            conn.commit()
+        except psycopg2.Error as e:
+            conn.rollback()
+            if e.pgcode == '42701': pass # duplicate_column 에러 무시
+            else: print(f"❌ [DB] ALTER TABLE fcm_tokens error: {e}")
 
         cursor.close()
         conn.close()

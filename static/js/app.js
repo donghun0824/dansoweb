@@ -75,6 +75,8 @@ function getFCMToken() {
     }).then((currentToken) => {
         if (currentToken) {
             console.log("FCM Token:", currentToken);
+            // ✅ [추가] 토큰을 전역 변수에 저장해둡니다 (설정 저장할 때 사용)
+            window.currentFCMToken = currentToken;
             // 6. ✅ 이 토큰을 우리 DB에 저장합니다.
             sendTokenToServer(currentToken);
         } else {
@@ -122,7 +124,63 @@ document.addEventListener('DOMContentLoaded', function() {
     if (subscribeBtn) {
         subscribeBtn.addEventListener('click', requestNotificationPermission);
     }
+// ✅ [여기부터 추가] 알림 점수 설정 저장 로직
+    const saveScoreBtn = document.getElementById('save-score-btn');
+    const minScoreInput = document.getElementById('min-score-input');
 
+    if (saveScoreBtn) {
+        saveScoreBtn.addEventListener('click', async () => {
+            const score = minScoreInput.value;
+            
+            // 1. 유효성 검사
+            if (score === '' || score < 0 || score > 100) {
+                alert("0에서 100 사이의 점수를 입력해주세요.");
+                return;
+            }
+
+            // 2. 토큰 확인 (전역 변수에서 가져옴)
+            const token = window.currentFCMToken;
+            if (!token) {
+                alert("알림 권한이 없거나 토큰을 아직 불러오지 못했습니다. 알림 받기 버튼을 먼저 눌러주세요.");
+                return;
+            }
+
+            // 3. 서버로 전송
+            try {
+                const originalText = saveScoreBtn.textContent;
+                saveScoreBtn.textContent = "저장 중...";
+                saveScoreBtn.disabled = true;
+
+                const response = await fetch('/api/set_alert_threshold', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        token: token, 
+                        threshold: parseInt(score) 
+                    }),
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`✅ 설정 완료! 이제 AI 점수 ${score}점 이상의 신호만 알림으로 받습니다.`);
+                } else {
+                    alert(`❌ 저장 실패: ${result.message}`);
+                }
+                saveScoreBtn.textContent = originalText;
+                saveScoreBtn.disabled = false;
+
+            } catch (error) {
+                console.error("Error saving threshold:", error);
+                alert("서버 통신 중 오류가 발생했습니다.");
+                saveScoreBtn.textContent = "저장";
+                saveScoreBtn.disabled = false;
+            }
+        });
+    }
+    // ✅ [여기까지 추가]
     // --- 1. DOM 요소 가져오기 (v11.0) ---
     const scanStatusEl = document.getElementById('scan-status-text');
     const scanCountEl = document.getElementById('scan-watching-count');
