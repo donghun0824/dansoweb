@@ -112,38 +112,39 @@ function generateNeonChartPath() {
     }
 }
 
-// 네온 차트 라인 그리기 함수
+// [수정됨] 네온 차트 라인 그리기 함수 (오류 해결 버전)
 function drawNeonChartLine() {
     if (!isDrawingChart || neonChartPoints.length === 0) return;
 
     ctx.strokeStyle = '#00e0ff'; // 밝은 청록색 (네온)
-    ctx.lineWidth = 6; // 선 두께
+    ctx.lineWidth = 6; 
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
 
-    // 네온 글로우 효과
     ctx.shadowBlur = 20; 
-    ctx.shadowColor = 'rgba(0, 224, 255, 0.8)'; // 빛 번짐 색상
+    ctx.shadowColor = 'rgba(0, 224, 255, 0.8)'; 
+
+    // 진행률 계산
+    const progress = currentChartDrawIndex / neonChartAnimationDuration;
+    // 최소 1개 이상의 점이 있어야 그려지도록 Math.max(1, ...) 추가
+    const currentPointsToDraw = Math.max(1, Math.min(neonChartPoints.length, Math.floor(neonChartPoints.length * progress)));
 
     ctx.beginPath();
     ctx.moveTo(neonChartPoints[0].x, neonChartPoints[0].y);
-
-    // 차트 라인을 점진적으로 그립니다.
-    const currentPointsToDraw = Math.min(neonChartPoints.length, Math.floor(neonChartPoints.length * (currentChartDrawIndex / neonChartAnimationDuration)));
 
     for (let i = 1; i < currentPointsToDraw; i++) {
         ctx.lineTo(neonChartPoints[i].x, neonChartPoints[i].y);
     }
     ctx.stroke();
 
-    // 라인 아래 영역을 채워 차트의 '볼륨'을 표현 (그라데이션)
-    ctx.shadowBlur = 0; // 채우기 전에 그림자 제거
+    // 라인 아래 영역 채우기 (그라데이션)
+    ctx.shadowBlur = 0; 
     ctx.shadowColor = 'transparent';
 
     const gradient = ctx.createLinearGradient(0, height, 0, 0);
-    gradient.addColorStop(0, 'rgba(0, 224, 255, 0)'); // 하단 투명
-    gradient.addColorStop(0.5, 'rgba(0, 224, 255, 0.05)'); // 중간 반투명
-    gradient.addColorStop(1, 'rgba(0, 224, 255, 0.1)'); // 상단 더 진하게
+    gradient.addColorStop(0, 'rgba(0, 224, 255, 0)'); 
+    gradient.addColorStop(0.5, 'rgba(0, 224, 255, 0.05)'); 
+    gradient.addColorStop(1, 'rgba(0, 224, 255, 0.1)'); 
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
@@ -151,18 +152,22 @@ function drawNeonChartLine() {
     for (let i = 1; i < currentPointsToDraw; i++) {
         ctx.lineTo(neonChartPoints[i].x, neonChartPoints[i].y);
     }
-    // 아래쪽으로 선을 닫아서 영역을 만듦
-    ctx.lineTo(neonChartPoints[currentPointsToDraw - 1].x, height);
+    
+    // ✅ 오류 수정: 인덱스가 안전할 때만 접근
+    if (currentPointsToDraw > 0) {
+        ctx.lineTo(neonChartPoints[currentPointsToDraw - 1].x, height);
+    } else {
+        ctx.lineTo(neonChartPoints[0].x, height);
+    }
+    
     ctx.lineTo(neonChartPoints[0].x, height);
     ctx.closePath();
     ctx.fill();
 
-    // 애니메이션 진행
     if (currentChartDrawIndex < neonChartAnimationDuration) {
         currentChartDrawIndex++;
     }
 }
-
 
 // --- 애니메이션 제어 ---
 const numberOfParticles = 400; // 파티클 개수 증가 (Vortex 효과를 위해)

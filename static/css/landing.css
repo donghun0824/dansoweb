@@ -133,13 +133,24 @@ body {
 /* 세로 스크롤 박스 (Hero Feed) */
 @keyframes scroll-up { 0% { transform: translateY(0); } 100% { transform: translateY(-50%); } }
 
+/* [수정됨] 세로 스크롤 박스 (Glassmorphism 효과 적용) */
 .hero-feed-vertical {
-    background-color: rgba(25, 31, 40, 0.8); /* 반투명 어두운 배경 */
+    /* 배경을 반투명하게 설정 (뒤에 파티클이 비침) */
+    background-color: rgba(25, 31, 40, 0.6); 
     border-radius: 16px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    height: 450px; display: flex; flex-direction: column;
-    backdrop-filter: blur(10px); /* ✅ 블러 효과 추가 */
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); /* 그림자 강화 */
+    
+    /* 테두리를 얇고 밝게 하여 유리 느낌 */
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+    border-top: 1px solid rgba(255, 255, 255, 0.2); /* 위쪽 빛 반사 효과 */
+    
+    height: 450px; 
+    display: flex; 
+    flex-direction: column;
+    
+    /* ✅ 핵심: 블러 효과 (뒤에 있는 요소 흐리게) */
+    backdrop-filter: blur(12px); 
+    -webkit-backdrop-filter: blur(12px); /* 사파리 호환 */
 }
 .widget-title {
     font-size: 18px; font-weight: 600; color: white;
