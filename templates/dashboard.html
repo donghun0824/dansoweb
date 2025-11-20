@@ -7,18 +7,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Roboto+Mono:wght@400;600&display=swap" rel="stylesheet">
     <meta name="naver-site-verification" content="eb8016dc00057f4fdb6cb38e81cb7e507a4e1886" />
     <meta name="google-site-verification" content="rrMaS_Uo8i_SC9M4XfatAMijOT2vpn7vkm1x6FKuQbk" />
     
-    <title>Danso Dashboard | AI Scalping</title> 
+    <title>danso</title> 
 
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
+    
     <link rel="manifest" href="/manifest.json">
+    
     <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
+    
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
+    
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
@@ -27,84 +29,71 @@
 </head>
 <body>
     
-    <canvas id="dashboardCanvas"></canvas>
-
     <div class="scrolling-bar-container">
         <div class="scrolling-bar-track" id="scrolling-bar-track">
-            </div>
+        </div>
     </div>
 
-    <div class="wide-dashboard-wrapper">
+    <div class="main-container">
+
+        <button id="subscribe-btn" class="notification-button" 
+            style="float: right; margin: 0 0 20px 0;">
+            <i class="fas fa-bell"></i> Enable Notifications
+        </button>
         
-        <header class="dashboard-header">
-            <div class="logo-area" style="display: flex; align-items: center; gap: 15px;">
-                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso" style="height: 40px;">
-                <span style="font-family: 'Outfit'; font-size: 1.8rem; font-weight: 700; color: white; text-shadow: 0 0 10px rgba(255,255,255,0.3);">Danso AI</span>
-            </div>
-            <div class="actions" style="display: flex; align-items: center; gap: 20px;">
-                <button id="subscribe-btn" class="btn-neon">
-                    <i class="fas fa-bell"></i> Enable Alerts
-                </button>
-                <a href="/logout" style="color: #ff4d4d; text-decoration: none; font-weight: 600;">Logout</a>
-            </div>
-        </header>
+        <div class="app-logo">
+            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="danso Logo">
+        </div>
 
-        <div class="card settings-card glass-card">
-            <div class="card-header" style="border:none; padding-bottom:0; margin-bottom: 15px;">
-                <h2 style="margin:0; font-size: 1.2rem; display: flex; align-items: center; gap: 10px;">
-                    <i class="fas fa-sliders-h" style="color: var(--neon-cyan);"></i> AI Sensitivity
-                </h2>
+        <div class="card settings-card" style="margin-top: 15px; clear: both;">
+            <div class="card-header">
+                <h3>🔔 Notification Sensitivity</h3>
             </div>
-            <div class="settings-body" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;">
-                <p class="description" style="margin: 0; flex: 1;">
-                    Only receive alerts with an AI Score <strong>above</strong> this threshold.
-                </p>
-                <div class="control-group" style="display: flex; align-items: center; gap: 10px;">
-                    <input type="number" id="min-score-input" placeholder="0" min="0" max="99">
-                    <span class="unit" style="font-weight: 500;">% or higher</span>
-                    <button id="save-score-btn" class="btn-neon">Save</button>
+            <div class="settings-body">
+                <p class="description">Only receive alerts with an AI Score <strong>above</strong> this threshold. (0 = Receive All)</p>
+                <div class="control-group">
+                    <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
+                    <span class="unit">or higher</span>
+                    <button id="save-score-btn" class="btn-primary">Save</button>
                 </div>
             </div>
         </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 32px;">
+        
+        <div class="status-card">
+            <h2>Scanner Status</h2>
+            <div class="status-header">
+                 <div id="scan-status-text">Scanner Scan: N/A</div> 
+                <div id="scan-watching-count">Watching: 0 tickers</div> 
+            </div>
             
-            <div class="status-card glass-card">
-                <h2><i class="fas fa-radar" style="color: #10b981;"></i> Live Scanner</h2>
-                <div class="status-header" style="margin-bottom: 20px;">
-                     <div id="scan-status-text" style="font-family: 'JetBrains Mono'; font-weight: 700;">Scanner Scan: N/A</div> 
-                    <div id="scan-watching-count" style="font-family: 'JetBrains Mono';">Watching: 0</div> 
-                </div>
-                
-                <h3 style="font-size: 0.9rem; margin-bottom: 15px; color: #64748b;">Currently Watching</h3>
-                <div class="ticker-list" id="ticker-list-container">
-                     <span class="ticker-tag">Loading scanner...</span> 
-                </div>
+            <h2 class="sidebar-h2">Currently Watching</h2>
+            <div class="ticker-list" id="ticker-list-container">
+                 <p style="color: #8b95a1;">Loading scanner...</p> 
             </div>
-
-            <div class="glass-card">
-                <h2><i class="fas fa-bolt" style="color: #facc15;"></i> Signal Feed</h2>
-                <div class="signal-feed" id="signal-feed-container" style="max-height: 350px; overflow-y: auto;">
-                    <div class="empty-state" style="text-align:center; padding:40px; color: #64748b;">Waiting for AI Signals...</div> 
-                </div>
-            </div>
-
         </div>
 
-        <div class="community-section glass-card" style="margin-top: 32px;">
-            <h2><i class="fas fa-users" style="color: var(--neon-cyan);"></i> Community Intel</h2>
-            <form id="post-form" onsubmit="return false;" style="display: flex; gap: 15px; margin-top: 20px;">
-                <input type="text" name="author" placeholder="Agent Name" required style="width: 200px;"> 
-                <textarea name="content" placeholder="Share market intelligence..." rows="1" required style="flex: 1; resize: none;"></textarea> 
-                <button type="button" id="post-submit-btn" class="btn-neon" style="width: auto; padding: 0 25px;"><i class="fas fa-paper-plane"></i></button> 
+        <h2>Signal Feed</h2>
+        <div class="signal-feed" id="signal-feed-container">
+            <div class="empty-state">Loading Signals...</div> 
+        </div>
+        
+        <div class="community-section">
+            <h2>Community</h2>
+            <form id="post-form" onsubmit="return false;">
+                <input type="text" name="author" placeholder="Name" required> 
+                <textarea name="content" placeholder="What's on your mind today? (All feedback welcome)" rows="2" required></textarea> 
+                <button type="button" id="post-submit-btn">Post</button> 
             </form>
-            <div class="post-feed" id="community-feed-container" style="margin-top: 20px;">
-                 <div class="empty-state" style="text-align:center; padding:20px; color: #64748b;">Loading Posts...</div> 
+            <div class="post-feed" id="community-feed-container">
+                 <div class="empty-state">Loading Posts...</div> 
             </div>
         </div>
             
-    </div> <div id="ticker-modal" class="modal-overlay">
-        <div class="modal-content glass-card"> <div class="modal-header">
+    </div>
+
+    <div id="ticker-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
                 <h2 id="modal-ticker-name">Loading...</h2>
                 <span class="close-button" id="modal-close-btn">&times;</span>
             </div>
