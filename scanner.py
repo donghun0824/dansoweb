@@ -5,7 +5,7 @@ import os  # 1. os 임포트
 import pandas as pd
 import pandas_ta as ta
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import psycopg2  # 2. sqlite3 대신 psycopg2
 import time
 import httpx 
@@ -549,9 +549,16 @@ def fetch_initial_data(ticker):
     """
     if not POLYGON_API_KEY: return
     
-    # 오늘 날짜 기준으로 과거 데이터 요청
-    # (limit=200: 최근 200개 1분봉 가져옴)
-    url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/2000-01-01/3000-01-01?adjusted=true&sort=desc&limit=200&apiKey={POLYGON_API_KEY}"
+   # [수정] 안전하게 최근 7일(일주일) 범위에서 최신 200개를 가져오도록 설정
+    # 주말/공휴일이 껴있어도 데이터가 끊기지 않게 하기 위함
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    
+    # ⚠️ 중요: 반드시 sort=desc여야 '최신 데이터'를 가져옵니다! asc로 하면 옛날 데이터 가져옴.
+    url = (
+        f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/"
+        f"{start_date}/{end_date}?adjusted=true&sort=desc&limit=200&apiKey={POLYGON_API_KEY}"
+    )
     
     try:
         print(f"⏳ [초기화 시도] {ticker} 과거 데이터 요청 중...")
