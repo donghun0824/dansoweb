@@ -102,54 +102,54 @@ async def get_gemini_probability(ticker, conditions_data):
         return 50
 
     system_prompt = """
-You are an elite **"Pre-Breakout" Scalping AI**.
-Your Strategy: **"Buy the Coil, Sell the Expansion."**
-You prioritize stocks that are **quietly coiling (Squeeze)** over stocks that have already exploded (FOMO).
+You are an elite **"Penny Stock Sniper AI"**.
+You represent a strict scalper who only pulls the trigger on **PERFECT setups**.
+**Your Rule:** It is better to miss a trade than to lose money.
+**Score Inflation is Forbidden.** 90+ scores must be RARE and PERFECT.
 
 **INPUT DATA Analysis:**
-1. `squeeze_ratio`:
-   - **< 1.0:** TIGHT SQUEEZE (Energy Coiling). **Target Entry Zone.**
-   - **> 1.3:** EXPANDED (Already popped). **High Risk of Pullback.**
-2. `is_volume_dry` (Volume Dry-up):
-   - **True:** Selling pressure exhausted. Smart money holding. (Good).
-   - **False:** High activity. If price spiked, it's too late.
-3. `pump_strength_5m`:
-   - **> 4.0%:** Danger. Price spiked vertically recently. **Deduct points.**
-4. `cloud_distance`: Should be holding support above the cloud.
+1. `pullback_from_high`: **The most critical filter.**
+   - **> 12%:** BROKEN TREND. (Immediate Fail).
+   - **< 5%:** ELITE STRENGTH. (High Tight Flag).
+2. `pump_strength_5m`:
+   - **> 3.0%:** Chasing. Too risky for a 90+ score.
+3. `daily_change`: Indicates momentum.
+4. `squeeze_ratio`: < 1.0 indicates stored energy.
 
 ---
-### SCORING LOGIC (The Sniper Approach)
+### STRICT SCORING LOGIC
 
-**🛑 CRITICAL FILTER: The "Anti-Chase" Rule**
-* IF `pump_strength_5m` > 5.0% (Rose >5% in 5 mins):
-   → **MAX SCORE = 55.** (Too late, let it go).
-   → *Reasoning: "Vertical spike detected. High risk of chasing top."*
+**🛑 KILL SWITCH (The "FOXX" Filter)**
+* **IF** `pullback_from_high` > 12.0%:
+   → **MAX SCORE = 40.** (Trend is broken. Do not catch a falling knife).
+   → *Reasoning: "Deep pullback (-x%) detected. Chart is broken."*
 
-**Step 1: The "Setup" Scoring**
+**🏆 Pattern A: "The King's Setup" (Rare & Perfect)**
+* **Conditions (ALL must be met):**
+   1. `pullback_from_high` < 5.0% (Holding gains like a rock)
+   2. `squeeze_ratio` < 1.0 (Energy is tightly coiled)
+   3. `pump_strength_5m` < 3.0% (Not currently spiking/chasing)
+   4. `is_volume_dry` is True (Sellers are gone)
+* **Verdict:** **SCORE 90~99** (Sniper Entry).
 
-* **Pattern A (Perfect Pre-Breakout):**
-   - `squeeze_ratio` < 1.0 (Bands are tight)
-   - `is_volume_dry` is True (Volume is low)
-   - Price is above Cloud (Trend Support)
-   → **SCORE: 85~95** (Ideal Sniper Entry).
+**🥈 Pattern B: "Standard Momentum" (Good but Risky)**
+* **Conditions:**
+   - `pullback_from_high` is 5% ~ 12% (Normal volatility)
+   - `engine_1_pass` (WAE) is True OR `squeeze_ratio` < 1.1
+* **Verdict:** **SCORE 75~85** (Good trade, but not perfect).
 
-* **Pattern B (Early Momentum):**
-   - `squeeze_ratio` starting to expand (1.0 ~ 1.2)
-   - `engine_1_pass` (WAE) just turned True.
-   - `volume_ratio` > 1.5 (Volume returning).
-   → **SCORE: 80~90** (Ride the wave start).
-
-* **Pattern C (Drifting/Fakeout):**
-   - Price far from Cloud support.
-   - `rsi_value` > 80 (Overbought).
-   → **SCORE: 40~50** (No edge).
+**🗑️ Pattern C: "The Chase" or "The Dump"**
+* **Conditions:**
+   - `pump_strength_5m` > 4.0% (You are chasing)
+   - OR `pullback_from_high` > 12% (Dump)
+* **Verdict:** **SCORE 40~60** (Pass).
 
 ---
 **Generate JSON Output:**
 Respond ONLY with this JSON structure.
 {
   "probability_score": <int>,
-  "reasoning": "<[Setup] Squeeze: x.xx, VolDry: T/F. [Analysis] Explain why this is a good pre-breakout entry or why it is skipped.>"
+  "reasoning": "<[Grade] King/Standard/Trash? [Risk] Pullback: -x.x%. [Verdict] Why this specific score?>"
 }
 """
     user_prompt = f"""
@@ -733,15 +733,34 @@ async def handle_msg(msg_data):
 
         try:
             # ---------------------------------------------------------
-            # ✅ [개선 1] 5분 급등 피로도 (Pump Fatigue)
-            # 이미 쏜 종목을 '눌림목'으로 착각해 들어가는 것 방지
+            # ✅ [개선 1] 추세 및 눌림목 분석 지표 (3종 세트)
+            # 1. 5분 급등률 (단기 과열 확인)
+            # 2. 고점 대비 눌림폭 (추세 이탈 확인 - FOXX 거르기용)
+            # 3. 일일 상승률 (모멘텀 확인)
             # ---------------------------------------------------------
             price_now = df['close'].iloc[-1]
+            
+            # 1. 5분 급등률 (Pump Strength)
             if len(df) >= 6:
                 price_5m_ago = df['close'].iloc[-6] 
                 pump_strength_5m = ((price_now - price_5m_ago) / price_5m_ago) * 100
             else:
                 pump_strength_5m = 0.0
+
+            # 🔥 2. 고점 대비 눌림폭 (Pullback from High) - 핵심!
+            # 현재 데이터프레임(최근 200분) 내에서의 최고가 기준
+            day_high = df['high'].max()
+            if day_high > 0:
+                pullback_from_high = ((day_high - price_now) / day_high) * 100
+            else:
+                pullback_from_high = 0.0
+
+            # 3. 일일 상승률 (Daily Change) - 데이터 시작가 대비
+            day_open = df['open'].iloc[0]
+            if day_open > 0:
+                daily_change = ((price_now - day_open) / day_open) * 100
+            else:
+                daily_change = 0.0
 
             # ---------------------------------------------------------
             # ✅ [개선 2] 볼린저 밴드 Squeeze 정교화
@@ -829,6 +848,8 @@ async def handle_msg(msg_data):
                     "strategy_type": strat_type,        # 전략 유형 로깅
                     "volume_ratio": vol_ratio,
                     "pump_strength_5m": float(round(pump_strength_5m, 2)),
+                    "pullback_from_high": float(round(pullback_from_high, 2)), # 추가됨
+                    "daily_change": float(round(daily_change, 2)),             # 추가됨
                     "bb_width_ratio": float(round(current_width / avg_width_20, 2)), # 평균 대비 비율 (1.0 미만이면 수축)
                     "is_volume_dry": bool(is_volume_dry),
                     "engine_1_pass": bool(engine_1_pass),
