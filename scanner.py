@@ -554,6 +554,7 @@ def fetch_initial_data(ticker):
     url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/2000-01-01/3000-01-01?adjusted=true&sort=desc&limit=200&apiKey={POLYGON_API_KEY}"
     
     try:
+        print(f"⏳ [초기화 시도] {ticker} 과거 데이터 요청 중...")
         res = requests.get(url, timeout=5)
         data = res.json()
         
@@ -571,6 +572,9 @@ def fetch_initial_data(ticker):
             # 전역 변수에 주입
             ticker_minute_history[ticker] = df
             print(f"✅ [초기화] {ticker} 과거 캔들 {len(df)}개 로딩 완료. 즉시 분석 가능.")
+        else:
+            # 🔥 여기가 핵심: 왜 실패했는지 로그 출력
+            print(f"⚠️ [데이터 없음] {ticker}: Status={data.get('status')}, Count={data.get('count')}, Msg={data.get('message')}")
     except Exception as e:
         print(f"⚠️ [초기화 실패] {ticker}: {e}")
 
