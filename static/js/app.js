@@ -646,7 +646,7 @@ document.addEventListener('DOMContentLoaded', function() {
 }); // <--- DOMContentLoaded 함수가 끝나는 지점입니다.
 // --- [추가] Dashboard Background Animation (Vortex) ---
 function initDashboardBg() {
-    const canvas = document.getElementById('dashboardCanvas');
+    const canvas = document.getElementById('heroCanvas');
     if (!canvas) return; // 캔버스가 없으면 중단
 
     const ctx = canvas.getContext('2d');

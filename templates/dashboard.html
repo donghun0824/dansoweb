@@ -14,13 +14,9 @@
     <title>danso</title> 
 
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
-    
     <link rel="manifest" href="/manifest.json">
-    
     <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
-    
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
-    
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
@@ -29,69 +25,71 @@
 </head>
 <body>
     
-    <div class="scrolling-bar-container">
-        <div class="scrolling-bar-track" id="scrolling-bar-track">
-        </div>
-    </div>
+    <canvas id="heroCanvas"></canvas>
 
-    <div class="main-container">
+    <div class="content-wrapper">
 
-        <button id="subscribe-btn" class="notification-button" 
-            style="float: right; margin: 0 0 20px 0;">
-            <i class="fas fa-bell"></i> Enable Notifications
-        </button>
-        
-        <div class="app-logo">
-            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="danso Logo">
-        </div>
-
-        <div class="card settings-card" style="margin-top: 15px; clear: both;">
-            <div class="card-header">
-                <h3>🔔 Notification Sensitivity</h3>
+        <div class="scrolling-bar-container">
+            <div class="scrolling-bar-track" id="scrolling-bar-track">
             </div>
-            <div class="settings-body">
-                <p class="description">Only receive alerts with an AI Score <strong>above</strong> this threshold. (0 = Receive All)</p>
-                <div class="control-group">
-                    <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
-                    <span class="unit">or higher</span>
-                    <button id="save-score-btn" class="btn-primary">Save</button>
+        </div>
+
+        <div class="main-container">
+
+            <button id="subscribe-btn" class="notification-button" 
+                style="float: right; margin: 0 0 20px 0;">
+                <i class="fas fa-bell"></i> Enable Notifications
+            </button>
+            
+            <div class="app-logo">
+                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="danso Logo">
+            </div>
+
+            <div class="card settings-card" style="margin-top: 15px; clear: both;">
+                <div class="card-header">
+                    <h3>🔔 Notification Sensitivity</h3>
+                </div>
+                <div class="settings-body">
+                    <p class="description">Only receive alerts with an AI Score <strong>above</strong> this threshold. (0 = Receive All)</p>
+                    <div class="control-group">
+                        <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
+                        <span class="unit">or higher</span>
+                        <button id="save-score-btn" class="btn-primary">Save</button>
+                    </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="status-card">
-            <h2>Scanner Status</h2>
-            <div class="status-header">
-                 <div id="scan-status-text">Scanner Scan: N/A</div> 
-                <div id="scan-watching-count">Watching: 0 tickers</div> 
+            
+            <div class="status-card">
+                <h2>Scanner Status</h2>
+                <div class="status-header">
+                     <div id="scan-status-text">Scanner Scan: N/A</div> 
+                    <div id="scan-watching-count">Watching: 0 tickers</div> 
+                </div>
+                
+                <h2 class="sidebar-h2">Currently Watching</h2>
+                <div class="ticker-list" id="ticker-list-container">
+                     <p style="color: #8b95a1;">Loading scanner...</p> 
+                </div>
+            </div>
+
+            <h2>Signal Feed</h2>
+            <div class="signal-feed" id="signal-feed-container">
+                <div class="empty-state">Loading Signals...</div> 
             </div>
             
-            <h2 class="sidebar-h2">Currently Watching</h2>
-            <div class="ticker-list" id="ticker-list-container">
-                 <p style="color: #8b95a1;">Loading scanner...</p> 
+            <div class="community-section">
+                <h2>Community</h2>
+                <form id="post-form" onsubmit="return false;">
+                    <input type="text" name="author" placeholder="Name" required> 
+                    <textarea name="content" placeholder="What's on your mind today? (All feedback welcome)" rows="2" required></textarea> 
+                    <button type="button" id="post-submit-btn">Post</button> 
+                </form>
+                <div class="post-feed" id="community-feed-container">
+                     <div class="empty-state">Loading Posts...</div> 
+                </div>
             </div>
-        </div>
-
-        <h2>Signal Feed</h2>
-        <div class="signal-feed" id="signal-feed-container">
-            <div class="empty-state">Loading Signals...</div> 
-        </div>
-        
-        <div class="community-section">
-            <h2>Community</h2>
-            <form id="post-form" onsubmit="return false;">
-                <input type="text" name="author" placeholder="Name" required> 
-                <textarea name="content" placeholder="What's on your mind today? (All feedback welcome)" rows="2" required></textarea> 
-                <button type="button" id="post-submit-btn">Post</button> 
-            </form>
-            <div class="post-feed" id="community-feed-container">
-                 <div class="empty-state">Loading Posts...</div> 
-            </div>
-        </div>
-            
-    </div>
-
-    <div id="ticker-modal" class="modal-overlay">
+                
+        </div> </div> <div id="ticker-modal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modal-ticker-name">Loading...</h2>
@@ -112,6 +110,8 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/landing-animation.js') }}"></script>
+    
     <script src="{{ url_for('static', filename='js/app.js') }}" type="module" defer></script>
 </body>
 </html>
