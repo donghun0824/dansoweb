@@ -761,6 +761,24 @@ async def handle_msg(msg_data):
                 daily_change = ((price_now - day_open) / day_open) * 100
             else:
                 daily_change = 0.0
+                # 4. [Squeeze Ratio] 밴드 압축비 (⚠️ 아까 이게 없어서 에러남!)
+            # 표준 볼린저 밴드(20, 2.0) 컬럼 찾기
+            cols = df.columns
+            bb_up_std = next((c for c in cols if 'BBU_20' in c), None)
+            bb_low_std = next((c for c in cols if 'BBL_20' in c), None)
+            if bb_up_std and bb_low_std:
+                # 현재 밴드 폭 비율
+                width_now = (last[bb_up_std] - last[bb_low_std]) / last['close']
+                # 과거 20개 밴드 폭 평균
+                width_avg_20 = ((df[bb_up_std] - df[bb_low_std]) / df['close']).iloc[-20:].mean()
+                # 압축비 계산 (1.0보다 작으면 쥐 죽은 듯 조용함)
+                squeeze_ratio = width_now / width_avg_20 if width_avg_20 > 0 else 1.0
+                current_width = width_now # (데이터 패키징용 변수)
+                avg_width_20 = width_avg_20
+            else:
+                squeeze_ratio = 1.0
+                current_width = 0.1
+                avg_width_20 = 0.1
 
             # ---------------------------------------------------------
             # ✅ [개선 2] 볼린저 밴드 Squeeze 정교화
@@ -791,7 +809,7 @@ async def handle_msg(msg_data):
             avg_vol_5 = df['volume'].iloc[-6:-1].mean()
             if avg_vol_5 == 0: avg_vol_5 = 1
             
-            is_volume_dry = curr_vol < (avg_vol_5 * 0.7) # 평소의 70% 수준
+            is_volume_dry = curr_vol < (avg_vol_5 * 0.8) # 평소의 80% 수준
 
             # --- 기본 조건 정의 ---
             cond_wae_momentum = (last['t1'] > last['e1']) and (last['t1'] > last['deadZone'])
@@ -850,7 +868,7 @@ async def handle_msg(msg_data):
                     "pump_strength_5m": float(round(pump_strength_5m, 2)),
                     "pullback_from_high": float(round(pullback_from_high, 2)), # 추가됨
                     "daily_change": float(round(daily_change, 2)),             # 추가됨
-                    "bb_width_ratio": float(round(current_width / avg_width_20, 2)), # 평균 대비 비율 (1.0 미만이면 수축)
+                    "squeeze_ratio": float(round(squeeze_ratio, 2)),
                     "is_volume_dry": bool(is_volume_dry),
                     "engine_1_pass": bool(engine_1_pass),
                     "engine_2_pass": bool(engine_2_pass),
