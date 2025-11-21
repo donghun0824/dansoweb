@@ -642,10 +642,10 @@ async def handle_msg(msg_data):
         new_row = {'o': msg.get('o'), 'h': msg.get('h'), 'l': msg.get('l'), 'c': msg.get('c'), 'v': msg.get('v')}
         ticker_minute_history[ticker].loc[timestamp] = new_row
         
-        # ✅ [중요 수정] 데이터 보관 갯수 60 -> 200개로 증가
+        # ✅ [중요 수정] 데이터 보관 갯수 60 -> 1000개로 증가
         # 일목균형표(52), MACD(26) 등의 선행 계산을 위해 넉넉한 데이터 필요 (NaN 방지)
-        if len(ticker_minute_history[ticker]) > 200:
-            ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-200:]
+        if len(ticker_minute_history[ticker]) > 1000:
+            ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-1000:]
         
         df_raw = ticker_minute_history[ticker].copy() 
         
