@@ -13,6 +13,7 @@ import firebase_admin # ✅ 1. firebase-admin 임포트
 from firebase_admin import credentials, messaging # ✅ 2. 관련 모듈 임포트
 import sys
 import pytz
+import traceback
 # --- (v12.0) API 키 설정 (보안) ---
 # 3. Render 환경 변수에서 API 키를 읽어옵니다.
 POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
@@ -32,9 +33,9 @@ VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY') # (이제 pywebpush용�
 VAPID_EMAIL = "mailto:cbvkqtm98@gmail.com" # (이제 pywebpush용이라 사용 안 함)
 
 # --- (v16.2) 튜닝 되돌리기 (API 한도 문제 해결) ---
-MAX_PRICE = 10
+MAX_PRICE = 20
 TOP_N = 100
-MIN_DATA_REQ = 6
+MIN_DATA_REQ = 20
 
 # --- (v16.2) 튜닝 되돌리기 ---
 WAE_MACD = (2, 3, 4) 
@@ -43,7 +44,7 @@ WAE_BB = (5, 1.5)
 WAE_ATR = 5 
 WAE_ATR_MULT = 1.5
 WAE_CMF = 5 
-WAE_RSI_RANGE = (45, 75) # <-- ✅ 75로 복귀
+WAE_RSI_RANGE = (40, 70) # <-- ✅ 75로 복귀
 RSI_LENGTH = 5 
 
 # --- (v16.2) 튜닝 되돌리기 ---
@@ -101,89 +102,54 @@ async def get_gemini_probability(ticker, conditions_data):
         return 50
 
     system_prompt = """
-You are a specialized Scalping AI designed to filter out "Fakeouts" and identify high-probability breakouts.
-You operate in two distinct modes based on the `session_type`.
+You are an elite **"Pre-Breakout" Scalping AI**.
+Your Strategy: **"Buy the Coil, Sell the Expansion."**
+You prioritize stocks that are **quietly coiling (Squeeze)** over stocks that have already exploded (FOMO).
 
-**INPUT DATA:**
-1. `session_type`: "premarket", "regular", or "aftermarket"
-2. `engine_1_pass`: WAE Explosion (Momentum)
-3. `engine_2_pass`: Ichimoku (Trend Support)
-4. `rsi_value`: Current RSI
-5. `cmf_value`: Chaikin Money Flow
-6. `cloud_distance`: Distance from Cloud
-7. `volume_ratio`: Current Volume / 5-bar Average Volume (e.g., 2.0 = 2x volume)
-
----
-### STEP 1: Session Mode Selector
-Determine the scoring logic based on `session_type`.
-
-**MODE A: STANDARD (Pre-market / Aftermarket)**
-* **Logic:** High sensitivity. Reacts to initial momentum.
-* **Max Score Cap:** 95
-
-**MODE B: HARD (Regular Session)**
-* **Logic:** High friction. Assumes all breakouts are fakeouts until proven otherwise by Volume & CMF.
-* **Max Score Cap:** 97 (Only if perfect triple confirmation exists).
+**INPUT DATA Analysis:**
+1. `squeeze_ratio`:
+   - **< 1.0:** TIGHT SQUEEZE (Energy Coiling). **Target Entry Zone.**
+   - **> 1.3:** EXPANDED (Already popped). **High Risk of Pullback.**
+2. `is_volume_dry` (Volume Dry-up):
+   - **True:** Selling pressure exhausted. Smart money holding. (Good).
+   - **False:** High activity. If price spiked, it's too late.
+3. `pump_strength_5m`:
+   - **> 4.0%:** Danger. Price spiked vertically recently. **Deduct points.**
+4. `cloud_distance`: Should be holding support above the cloud.
 
 ---
-### STEP 2: Mandatory Base Filter (Both Modes)
-If BOTH `engine_1_pass` AND `engine_2_pass` are **False** → **Invalid (Score 10~20). Stop.**
+### SCORING LOGIC (The Sniper Approach)
+
+**🛑 CRITICAL FILTER: The "Anti-Chase" Rule**
+* IF `pump_strength_5m` > 5.0% (Rose >5% in 5 mins):
+   → **MAX SCORE = 55.** (Too late, let it go).
+   → *Reasoning: "Vertical spike detected. High risk of chasing top."*
+
+**Step 1: The "Setup" Scoring**
+
+* **Pattern A (Perfect Pre-Breakout):**
+   - `squeeze_ratio` < 1.0 (Bands are tight)
+   - `is_volume_dry` is True (Volume is low)
+   - Price is above Cloud (Trend Support)
+   → **SCORE: 85~95** (Ideal Sniper Entry).
+
+* **Pattern B (Early Momentum):**
+   - `squeeze_ratio` starting to expand (1.0 ~ 1.2)
+   - `engine_1_pass` (WAE) just turned True.
+   - `volume_ratio` > 1.5 (Volume returning).
+   → **SCORE: 80~90** (Ride the wave start).
+
+* **Pattern C (Drifting/Fakeout):**
+   - Price far from Cloud support.
+   - `rsi_value` > 80 (Overbought).
+   → **SCORE: 40~50** (No edge).
 
 ---
-### STEP 3: Pattern Scoring & Adjustments
-
-#### ➤ IF MODE A (Pre/After-market):
-**1. Pattern Scoring:**
-   * **Pattern A (Power Breakout):** Engine 1 True + RSI ≥ 65 + Cloud Dist ≥ 5% → **Base: 80~90**
-   * **Pattern B (Support Bounce):** Cloud Dist < 5% + RSI 45~65 → **Base: 75~85**
-   * **Pattern C (Weak):** Others → **Base: 30~50**
-
-**2. Reliability Modifiers (Standard):**
-   * **CMF Check:** `cmf_value` > 0.05 → **+5 points**.
-   * **CMF Divergence:** `cmf_value` < 0 → **-10 points**.
-   * **RSI Overheat:** `rsi_value` > 85 → **-5 points**.
-
----
-
-#### ➤ IF MODE B (Regular Session - HARD FILTER):
-**⚠️ CRITICAL: Strict Confirmation Rules Apply**
-
-**1. Volume Validation (The Gatekeeper):**
-   * If `volume_ratio` < 2.0 (Volume is less than 2x average):
-       * **FORCE MAX SCORE = 65** (Treat as Fakeout/Trap).
-       * *Reasoning must state: "Low volume breakout in regular session."*
-
-**2. Pattern Scoring (If Volume Passed):**
-   * **Pattern A (Power Breakout):** Engine 1 True + RSI ≥ 60 → **Base: 75~85**
-   * **Pattern B (Support Bounce):** Engine 2 True → **Base: 70~80**
-   * **Cloud Penalty:** If strictly Engine 2 (Cloud) setup, apply **-15 points** weight reduction (Cloud breakouts are noisy in Regular session).
-
-**3. Reliability Modifiers (Strict):**
-   * **CMF Threshold:**
-       * `cmf_value` ≥ 0.15 → **+10 points** (Strong institutional buying).
-       * `cmf_value` between 0.00 and 0.14 → **0 points** (Neutral, not enough conviction).
-       * `cmf_value` < 0 → **-20 points** (Severe Divergence/Trap).
-
-   * **Triple Synergy Bonus (The only way to reach 90+):**
-       * IF (`rsi_value` > 60 rising) AND (`cmf_value` ≥ 0.15) AND (`volume_ratio` ≥ 2.5):
-       * **Add +5 points** (Perfect Synergy).
-
-   * **Engine 1 Solo Penalty:**
-       * If `engine_1_pass` is True BUT `engine_2_pass` is False:
-       * **Subtract -10 points** (Volatility without trend support is risky in Regular session).
-
----
-### STEP 4: Final Calculation & Output
-
-**Final Sanity Check:**
-1. If `rsi_value` > 80 AND `cmf_value` < 0.05 → **Cap Score at 60** (RSI Peak Trap).
-2. In **Regular Session**, if Score > 80 but `volume_ratio` < 2.0 → **Reduce Score to 60**.
-
 **Generate JSON Output:**
 Respond ONLY with this JSON structure.
 {
   "probability_score": <int>,
-  "reasoning": "<[SessionType] Pattern (A/B). Volume: x.x, CMF: x.xx. Explain why it is a Win or Fakeout based on the logic above.>"
+  "reasoning": "<[Setup] Squeeze: x.xx, VolDry: T/F. [Analysis] Explain why this is a good pre-breakout entry or why it is skipped.>"
 }
 """
     user_prompt = f"""
@@ -575,10 +541,45 @@ def calculate_volume_ratio(df):
         return round(ratio, 2)
     except:
         return 1.0
-# --- 2단계 로직: "v5.1 느슨한 통합 엔진" (5분) ---
+    # --- (신규) 과거 데이터 스냅샷 가져오기 ---
+def fetch_initial_data(ticker):
+    """
+    새로운 종목 구독 시, 과거 200분(캔들) 데이터를 즉시 로딩하여
+    52분 대기 시간(Cold Start)을 없애고 바로 분석 가능하게 만듦.
+    """
+    if not POLYGON_API_KEY: return
+    
+    # 오늘 날짜 기준으로 과거 데이터 요청
+    # (limit=200: 최근 200개 1분봉 가져옴)
+    url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/2000-01-01/3000-01-01?adjusted=true&sort=desc&limit=200&apiKey={POLYGON_API_KEY}"
+    
+    try:
+        res = requests.get(url, timeout=5)
+        data = res.json()
+        
+        if data.get('status') == 'OK' and data.get('results'):
+            results = data['results']
+            # Polygon Aggs는 최신순(desc)으로 요청했어도 리스트는 섞일 수 있으니 다시 정렬
+            # 보통 오름차순(옛날 -> 최신)으로 DataFrame을 만들어야 함
+            results.sort(key=lambda x: x['t']) 
+            
+            df = pd.DataFrame(results)
+            df.rename(columns={'o':'o', 'h':'h', 'l':'l', 'c':'c', 'v':'v', 't':'t'}, inplace=True)
+            df['t'] = pd.to_datetime(df['t'], unit='ms')
+            df.set_index('t', inplace=True)
+            
+            # 전역 변수에 주입
+            ticker_minute_history[ticker] = df
+            print(f"✅ [초기화] {ticker} 과거 캔들 {len(df)}개 로딩 완료. 즉시 분석 가능.")
+    except Exception as e:
+        print(f"⚠️ [초기화 실패] {ticker}: {e}")
+
 async def handle_msg(msg_data):
     global ticker_minute_history, ticker_tick_history
-    m_fast, m_slow, m_sig = WAE_MACD; bb_len, bb_std = WAE_BB
+    
+    # --- 설정값 로드 (외부 변수라 가정) ---
+    m_fast, m_slow, m_sig = WAE_MACD
+    bb_len, bb_std = WAE_BB
     T, K, S = ICHIMOKU_SHORT
     
     TENKAN_COL = f"ITS_{T}"
@@ -587,29 +588,38 @@ async def handle_msg(msg_data):
     SENKOU_B_COL = f"ISB_{K}"
     CHIKOU_COL = f"ICS_{K}"
     
-    # ✅ 2번 지적 사항 반영: msg_data가 dict이면 list로 감싸서 크래시 방지
+    # ✅ [수정] 입력 데이터 타입 안전성 확보
     if isinstance(msg_data, dict):
         msg_list = [msg_data]
     else:
         msg_list = msg_data
 
     minute_data = []
+    
+    # 1. 데이터 수신 및 분류
     for msg in msg_list:
         ticker = msg.get('sym')
-        if not ticker:
-            continue
+        if not ticker: continue
             
+        # (1) 실시간 틱 데이터 수집 (보간용)
         if msg.get('ev') == 'T':
             if ticker not in ticker_tick_history:
                 ticker_tick_history[ticker] = []
+            
+            # 필요한 데이터만 경량화해서 저장
             ticker_tick_history[ticker].append([msg.get('t'), msg.get('p'), msg.get('s')])
+            
+            # 틱 데이터 버퍼 관리
             if len(ticker_tick_history[ticker]) > 1000:
                 ticker_tick_history[ticker] = ticker_tick_history[ticker][-1000:]
                 
+        # (2) 1분봉 데이터 수집
         elif msg.get('ev') == 'AM':
-            print(f"-> [엔진 v10.0] 1분봉 데이터 수신: {ticker} @ ${msg.get('c')} (Vol: {msg.get('v')})")
+            # 로그는 필요시 주석 해제
+            # print(f"-> [엔진 v10.0] 1분봉 수신: {ticker} @ ${msg.get('c')}")
             minute_data.append(msg)
 
+    # 2. 각 종목별 지표 계산 및 분석
     for msg in minute_data:
         ticker = msg.get('sym')
         
@@ -621,34 +631,42 @@ async def handle_msg(msg_data):
         new_row = {'o': msg.get('o'), 'h': msg.get('h'), 'l': msg.get('l'), 'c': msg.get('c'), 'v': msg.get('v')}
         ticker_minute_history[ticker].loc[timestamp] = new_row
         
-        if len(ticker_minute_history[ticker]) > 60:
-            ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-60:]
+        # ✅ [중요 수정] 데이터 보관 갯수 60 -> 200개로 증가
+        # 일목균형표(52), MACD(26) 등의 선행 계산을 위해 넉넉한 데이터 필요 (NaN 방지)
+        if len(ticker_minute_history[ticker]) > 200:
+            ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-200:]
         
         df_raw = ticker_minute_history[ticker].copy() 
         
-        if len(df_raw) < MIN_DATA_REQ: continue
+        # 최소 데이터 요구량 체크 (일목균형표 선행스팬B 계산 최소치 고려)
+        if len(df_raw) < max(MIN_DATA_REQ, 52): 
+            continue
 
+        # 1분봉 리샘플링
         df = df_raw.resample('1min').agg({
             'o': 'first', 'h': 'max', 'l': 'min', 'c': 'last', 'v': 'sum'
         })
         
+        # 틱 데이터 기반 보간 (Interpolation)
         if ticker in ticker_tick_history and len(ticker_tick_history[ticker]) > 0:
             try:
                 ticks_df = pd.DataFrame(ticker_tick_history[ticker], columns=['t', 'p', 's'])
                 ticks_df['t'] = pd.to_datetime(ticks_df['t'], unit='ms')
                 ticks_df.set_index('t', inplace=True)
                 
+                # 현재 생성 중인 최신 봉(Last Row) 업데이트
                 df['c'] = df['c'].combine_first(ticks_df['p'].resample('1min').last())
                 df['o'] = df['o'].combine_first(ticks_df['p'].resample('1min').first())
                 df['h'] = df['h'].combine_first(ticks_df['p'].resample('1min').max())
                 df['l'] = df['l'].combine_first(ticks_df['p'].resample('1min').min())
                 df['v'] = df['v'].combine_first(ticks_df['s'].resample('1min').sum())
                 
-                ticker_tick_history[ticker] = ticker_tick_history[ticker][-100:]
+                ticker_tick_history[ticker] = ticker_tick_history[ticker][-200:] # 틱 버퍼 정리
 
             except Exception as e:
-                print(f"-> [v9.0 틱 보간 실패] {ticker}: {e}")
+                print(f"-> [v9.0 틱 보간 경고] {ticker}: {e}")
                 
+        # 결측치 처리
         df.interpolate(method='linear', inplace=True)
         df.ffill(inplace=True)
         df.bfill(inplace=True)
@@ -658,14 +676,21 @@ async def handle_msg(msg_data):
 
         df.rename(columns={'c': 'close', 'h': 'high', 'l': 'low', 'o': 'open', 'v': 'volume'}, inplace=True)
         
-        df.ta.macd(fast=m_fast, slow=m_slow, signal=m_sig, append=True)
-        df.ta.bbands(length=bb_len, std=bb_std, append=True)
-        df.ta.atr(length=WAE_ATR, append=True)
-        df.ta.cmf(length=WAE_CMF, append=True) 
-        df.ta.obv(append=True)
-        df.ta.rsi(length=RSI_LENGTH, append=True) 
-        df.ta.ichimoku(tenkan=T, kijun=K, senkou=S, append=True)
+        # --- 기술적 지표 계산 (pandas_ta) ---
+        try:
+            df.ta.macd(fast=m_fast, slow=m_slow, signal=m_sig, append=True)
+            df.ta.bbands(length=5, std=1.5, append=True)  # WAE용
+            df.ta.bbands(length=20, std=2.0, append=True) # ✅ Squeeze 감지용 표준 BB
+            df.ta.atr(length=WAE_ATR, append=True)
+            df.ta.cmf(length=WAE_CMF, append=True) 
+            df.ta.obv(append=True)
+            df.ta.rsi(length=RSI_LENGTH, append=True) 
+            df.ta.ichimoku(tenkan=T, kijun=K, senkou=S, append=True)
+        except Exception as e:
+            print(f"-> [지표 계산 오류] {ticker}: {e}")
+            continue
         
+        # 컬럼 찾기
         MACD_COL = next((c for c in df.columns if c.startswith('MACD_')), None)
         BB_UP_COL = next((c for c in df.columns if c.startswith('BBU_')), None)
         BB_LOW_COL= next((c for c in df.columns if c.startswith('BBL_')), None)
@@ -688,70 +713,129 @@ async def handle_msg(msg_data):
         TENKAN_COL   = tenkan_cols[0];   KIJUN_COL    = kijun_cols[0]
         CHIKOU_COL   = chikou_cols[0]
         
+        # WAE 지표 계산
         df['t1'] = (df[MACD_COL] - df[MACD_COL].shift(1)) * WAE_SENSITIVITY
         df['e1'] = df[BB_UP_COL] - df[BB_LOW_COL]
         df['deadZone'] = df[ATR_COL] * WAE_ATR_MULT
-        
-        if len(df) < MIN_DATA_REQ: continue 
             
         last = df.iloc[-1]; prev = df.iloc[-2]
 
         try:
+            # ---------------------------------------------------------
+            # ✅ [개선 1] 5분 급등 피로도 (Pump Fatigue)
+            # 이미 쏜 종목을 '눌림목'으로 착각해 들어가는 것 방지
+            # ---------------------------------------------------------
+            price_now = df['close'].iloc[-1]
+            if len(df) >= 6:
+                price_5m_ago = df['close'].iloc[-6] 
+                pump_strength_5m = ((price_now - price_5m_ago) / price_5m_ago) * 100
+            else:
+                pump_strength_5m = 0.0
+
+            # ---------------------------------------------------------
+            # ✅ [개선 2] 볼린저 밴드 Squeeze 정교화
+            # 단순히 폭이 좁은게 아니라, '평소보다' 좁은지를 비교
+            # ---------------------------------------------------------
+            bb_upper = df[BB_UP_COL].iloc[-1]
+            bb_lower = df[BB_LOW_COL].iloc[-1]
+            bb_mid_val = (bb_upper + bb_lower) / 2 if (bb_upper + bb_lower) != 0 else 1
+            
+            current_width = (bb_upper - bb_lower) / bb_mid_val # 현재 밴드폭 비율
+
+            # 최근 20봉 평균 밴드폭 계산
+            bb_width_series = (df[BB_UP_COL] - df[BB_LOW_COL]) / ((df[BB_UP_COL] + df[BB_LOW_COL]) / 2)
+            avg_width_20 = bb_width_series.rolling(20).mean().iloc[-1]
+            
+            # 현재 폭이 평균보다 작으면 '수축(Squeeze)' 상태
+            is_squeezed = current_width < avg_width_20
+
+            # ATR(변동성) 축소 확인 (보조 지표)
+            atr_now = df[ATR_COL].iloc[-1]
+            atr_avg = df[ATR_COL].iloc[-6:-1].mean()
+            is_volatility_shrinking = (atr_now < atr_avg) or is_squeezed
+
+            # ---------------------------------------------------------
+            # ✅ [개선 3] 거래량 가뭄 (Volume Dry-up)
+            # ---------------------------------------------------------
+            curr_vol = df['volume'].iloc[-1]
+            avg_vol_5 = df['volume'].iloc[-6:-1].mean()
+            if avg_vol_5 == 0: avg_vol_5 = 1
+            
+            is_volume_dry = curr_vol < (avg_vol_5 * 0.7) # 평소의 70% 수준
+
+            # --- 기본 조건 정의 ---
             cond_wae_momentum = (last['t1'] > last['e1']) and (last['t1'] > last['deadZone'])
             cond_volume = (last[CMF_COL] > 0) and (last['OBV'] > prev['OBV'])
-            cond_rsi = (WAE_RSI_RANGE[0] < last[RSI_COL] < WAE_RSI_RANGE[1]) # ✅ (v16.2) 75로 복귀
+            cond_rsi = (WAE_RSI_RANGE[0] < last[RSI_COL] < WAE_RSI_RANGE[1])
 
-            cloud_a_current = df[SENKOU_A_COL].iloc[-K]; cloud_b_current = df[SENKOU_B_COL].iloc[-K]
-            cloud_top = max(cloud_a_current, cloud_b_current); 
+            # --- 일목균형표 조건 ---
+            # 중요: 현재 캔들과 비교할 구름대는 K(26)개 전의 구름대 값임 (pandas_ta 구조상)
+            idx_cloud = -K if len(df) > K else -1
+            cloud_a_current = df[SENKOU_A_COL].iloc[idx_cloud]
+            cloud_b_current = df[SENKOU_B_COL].iloc[idx_cloud]
+            
+            cloud_top = max(cloud_a_current, cloud_b_current)
             is_above_cloud = last['close'] > cloud_top
             tk_cross_bullish = (prev[TENKAN_COL] < prev[KIJUN_COL]) and (last[TENKAN_COL] > last[KIJUN_COL])
             cond_ichimoku_trend = is_above_cloud and tk_cross_bullish
             
+            # 구름대 두께 및 이격도
             cloud_thickness = abs(cloud_a_current - cloud_b_current) / last['close'] * 100
             dist_bull = (last['close'] - cloud_top) / last['close'] * 100
-            
-            # ✅ (v16.2) 20.0으로 복귀
             cond_cloud_shape = (cloud_thickness >= CLOUD_THICKNESS) and (0 <= dist_bull <= CLOUD_PROXIMITY) 
 
-            chikou = last[CHIKOU_COL] 
-            price_K_ago = df['close'].iloc[-K] 
-            cond_chikou = chikou > price_K_ago
+            # 후행스팬 (26봉 전 주가보다 높아야 함)
+            price_K_ago = df['close'].iloc[idx_cloud]
+            cond_chikou = last[CHIKOU_COL] > price_K_ago
 
+            # --- 최종 트리거 조합 ---
+            
+            # A. WAE 폭발 (강력 매수)
             engine_1_pass = (cond_wae_momentum and cond_rsi)
+            
+            # B. 정석 셋업 (구름대 위 + 거래량 받쳐줌 + 모양 좋음)
             engine_2_pass = (cond_cloud_shape and cond_volume and cond_rsi)
             
-            if engine_1_pass or engine_2_pass:
-                
-                # ✅ [추가 3] 세션 및 거래량 비율 계산
-                current_session = get_current_session()
-                if current_session == "closed":
-                    pass # 장 마감이어도 로깅을 위해 진행하거나, 여기서 return하여 중단 가능
+            # C. [신규] 발산 전조 (Pre-Breakout)
+            # 조건: 수축 상태 + 거래량 말름 + 구름대 위 + (중요) 아직 급등 안함(3% 미만)
+            cond_pre_breakout = (is_volatility_shrinking and is_volume_dry and is_above_cloud and pump_strength_5m < 3.0)
 
-                vol_ratio = calculate_volume_ratio(df)
+            if engine_1_pass or engine_2_pass or cond_pre_breakout:
+                
+                # 추가 정보 계산
+                current_session = get_current_session() # 외부 함수
+                if current_session == "closed": pass 
+
+                vol_ratio = calculate_volume_ratio(df) # 외부 함수
+
+                # 전략 타입 결정
+                if engine_1_pass: strat_type = "Explosion (WAE)"
+                elif cond_pre_breakout: strat_type = "Pre-Breakout (Squeeze)"
+                else: strat_type = "Standard Setup"
 
                 conditions_data = {
-                    "session_type": current_session,   # <--- ★ 핵심: 세션 정보 추가
-                    "volume_ratio": vol_ratio,         # <--- ★ 핵심: 거래량 비율 추가
-                    "engine_1_pass (Explosion)": bool(engine_1_pass),
-                    "engine_2_pass (Setup)": bool(engine_2_pass),
-                    "wae_momentum": bool(cond_wae_momentum),
-                    "rsi_ok": bool(cond_rsi),
-                    "volume_ok": bool(cond_volume),
-                    "cloud_shape_ok (20%)": bool(cond_cloud_shape), # (v16.2) 복귀
-                    "ichimoku_trend_ok": bool(cond_ichimoku_trend),
-                    "chikou_ok": bool(cond_chikou),
+                    "session_type": current_session,
+                    "strategy_type": strat_type,        # 전략 유형 로깅
+                    "volume_ratio": vol_ratio,
+                    "pump_strength_5m": float(round(pump_strength_5m, 2)),
+                    "bb_width_ratio": float(round(current_width / avg_width_20, 2)), # 평균 대비 비율 (1.0 미만이면 수축)
+                    "is_volume_dry": bool(is_volume_dry),
+                    "engine_1_pass": bool(engine_1_pass),
+                    "engine_2_pass": bool(engine_2_pass),
+                    "pre_breakout": bool(cond_pre_breakout),
                     "rsi_value": float(round(last[RSI_COL], 2)),
                     "cmf_value": float(round(last[CMF_COL], 2)),
                     "cloud_distance_percent": float(round(dist_bull, 2))
                 }
                 
+                # AI 판단 요청
                 probability_score = await get_gemini_probability(ticker, conditions_data)
                 
-                print(f"💡💡💡 [통합 엔진 v5.1] {ticker} @ ${last['close']:.4f} (AI Score: {probability_score}%) 💡💡💡")
+                print(f"💡 [{strat_type}] {ticker} @ ${last['close']:.4f} | AI: {probability_score}% | Pump: {pump_strength_5m:.1f}%")
+                
                 is_new_rec = log_recommendation(ticker, float(last['close']), probability_score)
                 
                 if is_new_rec: 
-                    # ✅ (v16.2) 수정된 함수 (풀백 알림 제거)
                     send_discord_alert(ticker, float(last['close']), "recommendation", probability_score)
                     send_fcm_notification(ticker, float(last['close']), probability_score)
             
@@ -759,8 +843,10 @@ async def handle_msg(msg_data):
                 pass
                 
         except Exception as e:
-            print(f"-> ❌ [엔진 CRASH] {ticker} 분석 중 치명적 오류: {e}") 
-            pass 
+            # 에러 라인 번호까지 출력하여 디버깅 용이하게 함
+            import traceback
+            print(f"-> ❌ [엔진 CRASH] {ticker} ({e.__traceback__.tb_lineno} line): {e}") 
+            pass
 
 # --- (v7.2) 수신 엔진 ---
 async def websocket_engine(websocket):
@@ -777,7 +863,7 @@ async def websocket_engine(websocket):
     except Exception as e:
         print(f"-> ❌ [엔진 v9.0] 웹소켓 오류: {e}")
 
-# --- (v16.2) 튜닝: 7분마다 '사냥꾼' 실행 (API 한도 복귀) ---
+# --- (v16.2) 튜닝: 3분마다 '사냥꾼' 실행 (API 한도 복귀) ---
 async def periodic_scanner(websocket):
     current_subscriptions = set() 
     
@@ -807,6 +893,9 @@ async def periodic_scanner(websocket):
                     params_str = f"AM.{ticker},T.{ticker}"
                     sub_payload = json.dumps({"action": "subscribe", "params": params_str})
                     await websocket.send(sub_payload)
+                    # 2. 🔥 [추가] 과거 데이터 즉시 로딩 (52분 대기 시간 삭제)
+                    # 이 함수가 실행되면 즉시 ticker_minute_history에 200개 봉이 채워짐
+                    fetch_initial_data(ticker)
                     await asyncio.sleep(0.1)
                 print("[사냥꾼] 신규 구독 완료.")
                 
