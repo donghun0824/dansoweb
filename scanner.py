@@ -12,6 +12,7 @@ import httpx
 import firebase_admin # ✅ 1. firebase-admin 임포트
 from firebase_admin import credentials, messaging # ✅ 2. 관련 모듈 임포트
 import sys
+import pytz
 # --- (v12.0) API 키 설정 (보안) ---
 # 3. Render 환경 변수에서 API 키를 읽어옵니다.
 POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
@@ -100,78 +101,99 @@ async def get_gemini_probability(ticker, conditions_data):
         return 50
 
     system_prompt = """
-You are a specialized scalping AI. Your goal is to filter out "Fakeouts" and identify high-probability breakout setups (1–30 min).
+You are a specialized Scalping AI designed to filter out "Fakeouts" and identify high-probability breakouts.
+You operate in two distinct modes based on the `session_type`.
 
-**CRITICAL UPDATE:** You must cross-reference the `Engine` type with `CMF` (Money Flow). High RSI *without* positive CMF is a TRAP (Peak).
-
----
-STEP 1: Mandatory Engine Filter
--------------------------------------------
-* The signal MUST pass at least one:
-  - `engine_1_pass` (WAE Explosion): Measures volatility expansion & momentum.
-  - `engine_2_pass` (Ichimoku Setup): Measures trend support & breakouts.
-* If BOTH are false → **Invalid (Score 10~20)**. Stop.
-
----
-STEP 2: Pattern Identification & Scoring Base
--------------------------------------------
-Identify which pattern the signal fits best.
-
-**PATTERN A: "POWER BREAKOUT" (Momentum)**
-* **Core Logic:** `Engine 1` (Explosion) passed AND price is surging.
-* **Conditions:**
-  - `engine_1_pass` is **TRUE**.
-  - `rsi_value` ≥ 65 (Strong momentum).
-  - `cloud_distance` ≥ 5% (Clear of the cloud).
-* **Base Score:** 80 ~ 90
-
-**PATTERN B: "PERFECT SUPPORT" (Dip & Rip)**
-* **Core Logic:** Price pulled back to cloud/support and is bouncing.
-* **Conditions:**
-  - `cloud_distance` < 5% (Near or inside cloud support).
-  - `rsi_value` between 45 and 65 (Not overheated).
-* **Base Score:** 75 ~ 85
-
-**PATTERN C: "WEAK / TRAP ZONE"**
-* **Conditions:** Anything not matching A or B.
-* **Base Score:** 30 ~ 50
+**INPUT DATA:**
+1. `session_type`: "premarket", "regular", or "aftermarket"
+2. `engine_1_pass`: WAE Explosion (Momentum)
+3. `engine_2_pass`: Ichimoku (Trend Support)
+4. `rsi_value`: Current RSI
+5. `cmf_value`: Chaikin Money Flow
+6. `cloud_distance`: Distance from Cloud
+7. `volume_ratio`: Current Volume / 5-bar Average Volume (e.g., 2.0 = 2x volume)
 
 ---
-STEP 3: Reliability Check (The "95%" Filter)
--------------------------------------------
-Adjust the base score based on reliability factors. **This determines if a signal is a 'Win' or a 'Fakeout'.**
+### STEP 1: Session Mode Selector
+Determine the scoring logic based on `session_type`.
 
-**1. MONEY FLOW CHECK (Crucial):**
-   - If `cmf_value` > 0.05: **Add +5** (Real money is buying).
-   - If `cmf_value` < 0: **Subtract -10** (Price is rising but money is leaving = Divergence/Trap).
-   - *Note: A signal cannot exceed 90 without positive CMF.*
+**MODE A: STANDARD (Pre-market / Aftermarket)**
+* **Logic:** High sensitivity. Reacts to initial momentum.
+* **Max Score Cap:** 95
 
-**2. RSI EXHAUSTION CHECK:**
-   - If `rsi_value` > 85: **Subtract -5** (Too extended, risk of immediate pullback).
-   - If `rsi_value` is 60~80: **Neutral/Positive** (Healthy momentum).
-
-**3. ENGINE SYNERGY:**
-   - If `engine_1_pass` AND `engine_2_pass` are BOTH true: **Add +5**.
+**MODE B: HARD (Regular Session)**
+* **Logic:** High friction. Assumes all breakouts are fakeouts until proven otherwise by Volume & CMF.
+* **Max Score Cap:** 97 (Only if perfect triple confirmation exists).
 
 ---
-STEP 4: Final Output Generation
------------------------------------
-Calculate the final score.
-* **90~97:** Perfect Setup (Engine 1 + Positive CMF + Healthy RSI).
-* **80~89:** Strong Buy (Good Engine + Good Context).
-* **60~79:** Speculative/Weak Buy (Needs caution).
-* **< 60:** Avoid.
+### STEP 2: Mandatory Base Filter (Both Modes)
+If BOTH `engine_1_pass` AND `engine_2_pass` are **False** → **Invalid (Score 10~20). Stop.**
 
-**CAP final score at 97.**
+---
+### STEP 3: Pattern Scoring & Adjustments
 
-You must respond ONLY with the JSON schema:
+#### ➤ IF MODE A (Pre/After-market):
+**1. Pattern Scoring:**
+   * **Pattern A (Power Breakout):** Engine 1 True + RSI ≥ 65 + Cloud Dist ≥ 5% → **Base: 80~90**
+   * **Pattern B (Support Bounce):** Cloud Dist < 5% + RSI 45~65 → **Base: 75~85**
+   * **Pattern C (Weak):** Others → **Base: 30~50**
+
+**2. Reliability Modifiers (Standard):**
+   * **CMF Check:** `cmf_value` > 0.05 → **+5 points**.
+   * **CMF Divergence:** `cmf_value` < 0 → **-10 points**.
+   * **RSI Overheat:** `rsi_value` > 85 → **-5 points**.
+
+---
+
+#### ➤ IF MODE B (Regular Session - HARD FILTER):
+**⚠️ CRITICAL: Strict Confirmation Rules Apply**
+
+**1. Volume Validation (The Gatekeeper):**
+   * If `volume_ratio` < 2.0 (Volume is less than 2x average):
+       * **FORCE MAX SCORE = 65** (Treat as Fakeout/Trap).
+       * *Reasoning must state: "Low volume breakout in regular session."*
+
+**2. Pattern Scoring (If Volume Passed):**
+   * **Pattern A (Power Breakout):** Engine 1 True + RSI ≥ 60 → **Base: 75~85**
+   * **Pattern B (Support Bounce):** Engine 2 True → **Base: 70~80**
+   * **Cloud Penalty:** If strictly Engine 2 (Cloud) setup, apply **-15 points** weight reduction (Cloud breakouts are noisy in Regular session).
+
+**3. Reliability Modifiers (Strict):**
+   * **CMF Threshold:**
+       * `cmf_value` ≥ 0.15 → **+10 points** (Strong institutional buying).
+       * `cmf_value` between 0.00 and 0.14 → **0 points** (Neutral, not enough conviction).
+       * `cmf_value` < 0 → **-20 points** (Severe Divergence/Trap).
+
+   * **Triple Synergy Bonus (The only way to reach 90+):**
+       * IF (`rsi_value` > 60 rising) AND (`cmf_value` ≥ 0.15) AND (`volume_ratio` ≥ 2.5):
+       * **Add +5 points** (Perfect Synergy).
+
+   * **Engine 1 Solo Penalty:**
+       * If `engine_1_pass` is True BUT `engine_2_pass` is False:
+       * **Subtract -10 points** (Volatility without trend support is risky in Regular session).
+
+---
+### STEP 4: Final Calculation & Output
+
+**Final Sanity Check:**
+1. If `rsi_value` > 80 AND `cmf_value` < 0.05 → **Cap Score at 60** (RSI Peak Trap).
+2. In **Regular Session**, if Score > 80 but `volume_ratio` < 2.0 → **Reduce Score to 60**.
+
+**Generate JSON Output:**
+Respond ONLY with this JSON structure.
 {
   "probability_score": <int>,
-  "reasoning": "<Briefly explain Pattern (A/B), CMF status, and why it is/isnt a fakeout>"
+  "reasoning": "<[SessionType] Pattern (A/B). Volume: x.x, CMF: x.xx. Explain why it is a Win or Fakeout based on the logic above.>"
 }
 """
     user_prompt = f"""
     Analyze the following signal data for Ticker: {ticker}
+    
+    [MARKET CONTEXT]
+    - Current Session: {conditions_data.get('session_type', 'unknown')}
+    - Volume Ratio: {conditions_data.get('volume_ratio', 0.0)}
+    
+    [TECHNICAL DATA]
     {json.dumps(conditions_data, indent=2)}
     """
     
@@ -507,7 +529,52 @@ def find_active_tickers():
         
     # ✅ (추가) 성공 시에도 항상 set을 반환
     return tickers_to_watch
+# --- ✅ [추가 2] 시간 및 거래량 분석 함수 추가 ---
 
+def get_current_session():
+    """
+    현재 시간에 따라 세션 타입을 반환합니다. (US/Eastern 기준)
+    - premarket: 04:00 ~ 09:30
+    - regular: 09:30 ~ 16:00
+    - aftermarket: 16:00 ~ 20:00
+    """
+    try:
+        ny_tz = pytz.timezone('US/Eastern')
+        now = datetime.now(ny_tz).time()
+
+        # 시간대 설정
+        time_pre_start = datetime.strptime("04:00", "%H:%M").time()
+        time_regular_start = datetime.strptime("09:30", "%H:%M").time()
+        time_after_start = datetime.strptime("16:00", "%H:%M").time()
+        time_market_close = datetime.strptime("20:00", "%H:%M").time()
+
+        if time_pre_start <= now < time_regular_start:
+            return "premarket"  # [모드 A]
+        elif time_regular_start <= now < time_after_start:
+            return "regular"    # [모드 B] (엄격 모드)
+        elif time_after_start <= now < time_market_close:
+            return "aftermarket" # [모드 A]
+        else:
+            return "closed"      # 장 마감
+    except Exception as e:
+        print(f"⚠️ [Time Check Error] {e}")
+        return "premarket" # 에러 시 기본값
+
+def calculate_volume_ratio(df):
+    """
+    현재 캔들 거래량 / 직전 5개 캔들 평균 거래량
+    """
+    try:
+        if len(df) < 6: return 1.0
+        current_vol = df['volume'].iloc[-1]
+        avg_vol_5 = df['volume'].iloc[-6:-1].mean() # 직전 5개 평균
+        
+        if avg_vol_5 == 0: return 0.0
+        
+        ratio = current_vol / avg_vol_5
+        return round(ratio, 2)
+    except:
+        return 1.0
 # --- 2단계 로직: "v5.1 느슨한 통합 엔진" (5분) ---
 async def handle_msg(msg_data):
     global ticker_minute_history, ticker_tick_history
@@ -655,7 +722,16 @@ async def handle_msg(msg_data):
             
             if engine_1_pass or engine_2_pass:
                 
+                # ✅ [추가 3] 세션 및 거래량 비율 계산
+                current_session = get_current_session()
+                if current_session == "closed":
+                    pass # 장 마감이어도 로깅을 위해 진행하거나, 여기서 return하여 중단 가능
+
+                vol_ratio = calculate_volume_ratio(df)
+
                 conditions_data = {
+                    "session_type": current_session,   # <--- ★ 핵심: 세션 정보 추가
+                    "volume_ratio": vol_ratio,         # <--- ★ 핵심: 거래량 비율 추가
                     "engine_1_pass (Explosion)": bool(engine_1_pass),
                     "engine_2_pass (Setup)": bool(engine_2_pass),
                     "wae_momentum": bool(cond_wae_momentum),
