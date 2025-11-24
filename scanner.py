@@ -547,6 +547,19 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
             obv[i] = obv[i-1]
 
     idx = -1
+
+    # [VWAP] (Volume Weighted Average Price)
+    # 공식: 누적(가격 * 거래량) / 누적(거래량)
+    tp = (highs + lows + closes) / 3
+    vp = tp * volumes
+    
+    cum_vp = np.cumsum(vp)
+    cum_vol = np.cumsum(volumes)
+    
+    # 0 나누기 방지
+    vwap = np.divide(cum_vp, cum_vol, out=np.zeros_like(cum_vp), where=cum_vol!=0)
+
+    idx = -1
     
     return {
         "close": closes[idx],
@@ -586,40 +599,48 @@ You represent a strict scalper who only pulls the trigger on **PERFECT setups**.
 **Score Inflation is Forbidden.** 90+ scores must be RARE and PERFECT.
 
 **INPUT DATA Analysis:**
-1. `pullback_from_high`: **The most critical filter.**
-   - **> 12%:** BROKEN TREND. (Immediate Fail).
-   - **< 5%:** ELITE STRENGTH. (High Tight Flag).
-2. `pump_strength_5m`:
-   - **> 3.0%:** Chasing. Too risky for a 90+ score.
-3. `daily_change`: Indicates momentum.
-4. `squeeze_ratio`: < 1.0 indicates stored energy.
+1. `vwap_distance`: **The "Truth" Indicator (Trend Confirmation).**
+   - **Positive (+):** Price > VWAP. Buyers are defending the trend. (BULLISH).
+   - **Negative (-):** Price < VWAP. Sellers are trapped or unloading. (BEARISH / RESISTANCE).
+   - **Crucial Rule:** A tight squeeze BELOW VWAP is a **"Bearish Flag" (Distribution)**, NOT a breakout setup.
+2. `pullback_from_high`: Trend stability.
+   - **> 12%:** Broken trend.
+   - **< 5%:** Elite strength (High Tight Flag).
+3. `squeeze_ratio`: Energy accumulation (< 1.0 is tight).
+4. `pump_strength_5m`: Chasing risk.
 
 ---
 ### STRICT SCORING LOGIC
 
-**🛑 KILL SWITCH (The "FOXX" Filter)**
+**🛑 KILL SWITCH 1 (The "Dump" Filter)**
 * **IF** `pullback_from_high` > 12.0%:
    → **MAX SCORE = 40.** (Trend is broken. Do not catch a falling knife).
-   → *Reasoning: "Deep pullback (-x%) detected. Chart is broken."*
+
+**🛑 KILL SWITCH 2 (The "VWAP Trap" Filter)**
+* **IF** `vwap_distance` < -0.2%:
+   → **MAX SCORE = 50.** (Price is stuck below VWAP).
+   → *Reasoning: "Price below VWAP. This squeeze is likely distribution/selling, not accumulation."*
 
 **🏆 Pattern A: "The King's Setup" (Rare & Perfect)**
 * **Conditions (ALL must be met):**
-   1. `pullback_from_high` < 5.0% (Holding gains like a rock)
-   2. `squeeze_ratio` < 1.0 (Energy is tightly coiled)
-   3. `pump_strength_5m` < 3.0% (Not currently spiking/chasing)
-   4. `is_volume_dry` is True (Sellers are gone)
+   1. `vwap_distance` > 0.0% (Price is holding ABOVE VWAP) 👈 **MANDATORY**
+   2. `pullback_from_high` < 5.0% (Holding gains)
+   3. `squeeze_ratio` < 1.0 (Tight)
+   4. `is_volume_dry` is True
+   5. `pump_strength_5m` < 3.0%
 * **Verdict:** **SCORE 90~99** (Sniper Entry).
 
-**🥈 Pattern B: "Standard Momentum" (Good but Risky)**
+**🥈 Pattern B: "Standard Momentum" (Good Trade)**
 * **Conditions:**
-   - `pullback_from_high` is 5% ~ 12% (Normal volatility)
-   - `engine_1_pass` (WAE) is True OR `squeeze_ratio` < 1.1
-* **Verdict:** **SCORE 75~85** (Good trade, but not perfect).
+   - `vwap_distance` > -0.2% (At least fighting for VWAP)
+   - `pullback_from_high` is 5% ~ 12%
+   - `engine_1_pass` is True OR `squeeze_ratio` < 1.1
+* **Verdict:** **SCORE 75~85**.
 
-**🗑️ Pattern C: "The Chase" or "The Dump"**
+**🗑️ Pattern C: "The Chase" or "The Trap"**
 * **Conditions:**
-   - `pump_strength_5m` > 4.0% (You are chasing)
-   - OR `pullback_from_high` > 12% (Dump)
+   - `pump_strength_5m` > 4.0% (Chasing)
+   - OR `vwap_distance` < -0.2% (Distribution)
 * **Verdict:** **SCORE 40~60** (Pass).
 
 ---
@@ -627,7 +648,7 @@ You represent a strict scalper who only pulls the trigger on **PERFECT setups**.
 Respond ONLY with this JSON structure.
 {
   "probability_score": <int>,
-  "reasoning": "<[Grade] King/Standard/Trash? [Risk] Pullback: -x.x%. [Verdict] Why this specific score?>"
+  "reasoning": "<[Grade] King/Standard/Trash? [Check] VWAP Dist: x.x%, Pullback: -x.x%. [Verdict] Why this score?>"
 }
 """
     user_prompt = f"""
@@ -749,6 +770,11 @@ async def run_f1_analysis_and_signal(ticker, df):
         indicators = calculate_f1_indicators(closes, highs, lows, volumes)
         
         price_now = indicators['close']
+
+        # 🆕 [VWAP] 이격도 계산 (현재가가 VWAP보다 몇 % 위에 있는지)
+        # (+)값이면 상승세(지지), (-)값이면 하락세(저항)
+        vwap_val = indicators['vwap']
+        dist_vwap = ((price_now - vwap_val) / vwap_val) * 100 if vwap_val != 0 else 0.0
         
         if len(closes) >= 6:
             price_5m = closes[-6]
@@ -807,6 +833,7 @@ async def run_f1_analysis_and_signal(ticker, df):
             ai_data = {
                 "session_type": session,
                 "strategy_type": strat,
+                "vwap_distance": float(round(dist_vwap, 2)),
                 "volume_ratio": float(round(vol_ratio, 2)),
                 "pump_strength_5m": float(round(pump_strength_5m, 2)),
                 "pullback_from_high": float(round(pullback, 2)),
