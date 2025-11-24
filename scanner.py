@@ -867,30 +867,113 @@ async def handle_msg(msg_data):
         df = ticker_minute_history[ticker]
         if len(df) < 52: continue # 최소 데이터 체크
 
+        # --- [F1 버전] 고속 데이터 처리 엔진 (Data Sanitization 적용) ---
+async def handle_msg(msg_data):
+    global ticker_minute_history, ticker_tick_history
+    m_fast, m_slow, m_sig = WAE_MACD; bb_len, bb_std = WAE_BB
+    T, K, S = ICHIMOKU_SHORT
+    
+    if isinstance(msg_data, dict): msg_data = [msg_data]
+    minute_data = []
+
+    # 1. 데이터 수집
+    for msg in msg_data:
+        ticker = msg.get('sym')
+        if not ticker: continue
+        if msg.get('ev') == 'T':
+            if ticker not in ticker_tick_history: ticker_tick_history[ticker] = []
+            ticker_tick_history[ticker].append([msg.get('t'), msg.get('p'), msg.get('s')])
+            if len(ticker_tick_history[ticker]) > 2000: ticker_tick_history[ticker].pop(0)
+        elif msg.get('ev') == 'AM':
+            minute_data.append(msg)
+
+    # 2. 데이터 처리 및 분석
+    for msg in minute_data:
+        ticker = msg.get('sym')
+        
+        if ticker not in ticker_minute_history:
+            ticker_minute_history[ticker] = pd.DataFrame(columns=['o', 'h', 'l', 'c', 'v', 't'])
+            ticker_minute_history[ticker].set_index('t', inplace=True)
+            
+        ts = pd.to_datetime(msg['s'], unit='ms')
+        # 여기서 들어오는 데이터가 None일 수 있음 -> 일단 넣고 나중에 처리
+        ticker_minute_history[ticker].loc[ts] = [msg['o'], msg['h'], msg['l'], msg['c'], msg['v']]
+        
+        if len(ticker_minute_history[ticker]) > 1000:
+            ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-1000:]
+            
+        df = ticker_minute_history[ticker].copy() # 원본 보호를 위해 복사
+        
+        # 최소 데이터 확인
+        if len(df) < 52: continue
+
+        # ---------------------------------------------------------
+        # 🧹 [핵심 수정] 데이터 세탁 (Data Sanitization)
+        # 1. object(문자열/None) -> numeric 강제 변환 (에러나면 NaN)
+        # 2. 결측치(NaN) -> 앞의 값으로 채움 (ffill)
+        # 3. float64로 타입 확정
+        # ---------------------------------------------------------
+        try:
+            cols_to_fix = ['o', 'h', 'l', 'c', 'v']
+            for col in cols_to_fix:
+                # 'coerce': 숫자로 못 바꾸는 건 NaN으로 만들어라
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 빈 구멍(NaN) 메우기: 앞의 값(ffill) -> 뒤의 값(bfill) -> 0
+            df.ffill(inplace=True)
+            df.bfill(inplace=True)
+            df.fillna(0, inplace=True)
+            
+            # 이제 안전하게 float으로 변환
+            df = df.astype(float)
+
+            # 리샘플링 (1분봉 정렬) - 세탁된 데이터로 수행
+            df = df.resample('1min').agg({
+                'o': 'first', 'h': 'max', 'l': 'min', 'c': 'last', 'v': 'sum'
+            })
+            # 리샘플링 후 생기는 NaN도 다시 처리
+            df.ffill(inplace=True) 
+            
+            # 틱 보간 (옵션)
+            if ticker in ticker_tick_history and len(ticker_tick_history[ticker]) > 0:
+                # (틱 보간 코드는 에러 가능성이 있으니 안전하게 감쌈)
+                try:
+                    ticks_df = pd.DataFrame(ticker_tick_history[ticker], columns=['t', 'p', 's'])
+                    ticks_df['t'] = pd.to_datetime(ticks_df['t'], unit='ms')
+                    ticks_df.set_index('t', inplace=True)
+                    last_tick_price = ticks_df['p'].iloc[-1]
+                    # 현재 봉의 종가(close)를 최신 틱 가격으로 갱신 (반응속도 UP)
+                    df.iloc[-1, df.columns.get_loc('c')] = float(last_tick_price)
+                except: pass
+
+        except Exception as e:
+            print(f"⚠️ [데이터 세탁 실패] {ticker}: {e}")
+            continue
+
         # ---------------------------------------------------
-        # 🏎️ [F1 엔진 가동] Pandas TA 제거 -> NumPy 연산
+        # 🏎️ [F1 엔진 가동] (이제 데이터는 무조건 깨끗함)
         # ---------------------------------------------------
         try:
-            # DataFrame을 NumPy 배열로 변환 (연산 속도 UP)
-            closes = df['c'].values.astype(float)
-            highs = df['h'].values.astype(float)
-            lows = df['l'].values.astype(float)
-            volumes = df['v'].values.astype(float)
-            opens = df['o'].values.astype(float)
+            # DataFrame -> NumPy
+            closes = df['c'].values
+            highs = df['h'].values
+            lows = df['l'].values
+            volumes = df['v'].values
+            opens = df['o'].values
 
-            # 🔥 F1 계산 함수 호출 (여기서 모든 지표가 0.001초 만에 계산됨)
+            # 🔥 F1 계산
             indicators = calculate_f1_indicators(closes, highs, lows, volumes)
             
             # --- 결과 추출 ---
             price_now = indicators['close']
             
-            # 1. [Pump Strength] 5분 급등률
+            # 1. [Pump Strength]
             if len(closes) >= 6:
                 price_5m = closes[-6]
-                pump_strength_5m = ((price_now - price_5m) / price_5m) * 100
+                pump_strength_5m = ((price_now - price_5m) / price_5m) * 100 if price_5m != 0 else 0
             else: pump_strength_5m = 0.0
 
-            # 2. [Pullback] 고점 대비 눌림폭
+            # 2. [Pullback]
             day_high = np.max(highs)
             pullback = ((day_high - price_now) / day_high) * 100 if day_high > 0 else 0.0
 
@@ -903,59 +986,54 @@ async def handle_msg(msg_data):
 
             # 5. [Vol Dry]
             vol_avg_5 = np.mean(volumes[-6:-1]) if len(volumes) > 6 else 1
-            is_volume_dry = indicators['volume'] < (vol_avg_5 * 0.8)
+            is_volume_dry = indicators['volume'] < (vol_avg_5 * 1.0) # (테스트 위해 1.0으로 완화 유지)
 
             # --- 트리거 조건 ---
-            # WAE 폭발: (MACD Delta > BB Gap) AND (MACD Delta > DeadZone)
             cond_wae = (indicators['macd_delta'] > indicators['bb_gap_wae']) and \
                        (indicators['macd_delta'] > indicators['dead_zone'])
             
-            # RSI, CMF
             rsi_val = indicators['rsi']
             cmf_val = indicators['cmf']
+            
             cond_rsi = 40 < rsi_val < 75
-            cond_vol = (cmf_val > 0) and (indicators['obv_now'] > indicators['obv_prev'])
+            cond_vol = (cmf_val > 0)
 
-            # Ichimoku Cloud
             cloud_top = indicators['cloud_top']
             is_above_cloud = price_now > cloud_top
             
-            # Cloud Shape (두께, 거리)
             cloud_thick = abs(indicators['senkou_a'] - indicators['senkou_b']) / price_now * 100
             dist_bull = (price_now - cloud_top) / price_now * 100
             cond_cloud_shape = (cloud_thick >= 0.5) and (0 <= dist_bull <= 20.0)
 
-            # --- 최종 판단 ---
             engine_1 = cond_wae and cond_rsi
             engine_2 = cond_cloud_shape and cond_vol and cond_rsi
-            cond_pre = (squeeze_ratio < 1.1) and is_volume_dry and is_above_cloud
+            # [테스트용 완화] squeeze < 1.3
+            cond_pre = (squeeze_ratio < 1.3) and is_volume_dry and is_above_cloud
 
             # -------------------------------------------------------
-            # 🚀 AI 호출 (쿨타임 + 비용 절감 로직 적용)
+            # 🩺 [디버깅] 왜 안 잡히는지 로그 출력 (이거 보면 확실해짐)
             # -------------------------------------------------------
+            if pump_strength_5m > 2.0:
+                 print(f"🔍 [Check] {ticker} (+{pump_strength_5m:.1f}%) | Sqz:{squeeze_ratio:.2f} | WAE:{cond_wae} | RSI:{rsi_val:.0f}")
+
             if (engine_1 or engine_2 or cond_pre) and cond_rsi:
                 
-                # 1. [쿨타임 체크] 60초 내 재호출 금지
+                # 쿨타임 체크
                 import time
                 current_ts = time.time()
-                
                 if ticker in ai_cooldowns:
                     last_call = ai_cooldowns[ticker]
-                    if current_ts - last_call < 60: # 60초 쿨타임
-                        continue # 이번 턴은 넘김
+                    if current_ts - last_call < 60: continue 
 
-                # 2. 데이터 준비
                 session = get_current_session()
                 if session == "closed": pass
                 
-                # (F1 엔진에서 이미 계산된 거래량 평균 사용)
                 vol_ratio = indicators['volume'] / vol_avg_5 if vol_avg_5 > 0 else 1.0
 
                 if engine_1: strat = "Explosion (WAE)"
                 elif cond_pre: strat = "Pre-Breakout (Squeeze)"
                 else: strat = "Standard Setup"
 
-                # 3. AI 데이터 패키징 (ai_data로 통일)
                 ai_data = {
                     "session_type": session,
                     "strategy_type": strat,
@@ -973,9 +1051,7 @@ async def handle_msg(msg_data):
                     "cloud_distance_percent": float(round(dist_bull, 2))
                 }
                 
-              # 4. [수정] AI 분석 요청 (직접 호출 X -> 큐에 넣기 O)
-                # -------------------------------------------------------
-                # 웨이터(Worker)에게 넘겨줄 데이터 포장
+                # 큐에 넣기 (Non-blocking)
                 task_payload = {
                     'ticker': ticker,
                     'price': price_now,
@@ -984,20 +1060,13 @@ async def handle_msg(msg_data):
                     'squeeze': squeeze_ratio,
                     'pump': pump_strength_5m
                 }
-                
-                # 5. 쿨타임 갱신 (큐에 넣는 순간 이미 처리된 걸로 간주)
-                # (이걸 여기서 해야 중복 등록을 막습니다!)
                 ai_cooldowns[ticker] = current_ts
-                
-                # 6. 대기열에 집어넣기 (기다리지 않음! 0.00001초 소요)
                 ai_request_queue.put_nowait(task_payload)
-                
-                # print(f"📨 [Queue] {ticker} 분석 요청 등록 완료") 
 
         except Exception as e:
             import traceback
-            # print(f"F1 엔진 오류 {ticker}: {e}")
-            pass  
+            # print(f"-> ❌ [엔진 CRASH] {ticker} ({e.__traceback__.tb_lineno} line): {e}") 
+            pass
 
 # --- (v7.2) 수신 엔진 ---
 async def websocket_engine(websocket):
