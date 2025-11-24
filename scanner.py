@@ -7,6 +7,7 @@ import pandas_ta as ta
 import json
 from datetime import datetime, timedelta
 import psycopg2  # 2. sqlite3 대신 psycopg2
+from psycopg2 import pool # 👈 이거 추가
 import time
 import httpx 
 import firebase_admin # ✅ 1. firebase-admin 임포트
@@ -409,88 +410,112 @@ Respond ONLY with this JSON structure.
             print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: {e}")
         return 50
 
-# --- (v13.0) DB 초기화 함수 (PostgreSQL 용) ---
-def init_db():
-    """PostgreSQL DB와 테이블 4개를 생성합니다."""
-    conn = None
-    try:
-        # 5. DATABASE_URL이 설정되지 않았는지 확인
-        if not DATABASE_URL:
-            print("❌ [DB] DATABASE_URL이 설정되지 않아 초기화를 건너뜁니다.")
-            return
-            
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 6. PostgreSQL에 맞는 테이블 생성 (SERIAL = AUTOINCREMENT, TIMESTAMP)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS status (
-            key TEXT PRIMARY KEY, 
-            value TEXT NOT NULL, 
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
+# --- 전역 변수: 커넥션 풀 저장소 ---
+db_pool = None 
 
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS signals (
-            id SERIAL PRIMARY KEY, 
-            ticker TEXT NOT NULL, 
-            price REAL NOT NULL, 
-            time TIMESTAMP NOT NULL
-        )
-        """)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS recommendations (
-            id SERIAL PRIMARY KEY, 
-            ticker TEXT NOT NULL UNIQUE, 
-            price REAL NOT NULL, 
-            time TIMESTAMP NOT NULL, 
-            probability_score INTEGER
-        )
-        """)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS posts (
-            id SERIAL PRIMARY KEY, 
-            author TEXT NOT NULL, 
-            content TEXT NOT NULL, 
-            time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        
-        # --- ✅ 3. FCM 토큰 테이블 추가 (scanner.py에도 추가) ---
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fcm_tokens (
-            id SERIAL PRIMARY KEY,
-            token TEXT NOT NULL UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        # --- 여기까지 추가 ---
-        
-        conn.commit()
-        
+# --- (수정) DB 커넥션 가져오기 (풀링 방식) ---
+def get_db_connection():
+    global db_pool
+    # 풀이 없으면 생성 시도
+    if db_pool is None:
+        init_db()
+    # 풀에서 커넥션 하나를 빌려옴
+    return db_pool.getconn()
+
+# --- (수정) DB 초기화 및 풀 생성 함수 ---
+def init_db():
+    """
+    PostgreSQL 커넥션 풀을 생성하고 테이블을 초기화합니다.
+    (Turbo Mode: 매번 연결하지 않고 재사용)
+    """
+    global db_pool
+    
+    # 1. DATABASE_URL 확인
+    if not DATABASE_URL:
+        print("❌ [DB] DATABASE_URL이 설정되지 않아 초기화를 건너뜁니다.")
+        return
+
+    try:
+        # 2. 커넥션 풀 생성 (최소 1개 ~ 최대 20개 유지)
+        if db_pool is None:
+            db_pool = psycopg2.pool.SimpleConnectionPool(
+                1, 20, dsn=DATABASE_URL
+            )
+            print("✅ [DB] 커넥션 풀(Turbo) 가동 시작.")
+
+        # 3. 테이블 생성을 위해 커넥션 하나 빌리기
+        conn = db_pool.getconn()
         try:
-            # 7. PostgreSQL용 ALTER TABLE (에러 핸들링으로 처리)
-            cursor.execute("ALTER TABLE recommendations ADD COLUMN probability_score INTEGER")
-            conn.commit()
-            print("-> [DB] 'recommendations' 테이블에 'probability_score' 컬럼 추가 시도 완료.")
-        except psycopg2.Error as e:
-            conn.rollback() # ✅ (v16.2) 롤백 추가
-            if e.pgcode == '42701': # 'Duplicate Column' 에러 코드
-                pass # 컬럼이 이미 존재함, 정상
-            else:
-                # ✅ (v16.2) 502 오류 방지를 위해 raise -> print로 변경
-                print(f"❌ [DB] ALTER TABLE 중 예외 발생 (무시함): {e}")
+            cursor = conn.cursor()
             
-        cursor.close()
-        conn.close()
-        print(f"✅ [DB] PostgreSQL 테이블 초기화 성공.")
+            # --- 테이블 생성 쿼리 (기존 로직 유지) ---
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS status (
+                key TEXT PRIMARY KEY, 
+                value TEXT NOT NULL, 
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id SERIAL PRIMARY KEY, 
+                ticker TEXT NOT NULL, 
+                price REAL NOT NULL, 
+                time TIMESTAMP NOT NULL
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recommendations (
+                id SERIAL PRIMARY KEY, 
+                ticker TEXT NOT NULL UNIQUE, 
+                price REAL NOT NULL, 
+                time TIMESTAMP NOT NULL, 
+                probability_score INTEGER
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS posts (
+                id SERIAL PRIMARY KEY, 
+                author TEXT NOT NULL, 
+                content TEXT NOT NULL, 
+                time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            
+            # FCM 토큰 테이블
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fcm_tokens (
+                id SERIAL PRIMARY KEY, 
+                token TEXT NOT NULL UNIQUE, 
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                min_score INTEGER DEFAULT 0
+            )
+            """)
+            
+            # --- 컬럼 추가 (호환성 유지) ---
+            try:
+                cursor.execute("ALTER TABLE recommendations ADD COLUMN probability_score INTEGER")
+            except psycopg2.Error:
+                conn.rollback() # 이미 존재하면 롤백하고 계속 진행
+            
+            try:
+                cursor.execute("ALTER TABLE fcm_tokens ADD COLUMN min_score INTEGER DEFAULT 0")
+            except psycopg2.Error:
+                conn.rollback()
+                
+            conn.commit()
+            cursor.close()
+            print(f"✅ [DB] 테이블 초기화 완료.")
+            
+        except Exception as e:
+            print(f"❌ [DB 테이블 생성 오류] {e}")
+            if conn: conn.rollback()
+        finally:
+            # 🔥 [핵심] 다 쓴 커넥션은 반드시 풀에 반납(putconn)해야 함!
+            if conn: db_pool.putconn(conn)
+
     except Exception as e:
-        if conn: 
-            conn.rollback() # ✅ (v16.2) 롤백 추가
-            conn.close()
-        # ✅ (v16.2) 502 오류 방지를 위해 raise -> print로 변경
-        print(f"❌ [DB] PostgreSQL 초기화 실패 (무시함): {e}")
+        print(f"❌ [DB] 커넥션 풀 생성 실패: {e}")
 
 # --- (v16.1) 튜닝: 알림/로그 함수 ---
 def send_discord_alert(ticker, price, type="signal", probability_score=50):
@@ -514,33 +539,30 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# --- (v16.10 추천) 튜닝: FCM 푸시 알림 발송 함수 (구조화된 data 페이로드 + 점수 필터링) ---
+# --- (수정) 알림 발송 함수 (DB 연결 최적화: 빌리고 반납하기) ---
 def send_fcm_notification(ticker, price, probability_score):
     """DB의 min_score를 확인하여 조건에 맞는 사용자에게만 알림을 발송합니다."""
     
     if not firebase_admin._apps:
-        print("🔔 [FCM] Firebase Admin SDK가 초기화되지 않아 알림을 건너뜁니다.")
+        # print("🔔 [FCM] Firebase Admin SDK 미초기화. 패스.")
         return
 
     conn = None
     try:
-        conn = get_db_connection()
+        conn = get_db_connection() # 1. 커넥션 빌리기
         cursor = conn.cursor()
         
-        # ✅ [수정 1] 토큰과 함께 'min_score' 설정값도 가져옵니다.
+        # 구독자 및 설정값 조회
         cursor.execute("SELECT token, min_score FROM fcm_tokens")
-        subscribers = cursor.fetchall() 
-        
+        subscribers = cursor.fetchall()
         cursor.close()
-        conn.close()
-
+        
         if not subscribers:
-            print("🔔 [FCM] DB에 등록된 알림 구독자가 없습니다.")
+            # 구독자가 없으면 바로 반납하고 종료
+            db_pool.putconn(conn)
             return
 
-        print(f"🔔 [FCM] 총 {len(subscribers)}명의 구독자 확인. 필터링 및 발송 시작...")
-        
-        # 1. data 페이로드 구성 (동일)
+        # 데이터 페이로드 구성
         data_payload = {
             'title': "Danso AI 신호", 
             'ticker': ticker,
@@ -550,18 +572,17 @@ def send_fcm_notification(ticker, price, probability_score):
         
         success_count = 0
         failure_count = 0
-        skipped_count = 0 # 필터링된 횟수 카운트
+        skipped_count = 0
         failed_tokens = []
 
-        # ✅ [수정 2] 토큰과 최소 점수를 하나씩 꺼내서 확인
+        # 발송 루프
         for row in subscribers:
             token = row[0]
-            # DB 값이 NULL이면 0점으로 처리 (모두 받음)
             user_min_score = row[1] if row[1] is not None else 0 
             
             if not token: continue
 
-            # ✅ [핵심 로직] 신호 점수가 사용자의 설정 점수보다 낮으면 건너뜀
+            # 점수 필터링
             if probability_score < user_min_score:
                 skipped_count += 1
                 continue 
@@ -574,57 +595,56 @@ def send_fcm_notification(ticker, price, probability_score):
                         headers={'Urgency': 'high'}
                     )
                 )
-                
                 messaging.send(message)
                 success_count += 1
-                
             except Exception as e:
-                # print(f"❌ [FCM] 토큰 전송 실패: {token[:10]}... (이유: {e})") # 로그 너무 많으면 주석 처리
                 failure_count += 1
+                # 토큰 만료/오류 시 삭제 목록에 추가
                 if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e):
                     failed_tokens.append(token)
         
-        print(f"✅ [FCM] 발송 결과: 성공 {success_count}명, 실패 {failure_count}명, (점수 미달 패스: {skipped_count}명)")
+        # print(f"🔔 [FCM] 성공:{success_count}, 실패:{failure_count}, 패스:{skipped_count}")
         
-        # 만료된 토큰 삭제 로직 (동일)
+        # 만료된 토큰 DB에서 삭제
         if failed_tokens:
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
-                conn.commit()
-                cursor.close()
-                conn.close()
-                print(f"🧹 [FCM] 만료된 토큰 {len(failed_tokens)}개를 DB에서 삭제했습니다.")
-            except Exception as e:
-                print(f"❌ [FCM] 만료된 토큰 DB 삭제 실패: {e}")
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
+            conn.commit()
+            cursor.close()
+            print(f"🧹 [FCM] 만료된 토큰 {len(failed_tokens)}개 삭제 완료.")
 
     except Exception as e:
-        if conn: conn.close()
-        print(f"❌ [FCM] 푸시 알림 발송 중 치명적 오류: {e}")
-          
-# --- (v13.0) DB 로그 함수 (PostgreSQL 용) ---
+        print(f"❌ [FCM] 발송 중 오류: {e}")
+        if conn: conn.rollback() # 오류 시 롤백
+    finally:
+        # 🔥 [핵심] 다 썼으면 반드시 반납! (close 아님)
+        if conn: db_pool.putconn(conn)
+
+# --- (수정) DB 로그 함수 (PostgreSQL 용) ---
 def log_signal(ticker, price, probability_score=50):
     conn = None
     try:
-        conn = get_db_connection()
+        conn = get_db_connection() # 1. 빌리기
         cursor = conn.cursor()
-        # 8. PostgreSQL용 INSERT (%s 사용, ? 대신)
+        # INSERT 실행
         cursor.execute("INSERT INTO signals (ticker, price, time) VALUES (%s, %s, %s)", 
                        (ticker, price, datetime.now()))
         conn.commit()
         cursor.close()
-        conn.close()
     except Exception as e:
-        if conn: conn.close()
         print(f"❌ [DB] 'signals' 저장 실패: {e}")
+        if conn: conn.rollback()
+    finally:
+        # 🔥 [핵심] 반납하기
+        if conn: db_pool.putconn(conn)
 
 def log_recommendation(ticker, price, probability_score=50):
     conn = None
     try:
-        conn = get_db_connection()
+        conn = get_db_connection() # 1. 빌리기
         cursor = conn.cursor()
-        # 9. PostgreSQL용 INSERT (ON CONFLICT DO NOTHING = IGNORE)
+        
+        # 중복 방지 INSERT (ON CONFLICT DO NOTHING)
         cursor.execute("""
         INSERT INTO recommendations (ticker, price, time, probability_score) 
         VALUES (%s, %s, %s, %s)
@@ -632,14 +652,19 @@ def log_recommendation(ticker, price, probability_score=50):
         """, 
                        (ticker, price, datetime.now(), probability_score))
         conn.commit()
+        
+        # 이미 존재하면 rowcount는 0, 새로 들어가면 1
         is_new_rec = cursor.rowcount > 0
         cursor.close()
-        conn.close()
         return is_new_rec
+        
     except Exception as e:
-        if conn: conn.close()
         print(f"❌ [DB] 'recommendations' 저장 실패: {e}")
+        if conn: conn.rollback()
         return False
+    finally:
+        # 🔥 [핵심] 반납하기
+        if conn: db_pool.putconn(conn)
 
 # --- 1단계 로직: "오늘의 관심 잡주" (v7.2) ---
 def find_active_tickers():
@@ -940,88 +965,105 @@ async def websocket_engine(websocket):
     except Exception as e:
         print(f"-> ❌ [엔진 v9.0] 웹소켓 오류: {e}")
 
-# --- (v16.2) 튜닝: 3분마다 '사냥꾼' 실행 (API 한도 복귀) ---
+# --- (수정) 주기적 스캔 (사냥꾼) - DB 풀링 적용 ---
 async def periodic_scanner(websocket):
     current_subscriptions = set() 
     
     while True:
         try:
-            print(f"\n[사냥꾼] (v16.2) 3분 주기 시작. '신호 피드' (signals, recommendations) DB를 청소합니다...")
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            # 10. PostgreSQL은 TRUNCATE가 더 빠름 (DELETE도 작동은 함)
-            cursor.execute("TRUNCATE TABLE signals")
-            cursor.execute("TRUNCATE TABLE recommendations")
-            conn.commit()
-            cursor.close()
-            conn.close()
-            print("-> [사냥꾼] DB 청소 완료.")
-        except Exception as e:
-            print(f"-> ❌ [사냥꾼] DB 청소 실패: {e}")
+            # ---------------------------------------------------------
+            # 1. DB 청소 (커넥션 빌리고 -> 반납)
+            # ---------------------------------------------------------
+            print(f"\n[사냥꾼] (V2.1) 3분 주기 시작. DB 청소 중...")
+            conn = None
+            try:
+                conn = get_db_connection() # 1. 풀에서 빌리기
+                cursor = conn.cursor()
+                cursor.execute("TRUNCATE TABLE signals")
+                cursor.execute("TRUNCATE TABLE recommendations")
+                conn.commit()
+                cursor.close()
+                print("-> [사냥꾼] DB 청소 완료.")
+            except Exception as e:
+                print(f"-> ❌ [사냥꾼] DB 청소 실패: {e}")
+                if conn: conn.rollback()
+            finally:
+                # 🔥 [핵심] 반드시 반납해야 함! (안 하면 DB 멈춤)
+                if conn: db_pool.putconn(conn)
             
-        new_tickers = find_active_tickers() 
-        tickers_to_add = new_tickers - current_subscriptions
-        tickers_to_remove = current_subscriptions - new_tickers
-        
-        try:
+            # ---------------------------------------------------------
+            # 2. 새로운 타겟 찾기 및 구독 관리
+            # ---------------------------------------------------------
+            new_tickers = find_active_tickers() 
+            tickers_to_add = new_tickers - current_subscriptions
+            tickers_to_remove = current_subscriptions - new_tickers
+            
+            # 신규 구독 및 초기 데이터 로딩
             if tickers_to_add:
-                print(f"[사냥꾼] {len(tickers_to_add)}개 신규 종목 (1분봉+거래) 1개씩 구독 시작: {tickers_to_add}")
+                print(f"[사냥꾼] 신규 {len(tickers_to_add)}개 구독 및 로딩...")
                 for ticker in tickers_to_add:
                     params_str = f"AM.{ticker},T.{ticker}"
                     sub_payload = json.dumps({"action": "subscribe", "params": params_str})
                     await websocket.send(sub_payload)
-                    # 2. 🔥 [추가] 과거 데이터 즉시 로딩 (52분 대기 시간 삭제)
-                    # 이 함수가 실행되면 즉시 ticker_minute_history에 200개 봉이 채워짐
-                    fetch_initial_data(ticker)
+                    
+                    # 🔥 과거 데이터 즉시 로딩 (Cold Start 해결)
+                    fetch_initial_data(ticker) 
                     await asyncio.sleep(0.1)
                 print("[사냥꾼] 신규 구독 완료.")
                 
+            # 구독 해지 및 메모리 정리
             if tickers_to_remove:
-                print(f"[사냥꾼] {len(tickers_to_remove)}개 식은 종목 구독 해지: {tickers_to_remove}")
                 for ticker in tickers_to_remove:
                     params_str = f"AM.{ticker},T.{ticker}"
                     unsub_payload = json.dumps({"action": "unsubscribe", "params": params_str})
                     await websocket.send(unsub_payload)
+                    
+                    # (선택사항) 메모리 관리: 쿨타임 정보 삭제
+                    if ticker in ai_cooldowns: 
+                        del ai_cooldowns[ticker]
+                        
                     await asyncio.sleep(0.1)
                 print("[사냥꾼] 구독 해지 완료.")
+            
+            current_subscriptions = new_tickers
+            
+            # ---------------------------------------------------------
+            # 3. 상태 저장 (커넥션 빌리고 -> 반납)
+            # ---------------------------------------------------------
+            status_tickers_list = []
+            for ticker in current_subscriptions:
+                status_tickers_list.append({"ticker": ticker, "is_new": ticker in tickers_to_add})
                 
-        except websockets.exceptions.ConnectionClosed:
-             print("-> ❌ [사냥꾼] 구독/해지 실패: 웹소켓 연결이 이미 종료되었습니다. (재연결 시도)")
-             raise
-        except Exception as e:
-            print(f"-> ❌ [사냥꾼] 구독/해지 실패: {e}")
+            status_data = {
+                'last_scan_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'watching_count': len(current_subscriptions),
+                'watching_tickers': status_tickers_list
+            }
             
-        current_subscriptions = new_tickers
-        
-        status_tickers_list = []
-        for ticker in current_subscriptions:
-            status_tickers_list.append({"ticker": ticker, "is_new": ticker in tickers_to_add})
-        status_data = {
-            'last_scan_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'watching_count': len(current_subscriptions),
-            'watching_tickers': status_tickers_list
-        }
-        try:
-            status_json_string = json.dumps(status_data)
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            # 11. PostgreSQL용 INSERT (ON CONFLICT DO UPDATE)
-            cursor.execute("""
-            INSERT INTO status (key, value, last_updated) 
-            VALUES (%s, %s, %s)
-            ON CONFLICT (key) DO UPDATE SET
-                value = EXCLUDED.value,
-                last_updated = EXCLUDED.last_updated
-            """,
-                           ('status_data', status_json_string, datetime.now()))
-            conn.commit()
-            cursor.close()
-            conn.close()
-        except Exception as e:
-            print(f"❌ [DB] 'status' 저장 실패: {e}")
+            conn = None
+            try:
+                conn = get_db_connection() # 1. 풀에서 빌리기
+                cursor = conn.cursor()
+                cursor.execute("""
+                INSERT INTO status (key, value, last_updated) 
+                VALUES (%s, %s, %s)
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    last_updated = EXCLUDED.last_updated
+                """, ('status_data', json.dumps(status_data), datetime.now()))
+                conn.commit()
+                cursor.close()
+            except Exception as e:
+                print(f"❌ [DB] 'status' 저장 실패: {e}")
+                if conn: conn.rollback()
+            finally:
+                # 🔥 [핵심] 반드시 반납!
+                if conn: db_pool.putconn(conn)
             
-        # ✅ (튜닝 1) 7분(420초) -> 3분(180초)로 변경
-        # API 한도 및 서버 부하에 주의해야 합니다.
+        except Exception as e:
+            print(f"-> ❌ [사냥꾼 루프 오류] {e}")
+            
+        # 3분 대기
         print(f"\n[사냥꾼] 3분(180초) 후 다음 스캔을 시작합니다...")
         await asyncio.sleep(180)
 
