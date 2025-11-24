@@ -777,10 +777,17 @@ def fetch_initial_data(ticker):
             # 보통 오름차순(옛날 -> 최신)으로 DataFrame을 만들어야 함
             results.sort(key=lambda x: x['t']) 
             
+            # [수정된 코드]
             df = pd.DataFrame(results)
-            df.rename(columns={'o':'o', 'h':'h', 'l':'l', 'c':'c', 'v':'v', 't':'t'}, inplace=True)
+            
+            # 🔥 핵심: 여기서 필요한 6개 컬럼만 딱 골라냅니다! (나머지 버림)
+            df = df[['t', 'o', 'h', 'l', 'c', 'v']]
+            
             df['t'] = pd.to_datetime(df['t'], unit='ms')
             df.set_index('t', inplace=True)
+            
+            # 혹시 모르니 순서 확실하게 맞추고 실수형(float)으로 변환
+            df = df[['o', 'h', 'l', 'c', 'v']].astype(float)
             
             # 전역 변수에 주입
             ticker_minute_history[ticker] = df
