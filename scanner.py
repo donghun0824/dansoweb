@@ -1128,6 +1128,13 @@ async def periodic_scanner(websocket):
                     fetch_initial_data(ticker) 
                     await asyncio.sleep(0.1)
                 print("[사냥꾼] 신규 구독 완료.")
+                # -------------------------------------------------------
+                # 🔥 [여기입니다!] 반복문(for)이 다 끝나고 나서 호출
+                # "데이터 다 가져왔으니 이제 밀린 숙제(초기 분석) 한 번에 해라"
+                # -------------------------------------------------------
+                await run_initial_analysis()
+                
+                print("[사냥꾼] 신규 구독 및 초기 분석 완료.")
                 
             # 구독 해지 및 메모리 정리
             if tickers_to_remove:
@@ -1301,3 +1308,152 @@ if __name__ == "__main__":
             asyncio.run(main()) # ✅ asyncio 오타 수정
         except KeyboardInterrupt: 
             print("\n[메인] 사용자에 의해 프로그램이 종료되었습니다.")
+# -------------------------------------------------------------
+# 📌 [신규 함수] F1 지표 계산 및 시그널 큐잉 로직
+# handle_msg 내부의 F1 엔진 가동 부분을 여기에 옮깁니다.
+# -------------------------------------------------------------
+async def run_f1_analysis_and_signal(ticker, df):
+    global ai_cooldowns, ai_request_queue
+    try:
+        # DataFrame -> NumPy (Sanitization이 이전에 완료되었다고 가정)
+        closes = df['c'].values
+        highs = df['h'].values
+        lows = df['l'].values
+        volumes = df['v'].values
+        opens = df['o'].values
+
+        # 최소 데이터 확인 (handle_msg와 동일하게 52개 캔들 필요)
+        if len(df) < 52: 
+            return # 데이터 부족 시 종료
+
+        # 🔥 F1 계산
+        indicators = calculate_f1_indicators(closes, highs, lows, volumes)
+        
+        # --- 결과 추출 및 조건문 (handle_msg의 F1 엔진 로직 전체 복사) ---
+        price_now = indicators['close']
+        
+        # 1. [Pump Strength]
+        if len(closes) >= 6:
+            price_5m = closes[-6]
+            pump_strength_5m = ((price_now - price_5m) / price_5m) * 100 if price_5m != 0 else 0
+        else: pump_strength_5m = 0.0
+
+        # 2. [Pullback]
+        day_high = np.max(highs)
+        pullback = ((day_high - price_now) / day_high) * 100 if day_high > 0 else 0.0
+
+        # 3. [Daily Change]
+        day_open = opens[0]
+        daily_change = ((price_now - day_open) / day_open) * 100 if day_open > 0 else 0.0
+
+        # 4. [Squeeze Ratio]
+        squeeze_ratio = indicators['bb_width_now'] / indicators['bb_width_avg'] if indicators['bb_width_avg'] > 0 else 1.0
+
+        # 5. [Vol Dry]
+        vol_avg_5 = np.mean(volumes[-6:-1]) if len(volumes) > 6 else 1
+        is_volume_dry = indicators['volume'] < (vol_avg_5 * 1.0) 
+
+        # --- 트리거 조건 ---
+        cond_wae = (indicators['macd_delta'] > indicators['bb_gap_wae']) and \
+                   (indicators['macd_delta'] > indicators['dead_zone'])
+        
+        rsi_val = indicators['rsi']
+        cmf_val = indicators['cmf']
+        # [테스트용 완화] 90까지 허용
+        cond_rsi = 40 < rsi_val < 70
+        cond_vol = (cmf_val > 0)
+
+        cloud_top = indicators['cloud_top']
+        is_above_cloud = price_now > cloud_top
+        
+        cloud_thick = abs(indicators['senkou_a'] - indicators['senkou_b']) / price_now * 100
+        dist_bull = (price_now - cloud_top) / price_now * 100
+        cond_cloud_shape = (cloud_thick >= 0.5) and (0 <= dist_bull <= 20.0)
+
+        engine_1 = cond_wae and cond_rsi
+        engine_2 = cond_cloud_shape and cond_vol and cond_rsi
+        # [테스트용 완화] squeeze < 1.3
+        cond_pre = (squeeze_ratio < 1.3) and is_volume_dry and is_above_cloud
+
+        # -------------------------------------------------------
+        # 🩺 [디버깅] 초기 분석 로그
+        # -------------------------------------------------------
+        if (engine_1 or engine_2 or cond_pre) and pump_strength_5m > 0.0:
+            print(f"✨ [초기 감지] {ticker} | 전략: {'WAE' if engine_1 else 'Squeeze' if cond_pre else 'Cloud'} | RSI:{rsi_val:.0f} | Sqz:{squeeze_ratio:.2f}")
+
+        if (engine_1 or engine_2 or cond_pre) and cond_rsi:
+            
+            # 쿨타임 체크 (초기 분석 시에는 쿨타임 무시해도 됨, 하지만 실시간처럼 처리)
+            import time
+            current_ts = time.time()
+            if ticker in ai_cooldowns:
+                last_call = ai_cooldowns[ticker]
+                if current_ts - last_call < 60: return 
+
+            session = get_current_session()
+            vol_ratio = indicators['volume'] / vol_avg_5 if vol_avg_5 > 0 else 1.0
+
+            if engine_1: strat = "Explosion (WAE)"
+            elif cond_pre: strat = "Pre-Breakout (Squeeze)"
+            else: strat = "Standard Setup"
+
+            # ✅ [수정] 비어있던 ai_data 채우기
+            ai_data = {
+                "session_type": session,
+                "strategy_type": strat,
+                "volume_ratio": float(round(vol_ratio, 2)),
+                "pump_strength_5m": float(round(pump_strength_5m, 2)),
+                "pullback_from_high": float(round(pullback, 2)),
+                "daily_change": float(round(daily_change, 2)),
+                "squeeze_ratio": float(round(squeeze_ratio, 2)),
+                "is_volume_dry": bool(is_volume_dry),
+                "engine_1_pass": bool(engine_1),
+                "engine_2_pass": bool(engine_2),
+                "pre_breakout": bool(cond_pre),
+                "rsi_value": float(round(rsi_val, 2)),
+                "cmf_value": float(round(cmf_val, 2)),
+                "cloud_distance_percent": float(round(dist_bull, 2))
+            }
+            
+            task_payload = {
+                'ticker': ticker,
+                'price': price_now,
+                'ai_data': ai_data,
+                'strat': strat,
+                'squeeze': squeeze_ratio,
+                'pump': pump_strength_5m
+            }
+            ai_cooldowns[ticker] = current_ts
+            ai_request_queue.put_nowait(task_payload)
+
+    except Exception as e:
+        import traceback
+        # print(f"-> ❌ [F1 엔진 CRASH] {ticker}: {e}")
+        pass
+    # -------------------------------------------------------------
+# 📌 [신규 함수] 로드된 과거 데이터를 기반으로 초기 지표 분석 실행
+# -------------------------------------------------------------
+async def run_initial_analysis():
+    print("⏳ [초기 분석] 로드된 과거 데이터를 기반으로 지표 계산 시작...")
+    global ticker_minute_history
+    
+    # 로드된 모든 종목에 대해 분석 실행
+    for ticker, df in ticker_minute_history.items():
+        # 데이터 세탁기 로직을 다시 한 번 돌려 안전성을 확보합니다.
+        try:
+            cols_to_fix = ['o', 'h', 'l', 'c', 'v']
+            for col in cols_to_fix:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            df.ffill(inplace=True)
+            df.bfill(inplace=True)
+            df.fillna(0, inplace=True)
+            df = df.astype(float)
+        except Exception as e:
+             print(f"⚠️ [초기 분석 데이터 세탁 실패] {ticker}: {e}")
+             continue
+
+        # 1단계에서 분리한 분석 함수 호출
+        await run_f1_analysis_and_signal(ticker, df)
+        
+    print("✅ [초기 분석] 모든 종목의 지표 계산 및 초기 시그널 검토 완료.")
