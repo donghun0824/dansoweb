@@ -440,7 +440,8 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
             avg_gain[i] = (avg_gain[i-1] * (n-1) + gain[i-1]) / n
             avg_loss[i] = (avg_loss[i-1] * (n-1) + loss[i-1]) / n
             
-        rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss!=0)
+        # 분모에 1e-10(0.0000000001)을 더해 0으로 나누기 방지
+        rs = avg_gain / (avg_loss + 1e-10) 
         return 100 - (100 / (1 + rs))
 
     # [WAE] MACD (2, 3, 4)
@@ -518,7 +519,11 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
     rsi = rsi_func(closes, 5)
 
     # [CMF] (5)
-    mfm = ((closes - lows) - (highs - closes)) / (highs - lows)
+    # 고가-저가가 0일 경우(변동 없음) 0으로 나누기 에러 방지
+    denom = highs - lows
+    denom = np.where(denom == 0, 1e-10, denom) # 0이면 아주 작은 수로 대체
+    
+    mfm = ((closes - lows) - (highs - closes)) / denom
     mfm = np.nan_to_num(mfm) 
     mfv = mfm * volumes
     
@@ -526,6 +531,7 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
     for i in range(5, len(closes)):
         sum_mfv = np.sum(mfv[i-4:i+1])
         sum_vol = np.sum(volumes[i-4:i+1])
+        # 여기도 혹시 모르니 0이 아닐 때만 계산 (기존 유지)
         if sum_vol != 0:
             cmf[i] = sum_mfv / sum_vol
 
