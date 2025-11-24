@@ -271,6 +271,8 @@ def init_firebase():
 ticker_minute_history = {} 
 ticker_tick_history = {} 
 ai_cooldowns = {}
+# ✅ [신규] AI 분석 요청 대기열 (Queue)
+ai_request_queue = asyncio.Queue()
 # --- (v16.1) Gemini API 호출 함수 (AI 응답 오류 수정) ---
 async def get_gemini_probability(ticker, conditions_data):
     if not GEMINI_API_KEY:
@@ -788,7 +790,39 @@ def fetch_initial_data(ticker):
             print(f"⚠️ [데이터 없음] {ticker}: Status={data.get('status')}, Count={data.get('count')}, Msg={data.get('message')}")
     except Exception as e:
         print(f"⚠️ [초기화 실패] {ticker}: {e}")
+# --- [신규] AI 워커 (웨이터): 큐에서 꺼내서 처리 ---
+async def ai_worker():
+    print("👨‍🍳 [Worker] AI 처리 전담반 가동 시작!")
+    while True:
+        # 1. 큐에서 일감 꺼내기 (일 없으면 여기서 대기)
+        task = await ai_request_queue.get()
+        
+        try:
+            # 데이터 언패킹
+            ticker = task['ticker']
+            price_now = task['price']
+            ai_data = task['ai_data']
+            strat = task['strat']
+            squeeze_val = task['squeeze']
+            pump_val = task['pump']
 
+            # 2. AI 분석 요청 (오래 걸리는 작업)
+            # 여기서 시간이 걸려도 메인 루프(handle_msg)는 멈추지 않음!
+            score = await get_gemini_probability(ticker, ai_data)
+
+            # 3. 결과 처리 (로그 & DB & 알림)
+            print(f"🏎️ [F1 결과] {ticker} @ ${price_now:.4f} | AI: {score}% | Sqz: {squeeze_val:.2f} | Pump: {pump_val:.1f}%")
+            
+            is_new = log_recommendation(ticker, float(price_now), score)
+            if is_new:
+                send_discord_alert(ticker, float(price_now), "recommendation", score)
+                send_fcm_notification(ticker, float(price_now), score)
+                
+        except Exception as e:
+            print(f"❌ [Worker 오류] {e}")
+        finally:
+            # 작업 완료 신호 (큐에게 알려줌)
+            ai_request_queue.task_done()
 # --- [F1 버전] 고속 데이터 처리 엔진 ---
 async def handle_msg(msg_data):
     global ticker_minute_history, ticker_tick_history
@@ -932,23 +966,31 @@ async def handle_msg(msg_data):
                     "cloud_distance_percent": float(round(dist_bull, 2))
                 }
                 
-                # 4. AI 분석 요청 (딱 1번만 호출)
-                # (conditions_data 변수는 삭제하고 ai_data로 통일했습니다)
-                score = await get_gemini_probability(ticker, ai_data)
+              # 4. [수정] AI 분석 요청 (직접 호출 X -> 큐에 넣기 O)
+                # -------------------------------------------------------
+                # 웨이터(Worker)에게 넘겨줄 데이터 포장
+                task_payload = {
+                    'ticker': ticker,
+                    'price': price_now,
+                    'ai_data': ai_data,
+                    'strat': strat,
+                    'squeeze': squeeze_ratio,
+                    'pump': pump_strength_5m
+                }
                 
-                # 5. 쿨타임 갱신 (호출 성공 시 시간 기록)
+                # 5. 쿨타임 갱신 (큐에 넣는 순간 이미 처리된 걸로 간주)
+                # (이걸 여기서 해야 중복 등록을 막습니다!)
                 ai_cooldowns[ticker] = current_ts
+                
+                # 6. 대기열에 집어넣기 (기다리지 않음! 0.00001초 소요)
+                ai_request_queue.put_nowait(task_payload)
+                
+                # print(f"📨 [Queue] {ticker} 분석 요청 등록 완료") 
 
-                # 6. 결과 출력 및 알림
-                print(f"🏎️ [F1 분석] {ticker} @ ${price_now:.4f} | AI: {score}% | Sqz: {squeeze_ratio:.2f} | Pump: {pump_strength_5m:.1f}%")
-
-                if log_recommendation(ticker, float(price_now), score):
-                    send_discord_alert(ticker, float(price_now), "recommendation", score)
-                    send_fcm_notification(ticker, float(price_now), score)
         except Exception as e:
             import traceback
             # print(f"F1 엔진 오류 {ticker}: {e}")
-            pass
+            pass  
 
 # --- (v7.2) 수신 엔진 ---
 async def websocket_engine(websocket):
@@ -1111,6 +1153,7 @@ async def main():
                 
                 response = await websocket.recv()
                 print(f"[메인] 연결 응답: {response}")
+
                 if '"status":"connected"' not in str(response):
                      print("-> ❌ [메인] 비정상 연결 응답. 10초 후 재시도...")
                      await asyncio.sleep(10)
@@ -1126,17 +1169,27 @@ async def main():
                 print(f"[메인] 인증 응답: {response}")
                 
                 if '"status":"auth_success"' in str(response):
-                    print("-> ✅ [메인] '수동 인증' 성공! 3개 로봇(사냥꾼, 엔진, 핑)을 시작합니다.")
+                    print("-> ✅ [메인] '수동 인증' 성공! 4개 로봇(사냥꾼, 엔진, 핑, 워커)을 시작합니다.")
                     
                     watcher_task = websocket_engine(websocket) 
                     scanner_task = periodic_scanner(websocket)
                     keepalive_task = manual_keepalive(websocket)
                     
-                    await asyncio.gather(watcher_task, scanner_task, keepalive_task)
+                    # 🔥 [추가] AI 워커(웨이터) 태스크 생성
+                    # (이게 있어야 큐에 쌓인 데이터를 처리합니다!)
+                    worker_task = asyncio.create_task(ai_worker())
+                    
+                    # gather에 worker_task도 포함시켜서 같이 실행
+                    await asyncio.gather(
+                        watcher_task, 
+                        scanner_task, 
+                        keepalive_task, 
+                        worker_task  # 👈 여기 추가됨!
+                    )
                 else:
                     print("-> ❌ [메인] '수동 인증' 실패. 10초 후 재시도...")
                     await asyncio.sleep(10)
-                    continue
+                    continue  
                     
         except websockets.exceptions.ConnectionClosed as e:
             print(f"-> ❌ [메인] 웹소켓 연결이 예기치 않게 종료되었습니다 ({e.code}). 10초 후 재연결합니다...")
