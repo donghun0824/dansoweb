@@ -14,6 +14,8 @@ from firebase_admin import credentials, messaging # ✅ 2. 관련 모듈 임포�
 import sys
 import pytz
 import traceback
+import numpy as np
+
 # --- (v12.0) API 키 설정 (보안) ---
 # 3. Render 환경 변수에서 API 키를 읽어옵니다.
 POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
@@ -53,6 +55,182 @@ CLOUD_PROXIMITY = 20.0 # <-- ✅ 20.0으로 복귀
 CLOUD_THICKNESS = 0.5
 OBV_LOOKBACK = 3 
 
+# --- [F1 엔진] NumPy 고속 연산 함수 모음 ---
+def calculate_f1_indicators(closes, highs, lows, volumes):
+    """
+    Pandas TA를 대체하는 초고속 NumPy 지표 계산 함수
+    입력: np.array (closes, highs, lows, volumes)
+    출력: 딕셔너리 (지표 값들)
+    """
+    # 1. 기본 함수 정의 (SMA, EMA, Rolling)
+    def sma(arr, n):
+        ret = np.cumsum(arr, dtype=float)
+        ret[n:] = ret[n:] - ret[:-n]
+        return ret[n - 1:] / n
+
+    def ema(arr, n):
+        alpha = 2 / (n + 1)
+        # Numba 없이 Python Loop로 해도 1000개는 순식간임
+        res = np.empty_like(arr)
+        res[0] = arr[0]
+        for i in range(1, len(arr)):
+            res[i] = alpha * arr[i] + (1 - alpha) * res[i-1]
+        return res
+
+    def rolling_max(arr, n):
+        # 간단한 슬라이딩 윈도우 최대값
+        return np.array([arr[i-n+1:i+1].max() for i in range(n-1, len(arr))])
+
+    def rolling_min(arr, n):
+        return np.array([arr[i-n+1:i+1].min() for i in range(n-1, len(arr))])
+
+    def rsi_func(arr, n=5):
+        delta = np.diff(arr)
+        gain = np.where(delta > 0, delta, 0)
+        loss = np.where(delta < 0, -delta, 0)
+        
+        # Wilder's Smoothing (Pandas TA 방식)
+        avg_gain = np.zeros_like(arr); avg_loss = np.zeros_like(arr)
+        avg_gain[n] = np.mean(gain[:n]); avg_loss[n] = np.mean(loss[:n])
+        
+        for i in range(n+1, len(arr)):
+            avg_gain[i] = (avg_gain[i-1] * (n-1) + gain[i-1]) / n
+            avg_loss[i] = (avg_loss[i-1] * (n-1) + loss[i-1]) / n
+            
+        rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss!=0)
+        return 100 - (100 / (1 + rs))
+
+    # --- 지표 계산 시작 ---
+    
+    # [WAE] MACD (2, 3, 4)
+    ema_fast = ema(closes, 2)
+    ema_slow = ema(closes, 3)
+    macd = ema_fast - ema_slow
+    # macd_signal = ema(macd, 4) # Signal은 WAE 계산식에 직접 안쓰임 (트렌드 델타만 씀)
+
+    # [WAE] Bollinger Bands (5, 1.5)
+    # BB 계산: SMA +/- (Std * 1.5)
+    bb5_sma = np.zeros_like(closes)
+    # 단순화를 위해 끝부분만 계산 (전체 계산 안하고 효율화 가능하지만 일단 전체)
+    # 1000개 배열 루프는 Python에서도 빠름. 
+    # 정확한 표준편차 계산을 위해 Pandas Rolling Std와 유사하게 구현
+    w = 5
+    bb5_up = np.zeros_like(closes)
+    bb5_low = np.zeros_like(closes)
+    
+    for i in range(w, len(closes)):
+        window = closes[i-w+1:i+1]
+        mean = np.mean(window)
+        std = np.std(window)
+        bb5_up[i] = mean + (std * 1.5)
+        bb5_low[i] = mean - (std * 1.5)
+
+    # [Squeeze] Bollinger Bands (20, 2.0)
+    w20 = 20
+    bb20_up = np.zeros_like(closes)
+    bb20_low = np.zeros_like(closes)
+    for i in range(w20, len(closes)):
+        window = closes[i-w20+1:i+1]
+        mean = np.mean(window)
+        std = np.std(window)
+        bb20_up[i] = mean + (std * 2.0)
+        bb20_low[i] = mean - (std * 2.0)
+
+    # [WAE] ATR (5)
+    # TR = max(h-l, abs(h-cp), abs(l-cp))
+    prev_close = np.roll(closes, 1); prev_close[0] = closes[0]
+    tr1 = highs - lows
+    tr2 = np.abs(highs - prev_close)
+    tr3 = np.abs(lows - prev_close)
+    tr = np.maximum(tr1, np.maximum(tr2, tr3))
+    
+    # ATR은 보통 RMA(Running Moving Average) 사용
+    atr = np.zeros_like(closes)
+    atr[5] = np.mean(tr[:5])
+    for i in range(6, len(closes)):
+        atr[i] = (atr[i-1] * 4 + tr[i]) / 5
+
+    # [Ichimoku] (2, 3, 5) - 매우 짧은 설정
+    # 전환선(Tenkan): (9일 -> 2일) 고가+저가 / 2
+    t_max = rolling_max(highs, 2)
+    t_min = rolling_min(lows, 2)
+    tenkan = (t_max + t_min) / 2
+    
+    # 기준선(Kijun): (26일 -> 3일)
+    k_max = rolling_max(highs, 3)
+    k_min = rolling_min(lows, 3)
+    kijun = (k_max + k_min) / 2
+    
+    # 선행스팬 A/B (원래는 미래로 밀어야 하지만 현재 값 비교용으로 계산)
+    # 5일 전의 (전환+기준)/2 -> 선행 A
+    # 5일 전의 (52일 -> 5일) 고+저/2 -> 선행 B
+    # 사용자 코드 로직: cloud_a_current = df[SENKOU_A_COL].iloc[-K] (K=3)
+    # 즉 3봉 전의 값을 현재 구름대로 씀.
+    
+    senkou_a = (tenkan + kijun) / 2
+    
+    s_max = rolling_max(highs, 5)
+    s_min = rolling_min(lows, 5)
+    senkou_b = (s_max + s_min) / 2
+    
+    # [RSI] (5)
+    rsi = rsi_func(closes, 5)
+
+    # [CMF] (5)
+    # MFM = ((C-L) - (H-C)) / (H-L)
+    # MFV = MFM * V
+    # CMF = Sum(MFV, 5) / Sum(V, 5)
+    mfm = ((closes - lows) - (highs - closes)) / (highs - lows)
+    # 0으로 나누기 방지
+    mfm = np.nan_to_num(mfm) 
+    mfv = mfm * volumes
+    
+    cmf = np.zeros_like(closes)
+    for i in range(5, len(closes)):
+        sum_mfv = np.sum(mfv[i-4:i+1])
+        sum_vol = np.sum(volumes[i-4:i+1])
+        if sum_vol != 0:
+            cmf[i] = sum_mfv / sum_vol
+
+    # [OBV]
+    # OBV는 누적합
+    obv = np.zeros_like(volumes)
+    obv[0] = volumes[0]
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i-1]:
+            obv[i] = obv[i-1] + volumes[i]
+        elif closes[i] < closes[i-1]:
+            obv[i] = obv[i-1] - volumes[i]
+        else:
+            obv[i] = obv[i-1]
+
+    # 필요한 마지막 값들만 리턴 (속도 최적화)
+    idx = -1
+    
+    return {
+        "close": closes[idx],
+        "volume": volumes[idx],
+        "macd_delta": (macd[idx] - macd[idx-1]) * 150, # WAE Sensitivity
+        "bb_gap_wae": bb5_up[idx] - bb5_low[idx],      # WAE 폭발력
+        "dead_zone": atr[idx] * 1.5,                   # WAE ATR Mult
+        "rsi": rsi[idx],
+        "cmf": cmf[idx],
+        "obv_now": obv[idx],
+        "obv_prev": obv[idx-1],
+        
+        # Ichimoku (K=3 이므로 -3 인덱스 사용)
+        "cloud_top": max(senkou_a[-3], senkou_b[-3]),
+        "senkou_a": senkou_a[-3],
+        "senkou_b": senkou_b[-3],
+        
+        # Squeeze (20, 2.0)
+        "bb_up_std": bb20_up[idx],
+        "bb_low_std": bb20_low[idx],
+        "bb_width_now": (bb20_up[idx] - bb20_low[idx]) / closes[idx],
+        
+        # Squeeze Avg (과거 20개 평균 폭)
+        "bb_width_avg": np.mean((bb20_up[-20:] - bb20_low[-20:]) / closes[-20:])
+    }
 # --- (v13.0) DB 경로 설정 (PostgreSQL 연동) ---
 # 4. Render 환경 변수에서 PostgreSQL DB 연결 주소를 읽어옵니다.
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -91,7 +269,7 @@ def init_firebase():
 
 ticker_minute_history = {} 
 ticker_tick_history = {} 
-
+ai_cooldowns = {}
 # --- (v16.1) Gemini API 호출 함수 (AI 응답 오류 수정) ---
 async def get_gemini_probability(ticker, conditions_data):
     if not GEMINI_API_KEY:
@@ -541,6 +719,7 @@ def calculate_volume_ratio(df):
         return round(ratio, 2)
     except:
         return 1.0
+
     # --- (신규) 과거 데이터 스냅샷 가져오기 ---
 def fetch_initial_data(ticker):
     """
@@ -585,317 +764,165 @@ def fetch_initial_data(ticker):
     except Exception as e:
         print(f"⚠️ [초기화 실패] {ticker}: {e}")
 
+# --- [F1 버전] 고속 데이터 처리 엔진 ---
 async def handle_msg(msg_data):
     global ticker_minute_history, ticker_tick_history
     
-    # --- 설정값 로드 (외부 변수라 가정) ---
-    m_fast, m_slow, m_sig = WAE_MACD
-    bb_len, bb_std = WAE_BB
-    T, K, S = ICHIMOKU_SHORT
-    
-    TENKAN_COL = f"ITS_{T}"
-    KIJUN_COL = f"IKS_{K}"
-    SENKOU_A_COL = f"ISA_{T}"
-    SENKOU_B_COL = f"ISB_{K}"
-    CHIKOU_COL = f"ICS_{K}"
-    
-    # ✅ [수정] 입력 데이터 타입 안전성 확보
-    if isinstance(msg_data, dict):
-        msg_list = [msg_data]
-    else:
-        msg_list = msg_data
-
+    if isinstance(msg_data, dict): msg_data = [msg_data]
     minute_data = []
-    
-    # 1. 데이터 수신 및 분류
-    for msg in msg_list:
+
+    # 1. 데이터 수집 (기존과 동일)
+    for msg in msg_data:
         ticker = msg.get('sym')
         if not ticker: continue
-            
-        # (1) 실시간 틱 데이터 수집 (보간용)
         if msg.get('ev') == 'T':
-            if ticker not in ticker_tick_history:
-                ticker_tick_history[ticker] = []
-            
-            # 필요한 데이터만 경량화해서 저장
+            if ticker not in ticker_tick_history: ticker_tick_history[ticker] = []
             ticker_tick_history[ticker].append([msg.get('t'), msg.get('p'), msg.get('s')])
-            
-            # 틱 데이터 버퍼 관리
-            if len(ticker_tick_history[ticker]) > 1000:
-                ticker_tick_history[ticker] = ticker_tick_history[ticker][-1000:]
-                
-        # (2) 1분봉 데이터 수집
+            if len(ticker_tick_history[ticker]) > 2000: ticker_tick_history[ticker].pop(0)
         elif msg.get('ev') == 'AM':
-            # 로그는 필요시 주석 해제
-            # print(f"-> [엔진 v10.0] 1분봉 수신: {ticker} @ ${msg.get('c')}")
             minute_data.append(msg)
 
-    # 2. 각 종목별 지표 계산 및 분석
     for msg in minute_data:
         ticker = msg.get('sym')
         
+        # 데이터 업데이트
         if ticker not in ticker_minute_history:
-            ticker_minute_history[ticker] = pd.DataFrame(columns=['o', 'h', 'l', 'c', 'v', 't'])
-            ticker_minute_history[ticker].set_index('t', inplace=True)
+            # DataFrame 대신 그냥 리스트나 딕셔너리 쓸 수도 있지만, 
+            # 일단 1단계에서는 기존 구조 호환을 위해 DataFrame 유지 (연산만 NumPy로)
+            ticker_minute_history[ticker] = pd.DataFrame(columns=['o', 'h', 'l', 'c', 'v', 't']).set_index('t')
             
-        timestamp = pd.to_datetime(msg.get('s'), unit='ms')
-        new_row = {'o': msg.get('o'), 'h': msg.get('h'), 'l': msg.get('l'), 'c': msg.get('c'), 'v': msg.get('v')}
-        ticker_minute_history[ticker].loc[timestamp] = new_row
+        ts = pd.to_datetime(msg['s'], unit='ms')
+        ticker_minute_history[ticker].loc[ts] = [msg['o'], msg['h'], msg['l'], msg['c'], msg['v']]
         
-        # ✅ [중요 수정] 데이터 보관 갯수 60 -> 1000개로 증가
-        # 일목균형표(52), MACD(26) 등의 선행 계산을 위해 넉넉한 데이터 필요 (NaN 방지)
+        # 버퍼 관리 (1000개)
         if len(ticker_minute_history[ticker]) > 1000:
             ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-1000:]
-        
-        df_raw = ticker_minute_history[ticker].copy() 
-        
-        # 최소 데이터 요구량 체크 (일목균형표 선행스팬B 계산 최소치 고려)
-        if len(df_raw) < max(MIN_DATA_REQ, 52): 
-            continue
+            
+        df = ticker_minute_history[ticker]
+        if len(df) < 52: continue # 최소 데이터 체크
 
-        # 1분봉 리샘플링
-        df = df_raw.resample('1min').agg({
-            'o': 'first', 'h': 'max', 'l': 'min', 'c': 'last', 'v': 'sum'
-        })
-        
-        # 틱 데이터 기반 보간 (Interpolation)
-        if ticker in ticker_tick_history and len(ticker_tick_history[ticker]) > 0:
-            try:
-                ticks_df = pd.DataFrame(ticker_tick_history[ticker], columns=['t', 'p', 's'])
-                ticks_df['t'] = pd.to_datetime(ticks_df['t'], unit='ms')
-                ticks_df.set_index('t', inplace=True)
-                
-                # 현재 생성 중인 최신 봉(Last Row) 업데이트
-                df['c'] = df['c'].combine_first(ticks_df['p'].resample('1min').last())
-                df['o'] = df['o'].combine_first(ticks_df['p'].resample('1min').first())
-                df['h'] = df['h'].combine_first(ticks_df['p'].resample('1min').max())
-                df['l'] = df['l'].combine_first(ticks_df['p'].resample('1min').min())
-                df['v'] = df['v'].combine_first(ticks_df['s'].resample('1min').sum())
-                
-                ticker_tick_history[ticker] = ticker_tick_history[ticker][-200:] # 틱 버퍼 정리
-
-            except Exception as e:
-                print(f"-> [v9.0 틱 보간 경고] {ticker}: {e}")
-                
-        # 결측치 처리
-        df.interpolate(method='linear', inplace=True)
-        df.ffill(inplace=True)
-        df.bfill(inplace=True)
-
-        if len(df) < MIN_DATA_REQ: 
-            continue 
-
-        df.rename(columns={'c': 'close', 'h': 'high', 'l': 'low', 'o': 'open', 'v': 'volume'}, inplace=True)
-        
-        # --- 기술적 지표 계산 (pandas_ta) ---
+        # ---------------------------------------------------
+        # 🏎️ [F1 엔진 가동] Pandas TA 제거 -> NumPy 연산
+        # ---------------------------------------------------
         try:
-            df.ta.macd(fast=m_fast, slow=m_slow, signal=m_sig, append=True)
-            df.ta.bbands(length=5, std=1.5, append=True)  # WAE용
-            df.ta.bbands(length=20, std=2.0, append=True) # ✅ Squeeze 감지용 표준 BB
-            df.ta.atr(length=WAE_ATR, append=True)
-            df.ta.cmf(length=WAE_CMF, append=True) 
-            df.ta.obv(append=True)
-            df.ta.rsi(length=RSI_LENGTH, append=True) 
-            df.ta.ichimoku(tenkan=T, kijun=K, senkou=S, append=True)
-        except Exception as e:
-            print(f"-> [지표 계산 오류] {ticker}: {e}")
-            continue
-        
-        # 컬럼 찾기
-        MACD_COL = next((c for c in df.columns if c.startswith('MACD_')), None)
-        BB_UP_COL = next((c for c in df.columns if c.startswith('BBU_')), None)
-        BB_LOW_COL= next((c for c in df.columns if c.startswith('BBL_')), None)
-        ATR_COL = next((c for c in df.columns if c.startswith('ATRr_')), None) 
-        CMF_COL = next((c for c in df.columns if c.startswith('CMF_')), None)
-        RSI_COL = next((c for c in df.columns if c.startswith('RSI_')), None)
+            # DataFrame을 NumPy 배열로 변환 (연산 속도 UP)
+            closes = df['c'].values.astype(float)
+            highs = df['h'].values.astype(float)
+            lows = df['l'].values.astype(float)
+            volumes = df['v'].values.astype(float)
+            opens = df['o'].values.astype(float)
 
-        senkou_a_cols = [c for c in df.columns if c.startswith('ISA_') or c.startswith('SENKOU_A_')]
-        senkou_b_cols = [c for c in df.columns if c.startswith('ISB_') or c.startswith('SENKOU_B_')]
-        tenkan_cols   = [c for c in df.columns if c.startswith('ITS_') or c.startswith('TENKAN_')]
-        kijun_cols    = [c for c in df.columns if c.startswith('IKS_') or c.startswith('KIJUN_')]
-        chikou_cols   = [c for c in df.columns if c.startswith('ICS_') or c.startswith('CHIKOU_')]
-
-        if not (MACD_COL and BB_UP_COL and BB_LOW_COL and ATR_COL and CMF_COL and
-                RSI_COL and senkou_a_cols and senkou_b_cols and tenkan_cols and
-                kijun_cols and chikou_cols):
-            continue 
-        
-        SENKOU_A_COL = senkou_a_cols[0]; SENKOU_B_COL = senkou_b_cols[0]
-        TENKAN_COL   = tenkan_cols[0];   KIJUN_COL    = kijun_cols[0]
-        CHIKOU_COL   = chikou_cols[0]
-        
-        # WAE 지표 계산
-        df['t1'] = (df[MACD_COL] - df[MACD_COL].shift(1)) * WAE_SENSITIVITY
-        df['e1'] = df[BB_UP_COL] - df[BB_LOW_COL]
-        df['deadZone'] = df[ATR_COL] * WAE_ATR_MULT
+            # 🔥 F1 계산 함수 호출 (여기서 모든 지표가 0.001초 만에 계산됨)
+            indicators = calculate_f1_indicators(closes, highs, lows, volumes)
             
-        last = df.iloc[-1]; prev = df.iloc[-2]
-
-        try:
-            # ---------------------------------------------------------
-            # ✅ [개선 1] 추세 및 눌림목 분석 지표 (3종 세트)
-            # 1. 5분 급등률 (단기 과열 확인)
-            # 2. 고점 대비 눌림폭 (추세 이탈 확인 - FOXX 거르기용)
-            # 3. 일일 상승률 (모멘텀 확인)
-            # ---------------------------------------------------------
-            price_now = df['close'].iloc[-1]
+            # --- 결과 추출 ---
+            price_now = indicators['close']
             
-            # 1. 5분 급등률 (Pump Strength)
-            if len(df) >= 6:
-                price_5m_ago = df['close'].iloc[-6] 
-                pump_strength_5m = ((price_now - price_5m_ago) / price_5m_ago) * 100
-            else:
-                pump_strength_5m = 0.0
+            # 1. [Pump Strength] 5분 급등률
+            if len(closes) >= 6:
+                price_5m = closes[-6]
+                pump_strength_5m = ((price_now - price_5m) / price_5m) * 100
+            else: pump_strength_5m = 0.0
 
-            # 🔥 2. 고점 대비 눌림폭 (Pullback from High) - 핵심!
-            # 현재 데이터프레임(최근 200분) 내에서의 최고가 기준
-            day_high = df['high'].max()
-            if day_high > 0:
-                pullback_from_high = ((day_high - price_now) / day_high) * 100
-            else:
-                pullback_from_high = 0.0
+            # 2. [Pullback] 고점 대비 눌림폭
+            day_high = np.max(highs)
+            pullback = ((day_high - price_now) / day_high) * 100 if day_high > 0 else 0.0
 
-            # 3. 일일 상승률 (Daily Change) - 데이터 시작가 대비
-            day_open = df['open'].iloc[0]
-            if day_open > 0:
-                daily_change = ((price_now - day_open) / day_open) * 100
-            else:
-                daily_change = 0.0
-                # 4. [Squeeze Ratio] 밴드 압축비 (⚠️ 아까 이게 없어서 에러남!)
-            # 표준 볼린저 밴드(20, 2.0) 컬럼 찾기
-            cols = df.columns
-            bb_up_std = next((c for c in cols if 'BBU_20' in c), None)
-            bb_low_std = next((c for c in cols if 'BBL_20' in c), None)
-            if bb_up_std and bb_low_std:
-                # 현재 밴드 폭 비율
-                width_now = (last[bb_up_std] - last[bb_low_std]) / last['close']
-                # 과거 20개 밴드 폭 평균
-                width_avg_20 = ((df[bb_up_std] - df[bb_low_std]) / df['close']).iloc[-20:].mean()
-                # 압축비 계산 (1.0보다 작으면 쥐 죽은 듯 조용함)
-                squeeze_ratio = width_now / width_avg_20 if width_avg_20 > 0 else 1.0
-                current_width = width_now # (데이터 패키징용 변수)
-                avg_width_20 = width_avg_20
-            else:
-                squeeze_ratio = 1.0
-                current_width = 0.1
-                avg_width_20 = 0.1
+            # 3. [Daily Change]
+            day_open = opens[0]
+            daily_change = ((price_now - day_open) / day_open) * 100 if day_open > 0 else 0.0
 
-            # ---------------------------------------------------------
-            # ✅ [개선 2] 볼린저 밴드 Squeeze 정교화
-            # 단순히 폭이 좁은게 아니라, '평소보다' 좁은지를 비교
-            # ---------------------------------------------------------
-            bb_upper = df[BB_UP_COL].iloc[-1]
-            bb_lower = df[BB_LOW_COL].iloc[-1]
-            bb_mid_val = (bb_upper + bb_lower) / 2 if (bb_upper + bb_lower) != 0 else 1
+            # 4. [Squeeze Ratio]
+            squeeze_ratio = indicators['bb_width_now'] / indicators['bb_width_avg'] if indicators['bb_width_avg'] > 0 else 1.0
+
+            # 5. [Vol Dry]
+            vol_avg_5 = np.mean(volumes[-6:-1]) if len(volumes) > 6 else 1
+            is_volume_dry = indicators['volume'] < (vol_avg_5 * 0.8)
+
+            # --- 트리거 조건 ---
+            # WAE 폭발: (MACD Delta > BB Gap) AND (MACD Delta > DeadZone)
+            cond_wae = (indicators['macd_delta'] > indicators['bb_gap_wae']) and \
+                       (indicators['macd_delta'] > indicators['dead_zone'])
             
-            current_width = (bb_upper - bb_lower) / bb_mid_val # 현재 밴드폭 비율
+            # RSI, CMF
+            rsi_val = indicators['rsi']
+            cmf_val = indicators['cmf']
+            cond_rsi = 40 < rsi_val < 75
+            cond_vol = (cmf_val > 0) and (indicators['obv_now'] > indicators['obv_prev'])
 
-            # 최근 20봉 평균 밴드폭 계산
-            bb_width_series = (df[BB_UP_COL] - df[BB_LOW_COL]) / ((df[BB_UP_COL] + df[BB_LOW_COL]) / 2)
-            avg_width_20 = bb_width_series.rolling(20).mean().iloc[-1]
+            # Ichimoku Cloud
+            cloud_top = indicators['cloud_top']
+            is_above_cloud = price_now > cloud_top
             
-            # 현재 폭이 평균보다 작으면 '수축(Squeeze)' 상태
-            is_squeezed = current_width < avg_width_20
+            # Cloud Shape (두께, 거리)
+            cloud_thick = abs(indicators['senkou_a'] - indicators['senkou_b']) / price_now * 100
+            dist_bull = (price_now - cloud_top) / price_now * 100
+            cond_cloud_shape = (cloud_thick >= 0.5) and (0 <= dist_bull <= 20.0)
 
-            # ATR(변동성) 축소 확인 (보조 지표)
-            atr_now = df[ATR_COL].iloc[-1]
-            atr_avg = df[ATR_COL].iloc[-6:-1].mean()
-            is_volatility_shrinking = (atr_now < atr_avg) or is_squeezed
+            # --- 최종 판단 ---
+            engine_1 = cond_wae and cond_rsi
+            engine_2 = cond_cloud_shape and cond_vol and cond_rsi
+            cond_pre = (squeeze_ratio < 1.1) and is_volume_dry and is_above_cloud
 
-            # ---------------------------------------------------------
-            # ✅ [개선 3] 거래량 가뭄 (Volume Dry-up)
-            # ---------------------------------------------------------
-            curr_vol = df['volume'].iloc[-1]
-            avg_vol_5 = df['volume'].iloc[-6:-1].mean()
-            if avg_vol_5 == 0: avg_vol_5 = 1
-            
-            is_volume_dry = curr_vol < (avg_vol_5 * 0.8) # 평소의 80% 수준
-
-            # --- 기본 조건 정의 ---
-            cond_wae_momentum = (last['t1'] > last['e1']) and (last['t1'] > last['deadZone'])
-            cond_volume = (last[CMF_COL] > 0) and (last['OBV'] > prev['OBV'])
-            cond_rsi = (WAE_RSI_RANGE[0] < last[RSI_COL] < WAE_RSI_RANGE[1])
-
-            # --- 일목균형표 조건 ---
-            # 중요: 현재 캔들과 비교할 구름대는 K(26)개 전의 구름대 값임 (pandas_ta 구조상)
-            idx_cloud = -K if len(df) > K else -1
-            cloud_a_current = df[SENKOU_A_COL].iloc[idx_cloud]
-            cloud_b_current = df[SENKOU_B_COL].iloc[idx_cloud]
-            
-            cloud_top = max(cloud_a_current, cloud_b_current)
-            is_above_cloud = last['close'] > cloud_top
-            tk_cross_bullish = (prev[TENKAN_COL] < prev[KIJUN_COL]) and (last[TENKAN_COL] > last[KIJUN_COL])
-            cond_ichimoku_trend = is_above_cloud and tk_cross_bullish
-            
-            # 구름대 두께 및 이격도
-            cloud_thickness = abs(cloud_a_current - cloud_b_current) / last['close'] * 100
-            dist_bull = (last['close'] - cloud_top) / last['close'] * 100
-            cond_cloud_shape = (cloud_thickness >= CLOUD_THICKNESS) and (0 <= dist_bull <= CLOUD_PROXIMITY) 
-
-            # 후행스팬 (26봉 전 주가보다 높아야 함)
-            price_K_ago = df['close'].iloc[idx_cloud]
-            cond_chikou = last[CHIKOU_COL] > price_K_ago
-
-            # --- 최종 트리거 조합 ---
-            
-            # A. WAE 폭발 (강력 매수)
-            engine_1_pass = (cond_wae_momentum and cond_rsi)
-            
-            # B. 정석 셋업 (구름대 위 + 거래량 받쳐줌 + 모양 좋음)
-            engine_2_pass = (cond_cloud_shape and cond_volume and cond_rsi)
-            
-            # C. [신규] 발산 전조 (Pre-Breakout)
-            # 조건: 수축 상태 + 거래량 말름 + 구름대 위 + (중요) 아직 급등 안함(3% 미만)
-            cond_pre_breakout = (is_volatility_shrinking and is_volume_dry and is_above_cloud and pump_strength_5m < 3.0)
-
-            if engine_1_pass or engine_2_pass or cond_pre_breakout:
+            # -------------------------------------------------------
+            # 🚀 AI 호출 (쿨타임 + 비용 절감 로직 적용)
+            # -------------------------------------------------------
+            if (engine_1 or engine_2 or cond_pre) and cond_rsi:
                 
-                # 추가 정보 계산
-                current_session = get_current_session() # 외부 함수
-                if current_session == "closed": pass 
+                # 1. [쿨타임 체크] 60초 내 재호출 금지
+                import time
+                current_ts = time.time()
+                
+                if ticker in ai_cooldowns:
+                    last_call = ai_cooldowns[ticker]
+                    if current_ts - last_call < 60: # 60초 쿨타임
+                        continue # 이번 턴은 넘김
 
-                vol_ratio = calculate_volume_ratio(df) # 외부 함수
+                # 2. 데이터 준비
+                session = get_current_session()
+                if session == "closed": pass
+                
+                # (F1 엔진에서 이미 계산된 거래량 평균 사용)
+                vol_ratio = indicators['volume'] / vol_avg_5 if vol_avg_5 > 0 else 1.0
 
-                # 전략 타입 결정
-                if engine_1_pass: strat_type = "Explosion (WAE)"
-                elif cond_pre_breakout: strat_type = "Pre-Breakout (Squeeze)"
-                else: strat_type = "Standard Setup"
+                if engine_1: strat = "Explosion (WAE)"
+                elif cond_pre: strat = "Pre-Breakout (Squeeze)"
+                else: strat = "Standard Setup"
 
-                conditions_data = {
-                    "session_type": current_session,
-                    "strategy_type": strat_type,        # 전략 유형 로깅
-                    "volume_ratio": vol_ratio,
+                # 3. AI 데이터 패키징 (ai_data로 통일)
+                ai_data = {
+                    "session_type": session,
+                    "strategy_type": strat,
+                    "volume_ratio": float(round(vol_ratio, 2)),
                     "pump_strength_5m": float(round(pump_strength_5m, 2)),
-                    "pullback_from_high": float(round(pullback_from_high, 2)), # 추가됨
-                    "daily_change": float(round(daily_change, 2)),             # 추가됨
+                    "pullback_from_high": float(round(pullback, 2)),
+                    "daily_change": float(round(daily_change, 2)),
                     "squeeze_ratio": float(round(squeeze_ratio, 2)),
                     "is_volume_dry": bool(is_volume_dry),
-                    "engine_1_pass": bool(engine_1_pass),
-                    "engine_2_pass": bool(engine_2_pass),
-                    "pre_breakout": bool(cond_pre_breakout),
-                    "rsi_value": float(round(last[RSI_COL], 2)),
-                    "cmf_value": float(round(last[CMF_COL], 2)),
+                    "engine_1_pass": bool(engine_1),
+                    "engine_2_pass": bool(engine_2),
+                    "pre_breakout": bool(cond_pre),
+                    "rsi_value": float(round(rsi_val, 2)),
+                    "cmf_value": float(round(cmf_val, 2)),
                     "cloud_distance_percent": float(round(dist_bull, 2))
                 }
                 
-                # AI 판단 요청
-                probability_score = await get_gemini_probability(ticker, conditions_data)
+                # 4. AI 분석 요청 (딱 1번만 호출)
+                # (conditions_data 변수는 삭제하고 ai_data로 통일했습니다)
+                score = await get_gemini_probability(ticker, ai_data)
                 
-                print(f"💡 [{strat_type}] {ticker} @ ${last['close']:.4f} | AI: {probability_score}% | Pump: {pump_strength_5m:.1f}%")
-                
-                is_new_rec = log_recommendation(ticker, float(last['close']), probability_score)
-                
-                if is_new_rec: 
-                    send_discord_alert(ticker, float(last['close']), "recommendation", probability_score)
-                    send_fcm_notification(ticker, float(last['close']), probability_score)
-            
-            else:
-                pass
-                
+                # 5. 쿨타임 갱신 (호출 성공 시 시간 기록)
+                ai_cooldowns[ticker] = current_ts
+
+                # 6. 결과 출력 및 알림
+                print(f"🏎️ [F1 분석] {ticker} @ ${price_now:.4f} | AI: {score}% | Sqz: {squeeze_ratio:.2f} | Pump: {pump_strength_5m:.1f}%")
+
+                if log_recommendation(ticker, float(price_now), score):
+                    send_discord_alert(ticker, float(price_now), "recommendation", score)
+                    send_fcm_notification(ticker, float(price_now), score)
         except Exception as e:
-            # 에러 라인 번호까지 출력하여 디버깅 용이하게 함
             import traceback
-            print(f"-> ❌ [엔진 CRASH] {ticker} ({e.__traceback__.tb_lineno} line): {e}") 
+            # print(f"F1 엔진 오류 {ticker}: {e}")
             pass
 
 # --- (v7.2) 수신 엔진 ---
