@@ -484,19 +484,34 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
     for i in range(6, len(closes)):
         atr[i] = (atr[i-1] * 4 + tr[i]) / 5
 
-    # [Ichimoku] (2, 3, 5)
-    t_max = rolling_max(highs, 2)
-    t_min = rolling_min(lows, 2)
+    # -------------------------------------------------------
+    # 🛠️ [FIX] Array Alignment Helper
+    # 배열 길이가 짧아지면 앞부분을 첫 번째 값으로 채워 길이를 맞춤
+    # -------------------------------------------------------
+    target_len = len(closes)
+    def normalize_len(arr):
+        diff = target_len - len(arr)
+        if diff > 0:
+            return np.concatenate([np.full(diff, arr[0]), arr])
+        return arr
+
+    # [Ichimoku] (2, 3, 5) - Safe Mode (Broadcasting Error Fix)
+    # 전환선(Tenkan): (9일 -> 2일)
+    t_max = normalize_len(rolling_max(highs, 2))
+    t_min = normalize_len(rolling_min(lows, 2))
     tenkan = (t_max + t_min) / 2
     
-    k_max = rolling_max(highs, 3)
-    k_min = rolling_min(lows, 3)
+    # 기준선(Kijun): (26일 -> 3일)
+    k_max = normalize_len(rolling_max(highs, 3))
+    k_min = normalize_len(rolling_min(lows, 3))
     kijun = (k_max + k_min) / 2
     
+    # 선행스팬 A (이제 tenkan과 kijun 길이가 같으므로 안전)
     senkou_a = (tenkan + kijun) / 2
     
-    s_max = rolling_max(highs, 5)
-    s_min = rolling_min(lows, 5)
+    # 선행스팬 B (52일 -> 5일)
+    s_max = normalize_len(rolling_max(highs, 5))
+    s_min = normalize_len(rolling_min(lows, 5))
     senkou_b = (s_max + s_min) / 2
     
     # [RSI] (5)
