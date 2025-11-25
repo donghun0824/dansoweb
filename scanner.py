@@ -859,7 +859,9 @@ async def handle_msg(msg_data):
             
         df = ticker_minute_history[ticker].copy()
         
-        if len(df) < 52: continue
+        if len(df) < 52:
+            print(f"⏳ {ticker}: 데이터 부족 ({len(df)}개) - 대기 중") # 주석 해제해서 확인
+            continue
 
         try:
             cols_to_fix = ['o', 'h', 'l', 'c', 'v']
@@ -986,8 +988,8 @@ async def handle_msg(msg_data):
                 ai_request_queue.put_nowait(task_payload)
 
         except Exception as e:
-            import traceback
-            pass
+            print(f"🔥 [CRITICAL ERROR] {ticker} 처리 중 치명적 오류:")
+            traceback.print_exc()  # 에러의 상세 내용을 강제로 출력
 
 async def websocket_engine(websocket):
     try:
