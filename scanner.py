@@ -637,38 +637,12 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
         "bb_width_now": (bb20_up[idx] - bb20_low[idx]) / closes[idx],
         "bb_width_avg": np.mean((bb20_up[-20:] - bb20_low[-20:]) / closes[-20:])
     }
-# 🚀 [Math] XGBoost 기반 초고속 승률 계산
-def get_ai_score(ticker, ai_data):
-    global sniper_model
-    
-    # 모델이 없으면 기본값 50점
-    if sniper_model is None:
-        return 50
 
-    try:
-        # 학습 데이터와 컬럼 순서가 100% 일치해야 함
-        features = pd.DataFrame([{
-            'vwap_dist': ai_data['vwap_distance'],
-            'squeeze': ai_data['squeeze_ratio'],
-            'rsi': ai_data['rsi_value'],
-            'pump': ai_data['pump_strength_5m'],
-            'pullback': ai_data['pullback_from_high']
-        }])
-        
-        # 확률 계산 (0.0 ~ 1.0) -> 점수 변환
-        probs = sniper_model.predict_proba(features)[:, 1]
-        score = int(probs[0] * 100)
-        
-        return score
-
-    except Exception as e:
-        print(f"❌ [AI Score Error] {ticker}: {e}")
-        return 50
 # ==============================================================================
 # 5. AI WORKER & FUNCTIONS
 # ==============================================================================
 
-# 🚀 [Math] XGBoost 기반 초고속 승률 계산 (V16 Advanced Model)
+# 🚀 [Math] XGBoost 기반 초고속 승률 계산 (V16 Advanced Model + KeyError 방지)
 def get_ai_score(ticker, ai_data):
     global sniper_model
     
@@ -678,21 +652,22 @@ def get_ai_score(ticker, ai_data):
 
     try:
         # ⚠️ [중요] 모델 학습 당시의 피처 순서와 100% 일치해야 함
-        # 학습 피처: ['vwap_dist', 'squeeze', 'rsi', 'pump', 'pullback', 'rvol', 'volatility_z', 'order_imbalance', 'trend_align', 'session']
+        # 모든 필드에 .get()을 적용하여 데이터가 잠시 누락되어도 봇이 죽지 않게 함
         
         features = pd.DataFrame([{
-            'vwap_dist': ai_data['vwap_distance'],
-            'squeeze': ai_data['squeeze_ratio'],
-            'rsi': ai_data['rsi_value'],
-            'pump': ai_data['pump_strength_5m'],
-            'pullback': ai_data['pullback_from_high'],
+            # 기존 5개 (여기에도 .get을 꼭 써야 에러가 안 납니다!)
+            'vwap_dist': ai_data.get('vwap_distance', 0.0),
+            'squeeze': ai_data.get('squeeze_ratio', 1.0),
+            'rsi': ai_data.get('rsi_value', 50.0),
+            'pump': ai_data.get('pump_strength_5m', 0.0),
+            'pullback': ai_data.get('pullback_from_high', 0.0),
             
-            # 👇 [V16 추가 피처] 모델이 요구하는 나머지 5개
-            'rvol': ai_data.get('rvol', 0),
-            'volatility_z': ai_data.get('volatility_z', 0),
-            'order_imbalance': ai_data.get('order_imbalance', 0),
+            # V16 추가 5개
+            'rvol': ai_data.get('rvol', 0.0),
+            'volatility_z': ai_data.get('volatility_z', 0.0),
+            'order_imbalance': ai_data.get('order_imbalance', 0.0),
             'trend_align': ai_data.get('trend_align', 0),
-            'session': ai_data.get('session_int', 3) # 정수형 세션 (0, 1, 2, 3)
+            'session': ai_data.get('session_int', 3)
         }])
         
         # 확률 계산 (0.0 ~ 1.0) -> 점수 변환 (0 ~ 100)
@@ -702,8 +677,8 @@ def get_ai_score(ticker, ai_data):
         return score
 
     except Exception as e:
+        # 에러 발생 시 로그만 남기고 50점 반환 (봇 멈춤 방지)
         print(f"❌ [AI Score Error] {ticker}: {e}")
-        # 에러 발생 시(피처 불일치 등) 안전하게 50점 반환하여 봇 멈춤 방지
         return 50
 
 # 🧠 [Logic] 제미나이: V16 엘리트 스캘퍼 페르소나 적용
@@ -812,11 +787,11 @@ async def ai_worker():
             
             # 데이터 언패킹
             session_int = ai_data.get('session_int', 3)
-            rsi = ai_data['rsi_value']
-            pump = ai_data['pump_strength_5m']
-            oar_delta = ai_data.get('oar_delta', 0)
-            rvol = ai_data.get('rvol', 0)
-            vwap_dist = ai_data('vwap_distance',0.0)
+            rsi = ai_data.get('rsi_value', 50.0)
+            pump = ai_data.get('pump_strength_5m', 0.0)
+            oar_delta = ai_data.get('oar_delta', 0.0)
+            rvol = ai_data.get('rvol', 0.0)
+            vwap_dist = ai_data.get('vwap_distance', 0.0)
 
             # [Rule 1] Session 0: Legend Mode
             if session_int == 0:
