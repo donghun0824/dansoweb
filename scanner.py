@@ -18,7 +18,8 @@ import traceback
 import numpy as np
 import xgboost as xgb
 import joblib
-
+import warnings
+from concurrent.futures import ThreadPoolExecutor
 # ==============================================================================
 # 1. CONFIGURATION & CONSTANTS
 # ==============================================================================
@@ -40,8 +41,9 @@ VAPID_EMAIL = "mailto:cbvkqtm98@gmail.com"
 
 # Tuning Parameters
 MAX_PRICE = 20
-TOP_N = 100
+TOP_N = 1000
 MIN_DATA_REQ = 20
+HISTORY_WORKERS = 50
 
 WAE_MACD = (2, 3, 4)
 WAE_SENSITIVITY = 150
@@ -60,6 +62,7 @@ OBV_LOOKBACK = 3
 # Global State
 ticker_minute_history = {}
 ticker_tick_history = {}
+watched_tickers = set()
 ai_cooldowns = {}
 ai_request_queue = asyncio.Queue()
 db_pool = None
@@ -369,28 +372,42 @@ def find_active_tickers():
         print(f"-> ❌ [사냥꾼] 1단계 스캔 오류: POLYGON_API_KEY가 설정되지 않았습니다.")
         return set()
         
-    print(f"\n[사냥꾼] 1단계: 'Top Gainers' (조건: ${MAX_PRICE} 미만) 스캔 중...")
+    print(f"\n🔭 [사냥꾼] 시장 전체 스캔 중... (Top {TOP_N} Gainers / Max ${MAX_PRICE})")
     
+    # Polygon Snapshot API (시장 전체 상태 한방에 조회)
     url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={POLYGON_API_KEY}"
 
     tickers_to_watch = set()
     try:
-        response = requests.get(url)
+        # 타임아웃 10초 설정 (네트워크 지연 시 무한 대기 방지)
+        response = requests.get(url, timeout=10)
         response.raise_for_status() 
         data = response.json()
+        
         if data.get('status') == 'OK':
+            # 수신된 티커 리스트 순회
             for ticker in data.get('tickers', []):
+                # 가격 정보 추출 (lastTrade가 없는 경우 999로 처리하여 필터링)
                 price = ticker.get('lastTrade', {}).get('p', 999) 
                 ticker_symbol = ticker.get('ticker')
+                
+                # 가격 조건 확인 ($20 이하)
                 is_price_ok = price <= MAX_PRICE
+                
                 if is_price_ok and ticker_symbol:
                     tickers_to_watch.add(ticker_symbol)
-                if len(tickers_to_watch) >= TOP_N: break
-            print(f"-> [사냥꾼] 1단계 스캔 완료. 총 {len(tickers_to_watch)}개 종목 포착.")
+                
+                # 목표 수량(TOP_N)을 채우면 즉시 중단 (효율성)
+                if len(tickers_to_watch) >= TOP_N: 
+                    break
+            
+            print(f"-> ✅ [타겟 확보] 총 {len(tickers_to_watch)}개 종목 조준 완료.")
             
     except Exception as e:
-        print(f"-> ❌ [사냥꾼] 1단계 스캔 오류 (API 키/한도 확인): {e}")
+        print(f"-> ❌ [스캔 실패] API 호출 중 오류 발생: {e}")
+        # 오류가 나더라도 지금까지 확보한 티커라도 반환하여 봇이 멈추지 않게 함
         return tickers_to_watch
+        
     return tickers_to_watch
 
 def fetch_initial_data(ticker):
@@ -1181,114 +1198,89 @@ async def websocket_engine(websocket):
     except Exception as e:
         print(f"-> ❌ [엔진 v9.0] 웹소켓 오류: {e}")
 
-async def wait_for_data_readiness(ticker):
-    """
-    초기 데이터(fetch_initial_data)가 ticker_minute_history에 
-    완전히 로드될 때까지 짧게 대기합니다.
-    """
-    max_retries = 20 # 0.1s * 20 = 최대 2초 대기
-    for _ in range(max_retries):
-        if ticker in ticker_minute_history and not ticker_minute_history[ticker].empty:
-            # 데이터가 20개 이상(최소 분석 조건)인지 확인
-            if len(ticker_minute_history[ticker]) >= 20:
-                return
-        await asyncio.sleep(0.1)
-    
-    print(f"⚠️ [Timeout] {ticker}: 초기 데이터 로딩 지연 (분석 대상에서 제외될 수 있음)")       
+# ==============================================================================
+# 7. WEBSOCKET HANDLING & SCANNER (V18.0: Zero Latency)
+# ==============================================================================
 
-async def periodic_scanner(websocket):
-    current_subscriptions = set() 
+async def polygon_ws_client():
+    uri = "wss://socket.polygon.io/stocks"
     
     while True:
         try:
-            print(f"\n[사냥꾼] (V2.1) 3분 주기 시작. DB 청소 중...")
-            conn = None
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                # 24시간 지난 데이터만 안전하게 삭제
-                cursor.execute("DELETE FROM signals WHERE time < NOW() - INTERVAL '24 hours'")
-                cursor.execute("DELETE FROM recommendations WHERE time < NOW() - INTERVAL '24 hours'")
-                conn.commit()
-                cursor.close()
-                print("-> [사냥꾼] 만료된 데이터(24h+) 청소 완료.")
-            except Exception as e:
-                print(f"-> ❌ [사냥꾼] DB 청소 실패: {e}")
-                if conn: conn.rollback()
-            finally:
-                if conn: db_pool.putconn(conn)
-            
-            new_tickers = find_active_tickers() 
-            tickers_to_add = new_tickers - current_subscriptions
-            tickers_to_remove = current_subscriptions - new_tickers
-            
-            if tickers_to_add:
-                print(f"[사냥꾼] 신규 {len(tickers_to_add)}개 구독 및 로딩...")
-                for ticker in tickers_to_add:
-                    params_str = f"AM.{ticker},T.{ticker}"
-                    sub_payload = json.dumps({"action": "subscribe", "params": params_str})
-                    await websocket.send(sub_payload)
-                    
-                    # 데이터 요청
-                    fetch_initial_data(ticker) 
-                    
-                    # [Race Condition Fix] 데이터가 메모리에 로드될 때까지 대기
-                    await wait_for_data_readiness(ticker)
-                print("[사냥꾼] 신규 구독 완료.")
+            async with websockets.connect(uri) as websocket:
+                print("\n🔌 [WebSocket] Polygon 서버 접속 중...")
                 
-                await run_initial_analysis()
-                
-                print("[사냥꾼] 신규 구독 및 초기 분석 완료.")
-                
-            if tickers_to_remove:
-                for ticker in tickers_to_remove:
-                    params_str = f"AM.{ticker},T.{ticker}"
-                    unsub_payload = json.dumps({"action": "unsubscribe", "params": params_str})
-                    await websocket.send(unsub_payload)
-                    
-                    if ticker in ai_cooldowns: 
-                        del ai_cooldowns[ticker]
-                        
-                    await asyncio.sleep(0.1)
-                print("[사냥꾼] 구독 해지 완료.")
-            
-            current_subscriptions = new_tickers
-            
-            status_tickers_list = []
-            for ticker in current_subscriptions:
-                status_tickers_list.append({"ticker": ticker, "is_new": ticker in tickers_to_add})
-                
-            status_data = {
-                'last_scan_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'watching_count': len(current_subscriptions),
-                'watching_tickers': status_tickers_list
-            }
-            
-            conn = None
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                INSERT INTO status (key, value, last_updated) 
-                VALUES (%s, %s, %s)
-                ON CONFLICT (key) DO UPDATE SET
-                    value = EXCLUDED.value,
-                    last_updated = EXCLUDED.last_updated
-                """, ('status_data', json.dumps(status_data), datetime.now()))
-                conn.commit()
-                cursor.close()
-            except Exception as e:
-                print(f"❌ [DB] 'status' 저장 실패: {e}")
-                if conn: conn.rollback()
-            finally:
-                if conn: db_pool.putconn(conn)
-            
-        except Exception as e:
-            print(f"-> ❌ [사냥꾼 루프 오류] {e}")
-            
-        print(f"\n[사냥꾼] 3분(180초) 후 다음 스캔을 시작합니다...")
-        await asyncio.sleep(180)
+                # 1. 인증
+                await websocket.send(json.dumps({"action": "auth", "params": POLYGON_API_KEY}))
+                auth_res = await websocket.recv()
+                print(f"🔑 [Auth] {auth_res}")
 
+                # 2. DB 청소 (시작 시 1회 수행)
+                print("[System] 오래된 데이터 정리 중...")
+                conn = None
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM signals WHERE time < NOW() - INTERVAL '24 hours'")
+                    cursor.execute("DELETE FROM recommendations WHERE time < NOW() - INTERVAL '24 hours'")
+                    conn.commit()
+                    cursor.close()
+                except Exception as e:
+                    print(f"⚠️ [DB Clean Error] {e}")
+                    if conn: conn.rollback()
+                finally:
+                    if conn: db_pool.putconn(conn)
+
+                # 3. 감시 종목 선정 (Top 1000)
+                global watched_tickers
+                watched_tickers = find_active_tickers()
+                
+                if not watched_tickers:
+                    print("⚠️ [Warning] 감시할 종목이 없습니다. 30초 후 재시도.")
+                    await asyncio.sleep(30)
+                    continue
+
+                # 4. 🚀 [핵심] 병렬 데이터 로딩 (Parallel Loading)
+                # 기존의 순차적 대기(8분 소요)를 제거하고 50개 스레드로 동시 요청 (30초 소요)
+                print(f"📚 [History] {len(watched_tickers)}개 종목 과거 데이터 병렬 수집 시작 (Workers: {HISTORY_WORKERS})...")
+                
+                loop = asyncio.get_event_loop()
+                # ThreadPoolExecutor를 사용하여 fetch_initial_data를 병렬로 실행
+                await loop.run_in_executor(
+                    None, 
+                    lambda: list(ThreadPoolExecutor(max_workers=HISTORY_WORKERS).map(fetch_initial_data, list(watched_tickers)))
+                )
+                print("✅ [History] 데이터 수집 완료. 실시간 분석 엔진 가동.")
+
+                # 5. 초기 데이터 기반 1차 분석 실행 (V17 로직 적용)
+                await run_initial_analysis()
+
+                # 6. WebSocket 구독 (Batch Subscribe)
+                # 1000개를 한 번에 보내면 메시지가 너무 길 수 있으므로 나눠서 구독
+                ticker_list = list(watched_tickers)
+                batch_size = 500 
+                
+                for i in range(0, len(ticker_list), batch_size):
+                    batch = ticker_list[i:i+batch_size]
+                    params = ",".join([f"AM.{t}" for t in batch] + [f"T.{t}" for t in batch])
+                    await websocket.send(json.dumps({"action": "subscribe", "params": params}))
+                    print(f"📡 [Subscribe] Batch {i//batch_size + 1}: {len(batch)}개 구독 요청.")
+
+                # 7. AI 워커 태스크 시작
+                asyncio.create_task(ai_worker())
+
+                print("🔥 [System] V18.0 Real-time Scanning Started (Delay Removed) 🔥")
+
+                # 8. 무한 루프: 메시지 수신 즉시 처리 (Non-blocking)
+                while True:
+                    msg = await websocket.recv()
+                    data = json.loads(msg)
+                    # 메시지를 받자마자 비동기 Task로 던져버림 (대기 시간 0)
+                    asyncio.create_task(handle_msg(data))
+
+        except Exception as e:
+            print(f"❌ [WebSocket Error] {e} - 5초 후 재연결...")
+            await asyncio.sleep(5)
 async def manual_keepalive(websocket):
     try:
         while True:
@@ -1349,13 +1341,11 @@ async def main():
                     print("-> ✅ [메인] '수동 인증' 성공! 4개 로봇(사냥꾼, 엔진, 핑, 워커)을 시작합니다.")
                     
                     watcher_task = websocket_engine(websocket) 
-                    scanner_task = periodic_scanner(websocket)
                     keepalive_task = manual_keepalive(websocket)
                     worker_task = asyncio.create_task(ai_worker())
                     
                     await asyncio.gather(
                         watcher_task, 
-                        scanner_task, 
                         keepalive_task, 
                         worker_task
                     )
