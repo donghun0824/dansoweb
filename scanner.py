@@ -1258,14 +1258,15 @@ async def polygon_ws_client():
                 # 6. WebSocket 구독 (Batch Subscribe)
                 # 1000개를 한 번에 보내면 메시지가 너무 길 수 있으므로 나눠서 구독
                 ticker_list = list(watched_tickers)
-                batch_size = 500 
+                batch_size = 50
                 
                 for i in range(0, len(ticker_list), batch_size):
                     batch = ticker_list[i:i+batch_size]
                     params = ",".join([f"AM.{t}" for t in batch] + [f"T.{t}" for t in batch])
                     await websocket.send(json.dumps({"action": "subscribe", "params": params}))
                     print(f"📡 [Subscribe] Batch {i//batch_size + 1}: {len(batch)}개 구독 요청.")
-
+                # 👈 중요: 서버가 놀라지 않게 0.5초씩 쉬면서 요청
+                    await asyncio.sleep(0.5)
                 # 7. AI 워커 태스크 시작
                 asyncio.create_task(ai_worker())
 
