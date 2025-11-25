@@ -834,162 +834,69 @@ async def handle_msg(msg_data):
     if isinstance(msg_data, dict): msg_data = [msg_data]
     minute_data = []
 
+    # 1. 데이터 분류 (Trade vs Aggregate)
     for msg in msg_data:
         ticker = msg.get('sym')
         if not ticker: continue
+        
+        # 실시간 체결가(Tick) 업데이트 -> 마지막 종가 보정용
         if msg.get('ev') == 'T':
             if ticker not in ticker_tick_history: ticker_tick_history[ticker] = []
             ticker_tick_history[ticker].append([msg.get('t'), msg.get('p'), msg.get('s')])
-            if len(ticker_tick_history[ticker]) > 2000: ticker_tick_history[ticker].pop(0)
+            # 메모리 관리: 2000개는 너무 많음 -> 500개로 축소
+            if len(ticker_tick_history[ticker]) > 500: ticker_tick_history[ticker].pop(0)
+            
+        # 분봉 데이터(Aggregate) 수집
         elif msg.get('ev') == 'AM':
             minute_data.append(msg)
 
+    # 2. 분봉 데이터 처리 및 분석 트리거
     for msg in minute_data:
         ticker = msg.get('sym')
         
+        # DataFrame 초기화
         if ticker not in ticker_minute_history:
-            ticker_minute_history[ticker] = pd.DataFrame(columns=['o', 'h', 'l', 'c', 'v', 't'])
-            ticker_minute_history[ticker].set_index('t', inplace=True)
-            
-        ts = pd.to_datetime(msg['s'], unit='ms')
-        ticker_minute_history[ticker].loc[ts] = [msg['o'], msg['h'], msg['l'], msg['c'], msg['v']]
+            ticker_minute_history[ticker] = pd.DataFrame(columns=['o', 'h', 'l', 'c', 'v'])
         
-        if len(ticker_minute_history[ticker]) > 1000:
-            ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-1000:]
+        # 타임스탬프 변환
+        ts = pd.to_datetime(msg['s'], unit='ms')
+        
+        # 데이터 업데이트 (loc 사용)
+        ticker_minute_history[ticker].loc[ts] = [
+            float(msg['o']), float(msg['h']), float(msg['l']), float(msg['c']), float(msg['v'])
+        ]
+        
+        # 메모리 관리 (최근 120개만 유지 - 2시간 분량이면 충분)
+        if len(ticker_minute_history[ticker]) > 120:
+            ticker_minute_history[ticker] = ticker_minute_history[ticker].iloc[-120:]
             
         df = ticker_minute_history[ticker].copy()
         
-        if len(df) < 52:
-            print(f"⏳ {ticker}: 데이터 부족 ({len(df)}개) - 대기 중") # 주석 해제해서 확인
-            continue
+        # 데이터가 너무 적으면 계산 불가 (최소 20개로 완화)
+        if len(df) < 20: continue
 
         try:
-            cols_to_fix = ['o', 'h', 'l', 'c', 'v']
-            for col in cols_to_fix:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            df.ffill(inplace=True)
-            df.bfill(inplace=True)
-            df.fillna(0, inplace=True)
-            
-            df = df.astype(float)
-
-            df = df.resample('1min').agg({
-                'o': 'first', 'h': 'max', 'l': 'min', 'c': 'last', 'v': 'sum'
-            })
-            df.ffill(inplace=True) 
-            
+            # 3. 실시간 가격 보정 (Tick 데이터 활용)
             if ticker in ticker_tick_history and len(ticker_tick_history[ticker]) > 0:
-                try:
-                    ticks_df = pd.DataFrame(ticker_tick_history[ticker], columns=['t', 'p', 's'])
-                    ticks_df['t'] = pd.to_datetime(ticks_df['t'], unit='ms')
-                    ticks_df.set_index('t', inplace=True)
-                    last_tick_price = ticks_df['p'].iloc[-1]
-                    df.iloc[-1, df.columns.get_loc('c')] = float(last_tick_price)
-                except: pass
+                last_tick_price = float(ticker_tick_history[ticker][-1][1])
+                # 현재 캔들의 종가를 최신 틱 가격으로 강제 업데이트 (리페인팅 허용)
+                df.iloc[-1, df.columns.get_loc('c')] = last_tick_price
+                
+                # High/Low 갱신
+                if last_tick_price > df.iloc[-1, df.columns.get_loc('h')]:
+                    df.iloc[-1, df.columns.get_loc('h')] = last_tick_price
+                if last_tick_price < df.iloc[-1, df.columns.get_loc('l')]:
+                    df.iloc[-1, df.columns.get_loc('l')] = last_tick_price
+
+            # =========================================================
+            # 🔥 [핵심 수정] 복잡한 로직 다 버리고 분석 함수 호출로 통일
+            # =========================================================
+            await run_f1_analysis_and_signal(ticker, df)
 
         except Exception as e:
-            print(f"⚠️ [데이터 세탁 실패] {ticker}: {e}")
-            continue
-
-        try:
-            closes = df['c'].values
-            highs = df['h'].values
-            lows = df['l'].values
-            volumes = df['v'].values
-            opens = df['o'].values
-
-            indicators = calculate_quant_indicators(closes, highs, lows, volumes)
-            
-            price_now = indicators['close']
-            
-            if len(closes) >= 6:
-                price_5m = closes[-6]
-                pump_strength_5m = ((price_now - price_5m) / price_5m) * 100 if price_5m != 0 else 0
-            else: pump_strength_5m = 0.0
-
-            day_high = np.max(highs)
-            pullback = ((day_high - price_now) / day_high) * 100 if day_high > 0 else 0.0
-
-            day_open = opens[0]
-            daily_change = ((price_now - day_open) / day_open) * 100 if day_open > 0 else 0.0
-
-            squeeze_ratio = indicators['bb_width_now'] / indicators['bb_width_avg'] if indicators['bb_width_avg'] > 0 else 1.0
-
-            vol_avg_5 = np.mean(volumes[-6:-1]) if len(volumes) > 6 else 1
-            is_volume_dry = indicators['volume'] < (vol_avg_5 * 1.0)
-
-            cond_wae = (indicators['macd_delta'] > indicators['bb_gap_wae']) and \
-                       (indicators['macd_delta'] > indicators['dead_zone'])
-            
-            rsi_val = indicators['rsi']
-            cmf_val = indicators['cmf']
-            
-            cond_rsi = 40 < rsi_val < 75
-            cond_vol = (cmf_val > 0)
-
-            cloud_top = indicators['cloud_top']
-            is_above_cloud = price_now > cloud_top
-            
-            cloud_thick = abs(indicators['senkou_a'] - indicators['senkou_b']) / price_now * 100
-            dist_bull = (price_now - cloud_top) / price_now * 100
-            cond_cloud_shape = (cloud_thick >= 0.5) and (0 <= dist_bull <= 20.0)
-
-            engine_1 = cond_wae and cond_rsi
-            engine_2 = cond_cloud_shape and cond_vol and cond_rsi
-            cond_pre = (squeeze_ratio < 1.3) and is_volume_dry and is_above_cloud
-
-            if pump_strength_5m > 2.0:
-                 print(f"🔍 [Check] {ticker} (+{pump_strength_5m:.1f}%) | Sqz:{squeeze_ratio:.2f} | WAE:{cond_wae} | RSI:{rsi_val:.0f}")
-
-            if (engine_1 or engine_2 or cond_pre) and cond_rsi:
-                
-                import time
-                current_ts = time.time()
-                if ticker in ai_cooldowns:
-                    last_call = ai_cooldowns[ticker]
-                    if current_ts - last_call < 60: continue 
-
-                session = get_current_session()
-                if session == "closed": pass
-                
-                vol_ratio = indicators['volume'] / vol_avg_5 if vol_avg_5 > 0 else 1.0
-
-                if engine_1: strat = "Explosion (WAE)"
-                elif cond_pre: strat = "Pre-Breakout (Squeeze)"
-                else: strat = "Standard Setup"
-
-                ai_data = {
-                    "session_type": session,
-                    "strategy_type": strat,
-                    "volume_ratio": float(round(vol_ratio, 2)),
-                    "pump_strength_5m": float(round(pump_strength_5m, 2)),
-                    "pullback_from_high": float(round(pullback, 2)),
-                    "daily_change": float(round(daily_change, 2)),
-                    "squeeze_ratio": float(round(squeeze_ratio, 2)),
-                    "is_volume_dry": bool(is_volume_dry),
-                    "engine_1_pass": bool(engine_1),
-                    "engine_2_pass": bool(engine_2),
-                    "pre_breakout": bool(cond_pre),
-                    "rsi_value": float(round(rsi_val, 2)),
-                    "cmf_value": float(round(cmf_val, 2)),
-                    "cloud_distance_percent": float(round(dist_bull, 2))
-                }
-                
-                task_payload = {
-                    'ticker': ticker,
-                    'price': price_now,
-                    'ai_data': ai_data,
-                    'strat': strat,
-                    'squeeze': squeeze_ratio,
-                    'pump': pump_strength_5m
-                }
-                ai_cooldowns[ticker] = current_ts
-                ai_request_queue.put_nowait(task_payload)
-
-        except Exception as e:
-            print(f"🔥 [CRITICAL ERROR] {ticker} 처리 중 치명적 오류:")
-            traceback.print_exc()  # 에러의 상세 내용을 강제로 출력
+            print(f"⚠️ [Processing Error] {ticker}: {e}")
+            import traceback
+            traceback.print_exc()
 
 async def websocket_engine(websocket):
     try:
