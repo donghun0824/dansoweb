@@ -816,7 +816,7 @@ async def ai_worker():
             pump = ai_data['pump_strength_5m']
             oar_delta = ai_data.get('oar_delta', 0)
             rvol = ai_data.get('rvol', 0)
-            vwap_dist = ai_data['vwap_distance']
+            vwap_dist = ai_data('vwap_distance',0.0)
 
             # [Rule 1] Session 0: Legend Mode
             if session_int == 0:
