@@ -656,60 +656,142 @@ async def ai_worker():
 # 6. ANALYSIS LOGIC & PIPELINE
 # ==============================================================================
 
+def calculate_soft_gate_score(data, session):
+    """
+    [V17.0 Soft Gate] Binary Logic -> Weighted Scoring Logic
+    각 지표를 점수화하여 종합 점수(Fusion Score)를 산출합니다.
+    """
+    score = 0
+    reasons = []
+
+    # 1. 🌊 RVOL (거래량 에너지) - 가장 중요 (30점 만점)
+    if data['rvol'] >= 5.0:
+        score += 30; reasons.append("RVOL 폭발")
+    elif data['rvol'] >= 3.0:
+        score += 20
+    elif data['rvol'] >= 1.5:
+        score += 10
+    else:
+        score -= 10 # 거래량 부족 페널티
+
+    # 2. 🚀 Pump Strength (상승 강도) - (25점 만점)
+    pump = data['pump']
+    if 2.0 <= pump <= 5.0:
+        score += 25; reasons.append("Golden Pump")
+    elif 1.0 <= pump < 2.0:
+        score += 10 # 시동 거는 중
+    elif 5.0 < pump <= 8.0:
+        score += 15 # 강하지만 추격 위험 있음
+    elif pump > 8.0:
+        score += 5; reasons.append("Too High(Risk)") # 과열 감점
+
+    # 3. 📉 RSI & Session Context (20점 만점)
+    rsi = data['rsi']
+    # 오후장(Session 2 이상)은 RSI 필터가 핵심
+    if session >= 2:
+        if 50 <= rsi <= 75:
+            score += 20; reasons.append("PM Safe Zone")
+        elif rsi > 75:
+            score -= 5 # 오후장 과매수는 위험
+        else:
+            score += 5
+    # 오전장/점심장
+    else:
+        if 50 <= rsi <= 80:
+            score += 20
+        elif rsi > 80:
+            score += 10 # 초반 슈팅 인정
+
+    # 4. 🎯 VWAP Distance (눌림목) - (15점 만점)
+    vwap_dist = data['vwap_dist']
+    if 0 <= vwap_dist <= 2.0:
+        score += 15; reasons.append("Perfect Pullback")
+    elif 2.0 < vwap_dist <= 4.0:
+        score += 5
+    elif vwap_dist < 0:
+        score -= 5 # 역배열 위험
+
+    # 5. 🔬 Microstructure (OAR & Volatility) - (10점 만점)
+    if data['volatility_z'] > 2.0:
+        score += 5
+    if data['order_imbalance'] > 0:
+        score += 5
+
+    # 6. ⚖️ Session Weight (세션별 가중치/페널티)
+    # 점심장(1)은 가짜가 많으므로 전체 점수에서 10점 깎고 시작 (Iron Dome)
+    if session == 1:
+        score -= 10
+        
+    return score, reasons
+
 async def run_f1_analysis_and_signal(ticker, df):
     global ai_cooldowns, ai_request_queue
     try:
-        if len(df) < 60: return # 최소 데이터 요구량 (EMA60 등 고려)
+        if len(df) < 60: return 
 
-        # 1. 퀀트 지표 계산 (백테스트 로직 적용)
+        # 1. 퀀트 지표 계산
         indicators = calculate_quant_indicators(df)
         if indicators is None: return
         
         price_now = indicators['close']
         
-        # 2. Feature Engineering (학습 데이터와 동일한 형태로 가공)
-        # Pump (5분 상승률)
+        # 2. Feature Engineering
         pump_strength = ((price_now - indicators['prev_close_5']) / indicators['prev_close_5']) * 100
-        
-        # Pullback (고점 대비 하락률)
         pullback = ((indicators['recent_high'] - price_now) / indicators['recent_high']) * 100
-        
-        # VWAP Distance
         vwap_dist = ((price_now - indicators['vwap']) / indicators['vwap']) * 100 if indicators['vwap'] != 0 else 0
 
-        # 3. 1차 필터링 (최소 조건 - 불필요한 API 호출 방지)
-        # 백테스트에서 rvol < 0.5, vol_z < 0.5는 버렸으므로 여기서도 버림
-        if indicators['rvol'] < 0.5 and indicators['volatility_z'] < 0.5:
-            return
-
-        # 4. AI에게 보낼 데이터 패킷 (XGBoost Feature 10개 완벽 일치)
-        ai_data = {
-            "vwap_dist": float(round(vwap_dist, 2)),
-            "squeeze": float(round(indicators['squeeze_ratio'], 2)),
-            "rsi": float(round(indicators['rsi'], 2)),
-            "pump": float(round(pump_strength, 2)),
-            "pullback": float(round(pullback, 2)),
-            "rvol": float(round(indicators['rvol'], 2)),
-            "volatility_z": float(round(indicators['volatility_z'], 2)),
-            "order_imbalance": float(round(indicators['order_imbalance'], 2)),
-            "trend_align": int(indicators['trend_align']),
-            "session": int(indicators['session'])
+        # 데이터 패킷 준비 (점수 계산용)
+        score_data = {
+            'rvol': indicators['rvol'],
+            'pump': pump_strength,
+            'rsi': indicators['rsi'],
+            'vwap_dist': vwap_dist,
+            'volatility_z': indicators['volatility_z'],
+            'order_imbalance': indicators['order_imbalance']
         }
-        
-        # 5. AI 요청 (쿨다운 체크)
-        current_ts = time.time()
-        if ticker in ai_cooldowns:
-            if current_ts - ai_cooldowns[ticker] < 60: return 
 
-        # 펌핑이 어느정도 있거나, 셋업이 좋을 때만 AI 호출 (API 절약)
-        if pump_strength > 1.5 or indicators['squeeze_ratio'] < 0.1:
-            print(f"✨ [감지] {ticker} | Rvol:{ai_data['rvol']} | Pump:{ai_data['pump']}% | Z:{ai_data['volatility_z']}")
+        # 3. [V17.0] Soft Gate Scoring (점수 산출)
+        tech_score, score_reasons = calculate_soft_gate_score(score_data, indicators['session'])
+        
+        # 4. Tier 분류
+        tier = "TRASH"
+        if tech_score >= 85: tier = "ELITE"   # 즉시 진입급
+        elif tech_score >= 70: tier = "VALID" # AI 확인 필요
+        elif tech_score >= 50: tier = "WATCH" # 관망
+        
+        # ELITE나 VALID 등급만 AI 프로세스 태움 (API 비용 절약)
+        if tier in ["ELITE", "VALID"]:
+            
+            # 쿨다운 체크
+            import time
+            current_ts = time.time()
+            if ticker in ai_cooldowns:
+                if current_ts - ai_cooldowns[ticker] < 60: return 
+
+            reason_str = ", ".join(score_reasons)
+            print(f"✨ [{tier}] {ticker} | Score: {tech_score} | {reason_str}")
+
+            # AI에게 보낼 데이터
+            ai_data = {
+                "technical_score": int(tech_score),
+                "tier": tier,
+                "vwap_dist": float(round(vwap_dist, 2)),
+                "squeeze": float(round(indicators['squeeze_ratio'], 2)),
+                "rsi": float(round(indicators['rsi'], 2)),
+                "pump": float(round(pump_strength, 2)),
+                "pullback": float(round(pullback, 2)),
+                "rvol": float(round(indicators['rvol'], 2)),
+                "volatility_z": float(round(indicators['volatility_z'], 2)),
+                "order_imbalance": float(round(indicators['order_imbalance'], 2)),
+                "trend_align": int(indicators['trend_align']),
+                "session": int(indicators['session'])
+            }
             
             task_payload = {
                 'ticker': ticker,
                 'price': price_now,
                 'ai_data': ai_data,
-                'strat': "Quant V4 (XGBoost Logic)", # 전략명 변경
+                'strat': f"SoftGate {tier}", 
                 'squeeze': ai_data['squeeze'],
                 'pump': ai_data['pump']
             }
@@ -717,6 +799,7 @@ async def run_f1_analysis_and_signal(ticker, df):
             ai_request_queue.put_nowait(task_payload)
 
     except Exception as e:
+        # print(f"Error in signal: {e}")
         pass
 
 async def run_initial_analysis():
