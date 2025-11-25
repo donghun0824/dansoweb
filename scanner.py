@@ -16,6 +16,8 @@ import sys
 import pytz
 import traceback
 import numpy as np
+import xgboost as xgb
+import joblib
 
 # ==============================================================================
 # 1. CONFIGURATION & CONSTANTS
@@ -61,6 +63,26 @@ ticker_tick_history = {}
 ai_cooldowns = {}
 ai_request_queue = asyncio.Queue()
 db_pool = None
+
+# --- [AI 모델 설정] ---
+MODEL_FILE = "sniper_model_advanced.json"
+sniper_model = None
+
+def load_model():
+    global sniper_model
+    if os.path.exists(MODEL_FILE):
+        try:
+            # XGBoost 모델 불러오기
+            sniper_model = xgb.XGBClassifier()
+            sniper_model.load_model(MODEL_FILE)
+            print(f"✅ [AI] 스나이퍼 모델 장전 완료: {MODEL_FILE}")
+        except Exception as e:
+            print(f"❌ [AI] 모델 로드 실패: {e}")
+    else:
+        print(f"⚠️ [AI] 모델 파일 없음 ({MODEL_FILE}). 파일이 업로드 되었는지 확인하세요.")
+
+# 봇 시작 시 모델 즉시 로드
+load_model()
 
 # ==============================================================================
 # 2. DATABASE & FIREBASE FUNCTIONS
@@ -171,7 +193,8 @@ def get_db_connection():
         init_db()
     return db_pool.getconn()
 
-def send_discord_alert(ticker, price, type="signal", probability_score=50):
+
+def send_discord_alert(ticker, price, type="signal", probability_score=50, reasoning=""):
     if not DISCORD_WEBHOOK_URL or "YOUR_DISCORD" in DISCORD_WEBHOOK_URL or len(DISCORD_WEBHOOK_URL) < 50:
         print(f"🔔 [알림] {ticker} @ ${price} (디스코드 URL 미설정)")
         return
@@ -183,6 +206,7 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
             f"💡 **AI Setup (Recommendation)** 💡\n"
             f"**{ticker}** @ **${price:.4f}**\n"
             f"**AI Score: {probability_score}%**"
+            f"**AI Comment:** {reasoning}"
         )
         
     data = {"content": content}
@@ -192,7 +216,7 @@ def send_discord_alert(ticker, price, type="signal", probability_score=50):
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-def send_fcm_notification(ticker, price, probability_score):
+def send_fcm_notification(ticker, price, probability_score, reasoning=""):
     if not firebase_admin._apps:
         return
 
@@ -211,6 +235,7 @@ def send_fcm_notification(ticker, price, probability_score):
 
         data_payload = {
             'title': "Danso AI 신호", 
+            'body': f"{ticker}: {reasoning}",
             'ticker': ticker,
             'price': f"{price:.4f}",
             'probability': str(probability_score)
@@ -407,8 +432,9 @@ def fetch_initial_data(ticker):
 
 def calculate_f1_indicators(closes, highs, lows, volumes):
     """
-    Pandas TA를 대체하는 초고속 NumPy 지표 계산 함수
+    Pandas TA를 대체하는 초고속 NumPy 지표 계산 함수 (V16 OAR 적용)
     """
+    # ---------------- Helper Functions ----------------
     def sma(arr, n):
         ret = np.cumsum(arr, dtype=float)
         ret[n:] = ret[n:] - ret[:-n]
@@ -440,10 +466,10 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
             avg_gain[i] = (avg_gain[i-1] * (n-1) + gain[i-1]) / n
             avg_loss[i] = (avg_loss[i-1] * (n-1) + loss[i-1]) / n
             
-        # 분모에 1e-10(0.0000000001)을 더해 0으로 나누기 방지
         rs = avg_gain / (avg_loss + 1e-10) 
         return 100 - (100 / (1 + rs))
 
+    # ---------------- 1. Standard Indicators ----------------
     # [WAE] MACD (2, 3, 4)
     ema_fast = ema(closes, 2)
     ema_slow = ema(closes, 3)
@@ -485,10 +511,7 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
     for i in range(6, len(closes)):
         atr[i] = (atr[i-1] * 4 + tr[i]) / 5
 
-    # -------------------------------------------------------
-    # 🛠️ [FIX] Array Alignment Helper
-    # 배열 길이가 짧아지면 앞부분을 첫 번째 값으로 채워 길이를 맞춤
-    # -------------------------------------------------------
+    # ---------------- Array Alignment Helper ----------------
     target_len = len(closes)
     def normalize_len(arr):
         diff = target_len - len(arr)
@@ -496,21 +519,17 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
             return np.concatenate([np.full(diff, arr[0]), arr])
         return arr
 
-    # [Ichimoku] (2, 3, 5) - Safe Mode (Broadcasting Error Fix)
-    # 전환선(Tenkan): (9일 -> 2일)
+    # [Ichimoku] (2, 3, 5)
     t_max = normalize_len(rolling_max(highs, 2))
     t_min = normalize_len(rolling_min(lows, 2))
     tenkan = (t_max + t_min) / 2
     
-    # 기준선(Kijun): (26일 -> 3일)
     k_max = normalize_len(rolling_max(highs, 3))
     k_min = normalize_len(rolling_min(lows, 3))
     kijun = (k_max + k_min) / 2
     
-    # 선행스팬 A (이제 tenkan과 kijun 길이가 같으므로 안전)
     senkou_a = (tenkan + kijun) / 2
     
-    # 선행스팬 B (52일 -> 5일)
     s_max = normalize_len(rolling_max(highs, 5))
     s_min = normalize_len(rolling_min(lows, 5))
     senkou_b = (s_max + s_min) / 2
@@ -519,10 +538,8 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
     rsi = rsi_func(closes, 5)
 
     # [CMF] (5)
-    # 고가-저가가 0일 경우(변동 없음) 0으로 나누기 에러 방지
     denom = highs - lows
-    denom = np.where(denom == 0, 1e-10, denom) # 0이면 아주 작은 수로 대체
-    
+    denom = np.where(denom == 0, 1e-10, denom)
     mfm = ((closes - lows) - (highs - closes)) / denom
     mfm = np.nan_to_num(mfm) 
     mfv = mfm * volumes
@@ -531,7 +548,6 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
     for i in range(5, len(closes)):
         sum_mfv = np.sum(mfv[i-4:i+1])
         sum_vol = np.sum(volumes[i-4:i+1])
-        # 여기도 혹시 모르니 0이 아닐 때만 계산 (기존 유지)
         if sum_vol != 0:
             cmf[i] = sum_mfv / sum_vol
 
@@ -546,28 +562,66 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
         else:
             obv[i] = obv[i-1]
 
-    idx = -1
-
-    # [VWAP] (Volume Weighted Average Price)
-    # 공식: 누적(가격 * 거래량) / 누적(거래량)
+    # [VWAP]
     tp = (highs + lows + closes) / 3
     vp = tp * volumes
-    
     cum_vp = np.cumsum(vp)
     cum_vol = np.cumsum(volumes)
-    
-    # 0 나누기 방지
     vwap = np.divide(cum_vp, cum_vol, out=np.zeros_like(cum_vp), where=cum_vol!=0)
 
-    idx = -1
+    # ---------------- 2. V16 OAR & Microstructure ----------------
+    # 1. RVOL (Relative Volume)
+    vol_sma_20 = np.zeros_like(volumes)
+    for i in range(20, len(volumes)):
+        vol_sma_20[i] = np.mean(volumes[i-20:i])
+    rvol = np.divide(volumes, vol_sma_20, out=np.zeros_like(volumes), where=vol_sma_20!=0)
+
+    # 2. Volatility Z-Score
+    candle_range = highs - lows
+    range_ma_20 = np.zeros_like(candle_range)
+    range_std_20 = np.zeros_like(candle_range)
+    for i in range(20, len(candle_range)):
+        window = candle_range[i-20:i]
+        range_ma_20[i] = np.mean(window)
+        range_std_20[i] = np.std(window)
     
+    volatility_z = np.divide(
+        (candle_range - range_ma_20), 
+        (range_std_20 + 1e-10)
+    )
+
+    # 3. Order Imbalance & Trend Align
+    range_span = highs - lows
+    clv = np.divide(
+        ((closes - lows) - (highs - closes)), 
+        (range_span + 1e-10)
+    )
+    order_imbalance = clv * volumes
+    
+    ema_60 = ema(closes, 60)
+    trend_align = np.where(closes > ema_60, 1, -1)
+
+    # 4. OAR Calculation
+    imb_score = np.log1p(np.clip(order_imbalance, 0, None))
+    oar_calc = (np.clip(rvol, 0, 5) * imb_score) * (1 / (np.abs(volatility_z) + 0.5))
+    
+    idx = -1
+
     return {
         "close": closes[idx],
+        "vwap": vwap[idx],
         "volume": volumes[idx],
         "macd_delta": (macd[idx] - macd[idx-1]) * 150, 
         "bb_gap_wae": bb5_up[idx] - bb5_low[idx],      
         "dead_zone": atr[idx] * 1.5,                   
         "rsi": rsi[idx],
+        "rvol": rvol[idx],                  # ✅ 추가됨
+        "volatility_z": volatility_z[idx],  # ✅ 추가됨
+        "oar_calc": oar_calc[idx],          # ✅ 추가됨
+        "oar_prev": oar_calc[idx-1], 
+        "trend_align": trend_align[idx],    # ✅ 추가됨
+        # 👇 [FIX] 콤마(,) 추가 완료
+        "pump_strength": (closes[idx] - closes[idx-5]) / closes[idx-5] * 100 if closes[idx-5] != 0 else 0,
         "cmf": cmf[idx],
         "obv_now": obv[idx],
         "obv_prev": obv[idx-1],
@@ -579,176 +633,225 @@ def calculate_f1_indicators(closes, highs, lows, volumes):
         "bb_width_now": (bb20_up[idx] - bb20_low[idx]) / closes[idx],
         "bb_width_avg": np.mean((bb20_up[-20:] - bb20_low[-20:]) / closes[-20:])
     }
+# 🚀 [Math] XGBoost 기반 초고속 승률 계산
+def get_ai_score(ticker, ai_data):
+    global sniper_model
+    
+    # 모델이 없으면 기본값 50점
+    if sniper_model is None:
+        return 50
 
+    try:
+        # 학습 데이터와 컬럼 순서가 100% 일치해야 함
+        features = pd.DataFrame([{
+            'vwap_dist': ai_data['vwap_distance'],
+            'squeeze': ai_data['squeeze_ratio'],
+            'rsi': ai_data['rsi_value'],
+            'pump': ai_data['pump_strength_5m'],
+            'pullback': ai_data['pullback_from_high']
+        }])
+        
+        # 확률 계산 (0.0 ~ 1.0) -> 점수 변환
+        probs = sniper_model.predict_proba(features)[:, 1]
+        score = int(probs[0] * 100)
+        
+        return score
+
+    except Exception as e:
+        print(f"❌ [AI Score Error] {ticker}: {e}")
+        return 50
 # ==============================================================================
 # 5. AI WORKER & FUNCTIONS
 # ==============================================================================
 
-async def get_gemini_probability(ticker, conditions_data):
-    if not GEMINI_API_KEY:
-        print(f"-> [Gemini AI] {ticker}: GEMINI_API_KEY가 설정되지 않아 AI 분석을 건너뜁니다.")
-        return 50 
-    if not GCP_PROJECT_ID or "YOUR_PROJECT_ID" in GCP_PROJECT_ID:
-        print(f"-> [Gemini AI] {ticker}: GCP_PROJECT_ID가 설정되지 않아 AI 분석을 건너뜁니다.")
+# 🚀 [Math] XGBoost 기반 초고속 승률 계산
+def get_ai_score(ticker, ai_data):
+    global sniper_model
+    
+    # 모델이 없으면 기본값 50점
+    if sniper_model is None:
         return 50
 
-    system_prompt = """
-You are an elite **"Penny Stock Sniper AI"**.
-You represent a strict scalper who only pulls the trigger on **PERFECT setups**.
-**Your Rule:** It is better to miss a trade than to lose money.
-**Score Inflation is Forbidden.** 90+ scores must be RARE and PERFECT.
+    try:
+        # 학습 데이터와 컬럼 순서가 100% 일치해야 함
+        features = pd.DataFrame([{
+            'vwap_dist': ai_data['vwap_distance'],
+            'squeeze': ai_data['squeeze_ratio'],
+            'rsi': ai_data['rsi_value'],
+            'pump': ai_data['pump_strength_5m'],
+            'pullback': ai_data['pullback_from_high']
+        }])
+        
+        # 확률 계산 (0.0 ~ 1.0) -> 점수 변환
+        probs = sniper_model.predict_proba(features)[:, 1]
+        score = int(probs[0] * 100)
+        
+        return score
 
-**INPUT DATA Analysis:**
-1. `vwap_distance`: **The "Truth" Indicator (Trend Confirmation).**
-   - **Positive (+):** Price > VWAP. Buyers are defending the trend. (BULLISH).
-   - **Negative (-):** Price < VWAP. Sellers are trapped or unloading. (BEARISH / RESISTANCE).
-   - **Crucial Rule:** A tight squeeze BELOW VWAP is a **"Bearish Flag" (Distribution)**, NOT a breakout setup.
-2. `pullback_from_high`: Trend stability.
-   - **> 12%:** Broken trend.
-   - **< 5%:** Elite strength (High Tight Flag).
-3. `squeeze_ratio`: Energy accumulation (< 1.0 is tight).
-4. `pump_strength_5m`: Chasing risk.
+    except Exception as e:
+        print(f"❌ [AI Score Error] {ticker}: {e}")
+        return 50
 
----
-### STRICT SCORING LOGIC
+# 🧠 [Logic] 제미나이: V16 엘리트 스캘퍼 페르소나 적용
+async def get_gemini_reasoning(ticker, ai_data, xgb_score):
+    if not GEMINI_API_KEY: return "AI Comment Unavailable"
 
-**🛑 KILL SWITCH 1 (The "Dump" Filter)**
-* **IF** `pullback_from_high` > 12.0%:
-   → **MAX SCORE = 40.** (Trend is broken. Do not catch a falling knife).
+    # 1. 데이터 추출 (V16 키값이 없을 경우를 대비해 get으로 안전하게 호출)
+    session_type = ai_data.get('session_type', 'Unknown')
+    session_int = ai_data.get('session_int', 3)
+    vwap_dist = ai_data.get('vwap_distance', 0.0)
+    oar_delta = ai_data.get('oar_delta', 0.0)
+    rvol = ai_data.get('rvol', 0.0)
+    rsi = ai_data.get('rsi_value', 50.0)
+    pump = ai_data.get('pump_strength_5m', 0.0)
+    pullback = ai_data.get('pullback_from_high', 0.0)
+    trend_align = ai_data.get('trend_align', 0)
+    squeeze = ai_data.get('squeeze_ratio', 1.0)
 
-**🛑 KILL SWITCH 2 (The "VWAP Trap" Filter)**
-* **IF** `vwap_distance` < -0.2%:
-   → **MAX SCORE = 50.** (Price is stuck below VWAP).
-   → *Reasoning: "Price below VWAP. This squeeze is likely distribution/selling, not accumulation."*
+    # 2. 🆕 V16 프롬프트 적용 (Elite Nasdaq Scalper)
+    prompt = f"""
+    Tone should be sharp, emotionless, and practical — like a sniper talking to another sniper.
+    You are an Elite Nasdaq Momentum scalper AI assisting a real-time trading engine. 
+    The system already generated a trade signal using mathematical filters (VWAP Distance, OAR Delta, RVol, RSI, Pump Strength, Session Context, and XGBoost score). 
 
-**🏆 Pattern A: "The King's Setup" (Rare & Perfect)**
-* **Conditions (ALL must be met):**
-   1. `vwap_distance` > 0.0% (Price is holding ABOVE VWAP) 👈 **MANDATORY**
-   2. `pullback_from_high` < 5.0% (Holding gains)
-   3. `squeeze_ratio` < 1.0 (Tight)
-   4. `is_volume_dry` is True
-   5. `pump_strength_5m` < 3.0%
-* **Verdict:** **SCORE 90~99** (Sniper Entry).
+    Your job is NOT to predict direction again. 
+    Your job is to explain the signal and provide execution guidance.
 
-**🥈 Pattern B: "Standard Momentum" (Good Trade)**
-* **Conditions:**
-   - `vwap_distance` > -0.2% (At least fighting for VWAP)
-   - `pullback_from_high` is 5% ~ 12%
-   - `engine_1_pass` is True OR `squeeze_ratio` < 1.1
-* **Verdict:** **SCORE 75~85**.
+    ----------------------------------------
+    📌 DATA INPUT (Read & Use Carefully)
+    ----------------------------------------
+    Ticker: {ticker}
+    Score: {xgb_score}%
 
-**🗑️ Pattern C: "The Chase" or "The Trap"**
-* **Conditions:**
-   - `pump_strength_5m` > 4.0% (Chasing)
-   - OR `vwap_distance` < -0.2% (Distribution)
-* **Verdict:** **SCORE 40~60** (Pass).
+    Session: {session_type} (Numeric Code: {session_int})
+    VWAP Distance: {vwap_dist}%
+    OAR Delta: {oar_delta}
+    Relative Volume (RVOL): {rvol}
+    RSI: {rsi}
+    Pump (5m): {pump}%
+    Pullback: {pullback}%
+    Trend Align: {trend_align} (1 bullish / -1 bearish)
+    Squeeze Ratio: {squeeze}
 
----
-**Generate JSON Output:**
-Respond ONLY with this JSON structure.
-{
-  "probability_score": <int>,
-  "reasoning": "<[Grade] King/Standard/Trash? [Check] VWAP Dist: x.x%, Pullback: -x.x%. [Verdict] Why this score?>"
-}
-"""
-    user_prompt = f"""
-    Analyze the following signal data for Ticker: {ticker}
-    
-    [MARKET CONTEXT]
-    - Current Session: {conditions_data.get('session_type', 'unknown')}
-    - Volume Ratio: {conditions_data.get('volume_ratio', 0.0)}
-    
-    [TECHNICAL DATA]
-    {json.dumps(conditions_data, indent=2)}
+    ----------------------------------------
+    📌 TASKS
+    ----------------------------------------
+
+    1. **Explain WHY the setup is strong or weak.**
+       - Keep it concise.
+       - Reference the key factors ONLY (VWAP behavior, momentum, volume confirmation, OAR flow).
+       - No generic analysis.
+
+    2. **Give the trader an execution plan:**
+       - Entry confirmation rule (when to execute vs wait)
+       - Stop-loss level logic (based on VWAP or structure)
+       - Profit target logic (based on recent high or trend continuation)
+
+    3. **Include a risk flag if needed:**
+       - Overextension: Pump > 4%
+       - Low conviction volume: rvol < 1.5 
+       - RSI overheating: RSI > 75
+       - Weak VWAP control (< 0 or barely above)
+       - Trend misalignment
+
+    ----------------------------------------
+    📌 OUTPUT FORMAT (STRICT)
+    ----------------------------------------
+    - Sentence 1: Summary of why this signal triggered (technical reasoning).
+    - Sentence 2: Entry condition and confirmation rule.
+    - Sentence 3: Stop-loss and target suggestion.
+    - Sentence 4 (only if needed): Risk warning or caution tag.
+
+    Keep the tone short, confident, and Korean. No emojis. No extra text.
     """
     
-    api_url = (
-        f"https://{GCP_REGION}-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}"
-        f"/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-flash-lite:generateContent"
-    )
-
-    combined_prompt = f"{system_prompt}\n\n{user_prompt}"
-
-    payload = {
-        "contents": [
-            {
-                "role": "user", 
-                "parts": [{"text": combined_prompt}]
-            }
-        ],
-        "generationConfig": {
-            "responseMimeType": "application/json"
-        }
-    }
-
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
-    }
+    api_url = f"https://{GCP_REGION}-aiplatform.googleapis.com/v1/projects/{GCP_PROJECT_ID}/locations/{GCP_REGION}/publishers/google/models/gemini-2.5-flash-lite:generateContent"
+    payload = { "contents": [{ "role": "user", "parts": [{"text": prompt}] }] }
+    headers = { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY }
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(api_url, json=payload, headers=headers, timeout=10.0)
+            resp = await client.post(api_url, json=payload, headers=headers, timeout=5.0)
+            if not resp.is_success: return f"Gemini Error ({resp.status_code})"
             
-            if not response.is_success:
-                print(f"-> ❌ [Gemini AI] {ticker} 요청 실패 (HTTP {response.status_code}): {response.text}")
-                response.raise_for_status() 
-                
-            result = response.json()
-            
-            if 'candidates' not in result:
-                if 'error' in result:
-                     print(f"-> ❌ [Gemini AI] {ticker} Vertex AI 오류: {result['error']['message']}")
-                     return 50
-                print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: 응답에 'candidates' 없음. {result}")
-                return 50
-
-            response_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '{}')
-            
-            if '```json' in response_text:
-                print(f"-> [Gemini AI] {ticker}: Markdown 감지됨, JSON 추출 시도...")
-                start = response_text.find('{')
-                end = response_text.rfind('}') + 1
-                if start != -1 and end != -1:
-                    response_text = response_text[start:end]
-            
-            if not response_text.strip().startswith('{'):
-                print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: AI가 JSON이 아닌 텍스트로 응답함. {response_text}")
-                return 50
-
-            score_data = json.loads(response_text)
-            score = int(score_data.get("probability_score", 50))
-            reasoning = score_data.get("reasoning", "No reasoning provided.")
-            print(f"-> [Gemini AI] {ticker}: 상승 확률 {score}% (이유: {reasoning})")
-            return score
-    except Exception as e:
-        if 'response' not in locals(): 
-            print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: {e}")
-        return 50
+            res_json = resp.json()
+            text = res_json.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+            return text.strip()
+    except:
+        return "AI 분석 시간 초과"
 
 async def ai_worker():
-    print("👨‍🍳 [Worker] AI 처리 전담반 가동 시작!")
+    print("👨‍🍳 [Worker] 하이브리드 AI(Math + Logic) 가동 시작!")
     while True:
         task = await ai_request_queue.get()
         try:
             ticker = task['ticker']
             price_now = task['price']
             ai_data = task['ai_data']
-            strat = task['strat']
-            squeeze_val = task['squeeze']
-            pump_val = task['pump']
-
-            score = await get_gemini_probability(ticker, ai_data)
-
-            print(f"🏎️ [F1 결과] {ticker} @ ${price_now:.4f} | AI: {score}% | Sqz: {squeeze_val:.2f} | Pump: {pump_val:.1f}%")
             
-            is_new = log_recommendation(ticker, float(price_now), score)
-            if is_new:
-                send_discord_alert(ticker, float(price_now), "recommendation", score)
-                send_fcm_notification(ticker, float(price_now), score)
+            # 1단계: 단소의 수학적 확신 (XGBoost) - 0.001초 소요
+            score = get_ai_score(ticker, ai_data)
+
+            # --- 🆕 NEW: V16 Decision Logic (RSI + OAR Filter) ---
+            is_valid_signal = False
+            reasoning_prefix = ""
+            
+            # 데이터 언패킹
+            session_int = ai_data.get('session_int', 3)
+            rsi = ai_data['rsi_value']
+            pump = ai_data['pump_strength_5m']
+            oar_delta = ai_data.get('oar_delta', 0)
+            rvol = ai_data.get('rvol', 0)
+            vwap_dist = ai_data['vwap_distance']
+
+            # [Rule 1] Session 0: Legend Mode
+            if session_int == 0:
+                if (1.5 <= pump <= 5.5) and (0.8 <= oar_delta <= 5.0) and \
+                   (rvol >= 1.5) and (score >= 50):
+                    is_valid_signal = True
+                    reasoning_prefix = "[Morning Rush]"
+
+            # [Rule 2] Session 1: Iron Dome
+            elif session_int == 1:
+                if (1.0 <= pump <= 2.5) and (oar_delta >= 2.0) and \
+                   (rvol >= 5.0) and (score >= 70):
+                    is_valid_signal = True
+                    reasoning_prefix = "[Iron Dome]"
+
+            # [Rule 3] Session 2: RSI Sniper (오후장 정밀 타격)
+            elif session_int == 2:
+                # RSI 50~75 필터 & VWAP 타이트하게
+                if (50 <= rsi <= 75) and (vwap_dist <= 2.0):
+                    if (1.0 <= pump <= 3.5) and (1.0 <= oar_delta <= 5.0) and \
+                       (rvol >= 3.0) and (score >= 60):
+                        is_valid_signal = True
+                        reasoning_prefix = "[Afternoon Sniper]"
+
+            print(f"🏎️ [AI 체크] {ticker} | 점수:{score} | 세션:{session_int} | 유효:{is_valid_signal}")
+            
+            # 2. 결과 처리 (조건 만족 시에만 알림)
+            if is_valid_signal:
+                print(f"🚀 [V16 신호] {ticker} | {reasoning_prefix} | 점수: {score}%")
                 
+                # Gemini 호출 (옵션: 점수가 높거나 확실한 신호일 때만)
+                gemini_comment = ""
+                if score >= 70: # 코멘트 기준 점수
+                    gemini_comment = await get_gemini_reasoning(ticker, ai_data, score)
+                
+                final_reasoning = f"{reasoning_prefix} {gemini_comment}"
+                
+                # 알림 발송
+                is_new = log_recommendation(ticker, float(price_now), score)
+                if is_new:
+                    send_discord_alert(ticker, float(price_now), "recommendation", score, final_reasoning)
+                    send_fcm_notification(ticker, float(price_now), score, final_reasoning)
+            else:
+                # 조건 불만족 시 로그만 남김 (디버깅용)
+                print(f"💤 [Pass] {ticker} (S:{session_int}/RSI:{rsi:.1f}/Score:{score}) - 조건 미달")
+
         except Exception as e:
             print(f"❌ [Worker 오류] {e}")
+            traceback.print_exc()
         finally:
             ai_request_queue.task_done()
 
@@ -815,6 +918,8 @@ async def run_f1_analysis_and_signal(ticker, df):
         if (engine_1 or engine_2 or cond_pre) and pump_strength_5m > 0.0:
             print(f"✨ [초기 감지] {ticker} | 전략: {'WAE' if engine_1 else 'Squeeze' if cond_pre else 'Cloud'} | RSI:{rsi_val:.0f} | Sqz:{squeeze_ratio:.2f}")
 
+        # ... (앞부분의 engine_1, engine_2 판단 로직 그대로 유지) ...
+
         if (engine_1 or engine_2 or cond_pre) and cond_rsi:
             
             import time
@@ -830,8 +935,26 @@ async def run_f1_analysis_and_signal(ticker, df):
             elif cond_pre: strat = "Pre-Breakout (Squeeze)"
             else: strat = "Standard Setup"
 
+            # 🛠️ [FIX] V16 세션 정수 변환 및 변수 추출 (순서 중요!)
+            ny_tz = pytz.timezone('US/Eastern')
+            now_dt = datetime.now(ny_tz)
+            total_min = now_dt.hour * 60 + now_dt.minute
+            
+            session_int = 3 # Default
+            if 570 <= total_min < 630: session_int = 0
+            elif 630 <= total_min < 840: session_int = 1
+            elif 840 <= total_min < 960: session_int = 2
+            
+            # 여기서 미리 변수를 꺼내야 에러가 안 납니다.
+            oar_current = indicators['oar_calc']
+            oar_prev = indicators['oar_prev']
+            oar_delta = oar_current - oar_prev
+            rvol_val = indicators['rvol']
+            trend_val = indicators['trend_align']
+
             ai_data = {
                 "session_type": session,
+                "session_int": session_int,  # 정수형 세션 추가
                 "strategy_type": strat,
                 "vwap_distance": float(round(dist_vwap, 2)),
                 "volume_ratio": float(round(vol_ratio, 2)),
@@ -845,7 +968,12 @@ async def run_f1_analysis_and_signal(ticker, df):
                 "pre_breakout": bool(cond_pre),
                 "rsi_value": float(round(rsi_val, 2)),
                 "cmf_value": float(round(cmf_val, 2)),
-                "cloud_distance_percent": float(round(dist_bull, 2))
+                "cloud_distance_percent": float(round(dist_bull, 2)),
+                # 👇 V16 필수 데이터
+                "rvol": float(round(rvol_val, 2)),
+                "oar_calc": float(round(oar_current, 2)),
+                "oar_delta": float(round(oar_delta, 2)),
+                "trend_align": int(trend_val)
             }
             
             task_payload = {
@@ -858,7 +986,6 @@ async def run_f1_analysis_and_signal(ticker, df):
             }
             ai_cooldowns[ticker] = current_ts
             ai_request_queue.put_nowait(task_payload)
-
     except Exception as e:
         print(f"❌ [F1 Engine Error] {ticker}: {e}")
         # traceback.print_exc() # 디버깅 시 주석 해제
