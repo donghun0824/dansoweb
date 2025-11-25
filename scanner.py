@@ -1293,94 +1293,32 @@ async def manual_keepalive(websocket):
         print(f"-> ❌ [Keepalive] 핑 전송 중 오류: {e}")
 
 # ==============================================================================
-# 8. MAIN ENTRY POINT
+# 8. MAIN ENTRY POINT (V18.0 Final)
 # ==============================================================================
 
-async def main():
-    if not POLYGON_API_KEY:
-        print("❌ [메인] POLYGON_API_KEY가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
-        return
-    if not DATABASE_URL:
-        print("❌ [메인] DATABASE_URL이 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
-        return
-    if not GEMINI_API_KEY:
-        print("❌ [메인] GEMINI_API_KEY가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
-        return
-    if not GCP_PROJECT_ID or "YOUR_PROJECT_ID" in GCP_PROJECT_ID:
-        print("❌ [메인] GCP_PROJECT_ID가 설정되지 않았습니다. 스캐너를 시작할 수 없습니다.")
-        return
-    
-    if not FIREBASE_ADMIN_SDK_JSON_STR:
-        print("⚠️ [메인] FIREBASE_ADMIN_SDK_JSON이 설정되지 않았습니다. FCM 푸시 알림이 비활성화됩니다.")
-
-    print("스캐너 V16.7 (FCM-Admin SDK)을 시작합니다...") 
-    uri = "wss://socket.polygon.io/stocks"
-    
-    while True:
-        try:
-            async with websockets.connect(uri, ping_interval=None, ping_timeout=300) as websocket:
-                print(f"[메인] 웹소켓 {uri} 연결 성공.")
-                
-                response = await websocket.recv()
-                print(f"[메인] 연결 응답: {response}")
-
-                if '"status":"connected"' not in str(response):
-                     print("-> ❌ [메인] 비정상 연결 응답. 10초 후 재시도...")
-                     await asyncio.sleep(10)
-                     continue
-
-                api_key_to_use = POLYGON_API_KEY or ""
-                print(f"[메인] API 키 ({api_key_to_use[:4]}...)로 '수동 인증'을 시도합니다...")
-                auth_payload = json.dumps({"action": "auth", "params": api_key_to_use})
-                await websocket.send(auth_payload)
-                
-                response = await websocket.recv()
-                print(f"[메인] 인증 응답: {response}")
-                
-                if '"status":"auth_success"' in str(response):
-                    print("-> ✅ [메인] '수동 인증' 성공! 4개 로봇(사냥꾼, 엔진, 핑, 워커)을 시작합니다.")
-                    
-                    watcher_task = websocket_engine(websocket) 
-                    keepalive_task = manual_keepalive(websocket)
-                    worker_task = asyncio.create_task(ai_worker())
-                    
-                    await asyncio.gather(
-                        watcher_task, 
-                        keepalive_task, 
-                        worker_task
-                    )
-                else:
-                    print("-> ❌ [메인] '수동 인증' 실패. 10초 후 재시도...")
-                    await asyncio.sleep(10)
-                    continue  
-                    
-        except websockets.exceptions.ConnectionClosed as e:
-            print(f"-> ❌ [메인] 웹소켓 연결이 예기치 않게 종료되었습니다 ({e.code}). 10초 후 재연결합니다...")
-            await asyncio.sleep(10)
-        except Exception as e:
-            print(f"-> ❌ [메인] 치명적 오류 발생: {e}. 10초 후 재연결합니다...")
-            await asyncio.sleep(10)
+# 주의: 기존의 async def main(): 함수는 삭제되었습니다.
+# V18.0부터는 polygon_ws_client()가 메인 엔진 역할을 수행합니다.
 
 if __name__ == "__main__":
-    init_db() 
-    init_firebase() 
+    # 1. 인프라 초기화
+    init_db()
+    init_firebase()
     
+    # (선택사항) 테스트 모드 유지
     if len(sys.argv) > 1 and sys.argv[1] == 'test':
-        print("--- [TEST MODE] ---")
-        print("DB와 Firebase 초기화 완료. 3초 후 테스트 알림을 발송합니다...")
-        time.sleep(3) 
-        
-        send_fcm_notification(
-            ticker="TEST", 
-            price=123.45, 
-            probability_score=99
-        )
-        
-        print("--- [TEST MODE] 테스트 완료. 스크립트를 종료합니다. ---")
+        print("--- [TEST MODE] FCM 발송 테스트 ---")
+        send_fcm_notification("TEST-TICKER", 15.50, 99, "테스트 메시지입니다.")
+        sys.exit()
+
+    print("\n🚀 [System] V18.0 Real-time Sniper Scanner Starting...")
+    print(f"    - Target: Top {TOP_N} tickers under ${MAX_PRICE}")
+    print(f"    - Parallel Workers: {HISTORY_WORKERS}")
     
-    else:
-        try: 
-            print("--- [LIVE MODE] 스캐너를 시작합니다... ---")
-            asyncio.run(main()) 
-        except KeyboardInterrupt: 
-            print("\n[메인] 사용자에 의해 프로그램이 종료되었습니다.")
+    # 2. V18.0 메인 엔진 실행
+    try:
+        # polygon_ws_client 함수가 연결->데이터로딩->구독->감시 모든 것을 수행함
+        asyncio.run(polygon_ws_client())
+    except KeyboardInterrupt:
+        print("\n🛑 [System] 봇이 사용자에 의해 종료되었습니다.")
+    except Exception as e:
+        print(f"❌ [System] 치명적 오류 발생: {e}")
