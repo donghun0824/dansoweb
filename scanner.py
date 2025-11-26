@@ -195,15 +195,15 @@ async def send_discord_alert(ticker, price, type="signal", probability_score=50)
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-def _send_fcm_sync(ticker, price, probability_score):
-    """FCM 전송 실제 로직 (동기) - 비동기 래퍼에서 호출됨"""
+# 1. _send_fcm_sync 함수 (교체용)
+def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
+    """FCM 전송 (Entry/TP/SL 포함 & 즉시 알림 표시)"""
     if not firebase_admin._apps: return
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute("SELECT token, min_score FROM fcm_tokens")
         subscribers = cursor.fetchall()
         cursor.close()
@@ -212,15 +212,28 @@ def _send_fcm_sync(ticker, price, probability_score):
             db_pool.putconn(conn)
             return
 
+        # 1. 알림 제목 (이모지 + 티커 + 점수)
+        noti_title = f"💎 {ticker} 신호 감지 (점수: {probability_score})"
+        
+        # 2. 알림 내용 (전략 정보 표시)
+        if entry and tp and sl:
+            noti_body = f"진입: ${entry:.4f}\n익절: ${tp:.4f} | 손절: ${sl:.4f}"
+        else:
+            noti_body = f"현재가: ${price:.4f} | AI 점수: {probability_score}점"
+
+        # 3. 데이터 페이로드 (앱 내부 처리용)
         data_payload = {
-            'title': "Danso AI 신호", 
+            'type': 'hybrid_signal',
             'ticker': ticker,
-            'price': f"{price:.4f}",
-            'probability': str(probability_score)
+            'price': str(price),
+            'score': str(probability_score),
+            'entry': str(entry) if entry else "",
+            'tp': str(tp) if tp else "",
+            'sl': str(sl) if sl else ""
         }
         
-        failed_tokens = []
         send_count = 0
+        failed_tokens = []
 
         for row in subscribers:
             token = row[0]
@@ -231,8 +244,24 @@ def _send_fcm_sync(ticker, price, probability_score):
 
             try:
                 message = messaging.Message(
-                    token=token, data=data_payload, 
-                    webpush=messaging.WebpushConfig(headers={'Urgency': 'high'})
+                    token=token,
+                    # 🔥 [핵심] 이 부분이 있어야 폰 잠금화면에 바로 뜹니다!
+                    notification=messaging.Notification(
+                        title=noti_title,
+                        body=noti_body
+                    ),
+                    data=data_payload,
+                    android=messaging.AndroidConfig(
+                        priority='high',
+                        notification=messaging.AndroidNotification(
+                            channel_id='high_importance_channel' 
+                        )
+                    ),
+                    apns=messaging.APNSConfig(
+                        payload=messaging.APNSPayload(
+                            aps=messaging.Aps(sound="default")
+                        )
+                    )
                 )
                 messaging.send(message)
                 send_count += 1
@@ -245,7 +274,6 @@ def _send_fcm_sync(ticker, price, probability_score):
             cursor.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
             conn.commit()
             cursor.close()
-            print(f"🧹 [FCM] 만료된 토큰 {len(failed_tokens)}개 삭제 완료.")
 
     except Exception as e:
         print(f"❌ [FCM] 발송 중 오류: {e}")
@@ -253,10 +281,11 @@ def _send_fcm_sync(ticker, price, probability_score):
     finally:
         if conn: db_pool.putconn(conn)
 
-async def send_fcm_notification(ticker, price, probability_score):
-    """비동기 래퍼: FCM 전송을 별도 스레드에서 실행"""
+# 2. send_fcm_notification 함수 (교체용)
+async def send_fcm_notification(ticker, price, probability_score, entry=None, tp=None, sl=None):
+    """비동기 래퍼: 인자 추가됨"""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, partial(_send_fcm_sync, ticker, price, probability_score))
+    await loop.run_in_executor(None, partial(_send_fcm_sync, ticker, price, probability_score, entry, tp, sl))
 
 def log_signal(ticker, price, probability_score=50):
     conn = None
@@ -431,6 +460,18 @@ def calculate_quant_indicators(df):
         volumes = df['v'].values.astype(float)
         times = df.index # 인덱스가 datetime이어야 함
 
+        # [NEW] ATR (14) 계산
+        # True Range = Max(High-Low, Abs(High-PrevClose), Abs(Low-PrevClose))
+        prev_closes = np.roll(closes, 1)
+        prev_closes[0] = closes[0] # 첫 번째 값 보정
+
+        tr1 = highs - lows
+        tr2 = np.abs(highs - prev_closes)
+        tr3 = np.abs(lows - prev_closes)
+        
+        true_range = np.maximum(tr1, np.maximum(tr2, tr3))
+        atr_14 = pd.Series(true_range).rolling(14).mean().values
+
         # 1. VWAP (Volume Weighted Average Price)
         tp = (highs + lows + closes) / 3
         vp = tp * volumes
@@ -531,6 +572,7 @@ def calculate_quant_indicators(df):
             "pump": current_pump,
             "pump_accel": pump_acceleration,         # ✅ 추가됨
             "volatility_z": volatility_z[idx],
+            "atr": atr_14[idx] if not np.isnan(atr_14[idx]) else 0.01,
             "order_imbalance": order_imbalance_ma[idx],
             "trend_align": int(trend_align[idx]),
             "session": int(session_bucket[idx]),
@@ -553,68 +595,87 @@ async def get_gemini_probability(ticker, conditions_data):
         print(f"-> [Gemini AI] {ticker}: GCP_PROJECT_ID가 설정되지 않아 AI 분석을 건너뜁니다.")
         return 50
 
+    # [V20.0 System Prompt]
     system_prompt = """
-You are a **Senior Scalping Risk Manager**. 
-Your mission is to predict the probability of achieving a **+3% profit within 10 minutes**.
+You are a **Senior Scalping Risk Manager & Market Microstructure Analyst**.
+Your primary mission is to evaluate whether the setup can realistically produce a **+3% profit within 10 minutes**
+while aggressively avoiding **late chasing and bull traps**.
 
-Your top priority is to detect **early breakout setups** (before explosive movement begins) 
-and to strictly **avoid late-chasing entries** or **peak traps**.
+**[CORE PRINCIPLES]**
+"Better to miss a trade than to lose money."
+Prioritize **Early Breakouts** and reject **overextended, unstable setups**.
 
-### [FEATURE INTERPRETATION RULES]
+---
 
-1. **Squeeze Ratio (`squeeze_ratio`)**
-   - < 0.85 → High compression / Pre-breakout energy
-   - 0.85 ~ 1.10 → Stable coil zone
-   - > 2.5 → Overextended volatility / High risk
+**[KEY EVALUATION RULES]**
 
-2. **Pump Acceleration (`pump_accel`)**
-   - > 0.2 → Momentum building (ideal early entry)
-   - < 0.0 while pump > 5% → Peak Trap / Must downgrade hard
+### 1. Squeeze Energy (`squeeze_ratio`)
+- < 0.70 = Super Compression (Pre-Breakout 💎 - IGNORE minor flaws if accel > 0)
+- 0.70 ~ 0.90 = Healthy coil
+- > 2.0 = Volatility spike / Chaos → REJECT
 
-3. **Relative Volume Dynamics (`rvol`, `rvol_slope`, `rvol_consecutive`)**
-   - rvol_consecutive = TRUE & slope > 0.5 → True accumulation
-   - rvol decreasing → Losing interest (avoid entry)
+### 2. Momentum Velocity (`pump`, `pump_accel`)
+- accel > 0.2 = Speed rising (ideal entry)
+- accel < 0 & pump > 4% = Bull Trap (Momentum dying)
+- pump > 7% = Late Chasing (High risk)
 
-4. **VWAP Structure (`vwap_dist`, `vwap_slope`)**
-   - |dist| < 1.5% AND slope > 0 → Perfect pullback support
-   - dist > 5% → Mean reversion danger / Late entry
+### 3. VWAP Structure (`vwap_dist`, `vwap_slope`)
+- slope > 0 = Uptrend confirmed
+- dist < 1.5% = Perfect pullback zone
+- dist > 3% = Extended / Mean reversion risk
 
-5. **Pullback (`pullback`)**
-   - 0% ~ 5% → High Tight Flag (Best condition)
-   - 5% ~ 12% → Deep Pullback (ACCEPTABLE IF squeeze_ratio < 0.8)  <-- 핵심!
-   - > 15% → Broken structure (invalid)
+### 4. Volume Integrity
+- rvol_consecutive = Real accumulation
+- order_imbalance > 0 = Aggressive buying
+- falling rvol_slope = Liquidity loss → Risk
 
-6. **Session Context (`session`)**
-   - Session 2 (14:00~16:00): Strong signals matter more
-   - Session 1 (Mid-Day): Many fake breakouts → downgrade if borderline
+### 5. Pullback Validation
+- 0%~5% ideal
+- 5%~10% allowed only if squeeze < 0.75
+- >10% = Broken structure
 
-### [HARD REJECTION RULES]
-- pump > 8% → Immediate Score < 50 (chasing)
-- pump > 5% AND pump_accel < 0 → Peak Trap / Score < 50
-- vwap_slope < 0 → Downtrend / Score < 50
-- squeeze_ratio > 2.5 → Unstable / Score < 50
+---
 
-### [SCORING TIERS]
-- **95-99 (Diamond / Pre-Breakout Sniper)** (squeeze < 0.75 AND pump_accel > 0.1) OR (squeeze < 0.9 AND pump_accel > 0.2 AND vwap_dist < 1.5)
-- **80-94 (Gold / Valid Breakout)** rvol > 3.0 AND vwap_slope > 0 AND acceleration positive
-- **60-79 (Silver / Watch)** Needs confirmation (low energy or unstable slope)
-- **0-59 (Pass)** Negative accel, far from VWAP, squeeze loose, or overextended pump
+**[REJECTION TRIGGERS (Instant Score < 50)]**
+- pump > 5% AND accel < 0
+- vwap_slope < 0
+- squeeze_ratio > 2.0
+- pump > 8%
 
-### [OUTPUT FORMAT]
-Return ONLY JSON:
+---
+
+**[SCORING TIERS]**
+- **90-100 (Diamond Early Breakout):** squeeze<0.85 & accel>0.2 & rvol_consecutive
+- **80-89 (Gold Valid Entry):** Strong volume & positive accel, but slightly extended
+- **60-79 (Silver Watch):** Good structure but waiting for volume trigger
+- **< 60 (Trap):** Avoid at all costs
+
+---
+
+### [RESPONSE FORMAT — STRICT JSON]
+Return strictly JSON (no markdown, no text before/after):
 {
-  "probability_score": <int>,
-  "reasoning": "<IF REJECTED: Start with 'REJECTED: [Reason]'. IF BUY: Focus on Squeeze & Accel>"
+  "probability_score": <0-100>,
+  "risk_level": "<LOW | MEDIUM | HIGH>",
+  "entry_evaluation": "<EARLY_BREAKOUT | MID_MOMENTUM | LATE_CHASING | TRAP>",
+  "should_enter": "<YES | WAIT | NO>",
+  "reasoning": "<Concise analysis: 1. Squeeze status 2. Acceleration check 3. Volume/VWAP verdict>",
+  "micro_test": "<REQUIRED (if score 60-85) | OPTIONAL (if score > 85) | NOT_NEEDED (if score < 60)>",
+  "tp_sl_comment": "<Brief TP/SL guidance based on volatility>"
 }
 """
+
+    # [V20.0 User Prompt with Key Metrics]
     user_prompt = f"""
     Analyze the following signal data for Ticker: {ticker}
     
-    [MARKET CONTEXT]
+    [MARKET CONTEXT & KEY METRICS]
     - Current Session: {conditions_data.get('session_type', 'unknown')}
-    - Volume Ratio: {conditions_data.get('volume_ratio', 0.0)}
+    - Squeeze Ratio: {conditions_data.get('squeeze_ratio', 'N/A')} (Lower is better)
+    - Pump Acceleration: {conditions_data.get('pump_accel', 'N/A')} (Positive is good)
+    - VWAP Slope: {conditions_data.get('vwap_slope', 'N/A')}
     
-    [TECHNICAL DATA]
+    [FULL TECHNICAL DATA]
     {json.dumps(conditions_data, indent=2)}
     """
     
@@ -661,51 +722,141 @@ Return ONLY JSON:
 
             response_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '{}')
             
+            # JSON 파싱 강화 로직
             if '```json' in response_text:
-                print(f"-> [Gemini AI] {ticker}: Markdown 감지됨, JSON 추출 시도...")
                 start = response_text.find('{')
                 end = response_text.rfind('}') + 1
                 if start != -1 and end != -1:
                     response_text = response_text[start:end]
             
-            if not response_text.strip().startswith('{'):
-                print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: AI가 JSON이 아닌 텍스트로 응답함. {response_text}")
-                return 50
+            try:
+                score_data = json.loads(response_text)
+            except json.JSONDecodeError:
+                # 괄호 강제 추출 재시도
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                if start != -1 and end != -1:
+                    score_data = json.loads(response_text[start:end])
+                else:
+                    print(f"-> ❌ [Gemini AI] {ticker} JSON 파싱 실패: {response_text}")
+                    return 50
 
-            score_data = json.loads(response_text)
             score = int(score_data.get("probability_score", 50))
             reasoning = score_data.get("reasoning", "No reasoning provided.")
             print(f"-> [Gemini AI] {ticker}: 상승 확률 {score}% (이유: {reasoning})")
             return score
+            
     except Exception as e:
+        # 변수가 정의되지 않은 상태에서의 에러 처리
         if 'response' not in locals(): 
             print(f"-> ❌ [Gemini AI] {ticker} 분석 실패: {e}")
         return 50
 
 async def ai_worker():
-    print("👨‍🍳 [Worker] AI 처리 전담반 가동 시작!")
+    print("👨‍🍳 [Worker] V20.0 Hybrid (Quant+AI+Suitability) & Micro Logic 가동!", flush=True)
+    
     while True:
         task = await ai_request_queue.get()
         try:
             ticker = task['ticker']
-            price_now = task['price']
+            initial_price = float(task['price'])
             ai_data = task['ai_data']
-            strat = task['strat']
-            squeeze_val = task['squeeze_ratio']
-            pump_val = task['pump']
-
-            score = await get_gemini_probability(ticker, ai_data)
-
-            print(f"🏎️ [F1 결과] {ticker} @ ${price_now:.4f} | AI: {score}% | Sqz: {squeeze_val:.2f} | Pump: {pump_val:.1f}%")
             
-            is_new = log_recommendation(ticker, float(price_now), score)
+            # 1. 점수 추출
+            quant_score = ai_data.get('technical_score', 0)
+            suitability_score = ai_data.get('entry_suitability', 50) # 구조 점수
+            
+            squeeze_val = ai_data.get('squeeze_ratio', 0)
+            pump_val = ai_data.get('pump', 0)
+            
+            print(f"🤖 [Ask Gemini] {ticker} 분석 요청... (Q:{quant_score} | Suit:{suitability_score})", flush=True)
+            
+            # 2. AI 분석
+            ai_score = await get_gemini_probability(ticker, {
+                **ai_data, 
+                "squeeze_ratio": squeeze_val,
+                "pump": pump_val
+            })
+
+            # 3. ⚖️ Hybrid Score V2 (3-Factor Model)
+            # Quant(50%) + AI(30%) + Suitability(20%) -> 밸런스 중시
+            hybrid_score = round((quant_score * 0.50) + (ai_score * 0.30) + (suitability_score * 0.20), 2)
+            print(f"📊 [1차 판정] {ticker} | Hybrid: {hybrid_score} (Q{quant_score}/A{ai_score}/S{suitability_score})", flush=True)
+
+            # 4. 1차 컷라인 (65점)
+            if hybrid_score < 65: 
+                print(f"📉 [Reject] {ticker} Hybrid 점수 미달 ({hybrid_score} < 65)", flush=True)
+                continue
+
+            # ==================================================================
+            # 🛑 5. Advanced Micro Test (10s) - Tick Speed & Candle Shape
+            # ==================================================================
+            print(f"⏳ [Micro Test] {ticker} 10초간 틱 속도 및 캔들 검증...", flush=True)
+            
+            # 검증 시작 전 틱 카운트 (Tick History 길이를 잼)
+            ticks_start_len = len(ticker_tick_history.get(ticker, []))
+            await asyncio.sleep(10) 
+            
+            # 검증 후 데이터 확인
+            if ticker not in ticker_tick_history: continue
+            ticks_end_len = len(ticker_tick_history[ticker])
+            
+            # A. 틱 속도 (Tick Speed) 계산: 10초간 발생한 체결 건수
+            ticks_count = ticks_end_len - ticks_start_len
+            if ticks_count < 0: ticks_count = 10 # 리스트 갱신됐으면 기본값 처리
+            
+            # B. 가격 변동 확인
+            current_price = initial_price # 기본값
+            if ticker in ticker_tick_history and ticker_tick_history[ticker]:
+                current_price = float(ticker_tick_history[ticker][-1][1])
+                
+            price_delta = ((current_price - initial_price) / initial_price) * 100
+            
+            # 🚫 [탈락 조건 1] Failing Candle (윗꼬리 달고 음전)
+            if price_delta < -0.2: 
+                print(f"❌ [Fail] {ticker} Failing Candle (Δ {price_delta:.2f}%) - 매수세 실종", flush=True)
+                continue
+
+            # 🚫 [탈락 조건 2] Low Tick Speed (허매수)
+            # 10초 동안 체결이 5건 미만이면 호가만 비어있는 가짜 상승
+            if ticks_count < 5:
+                print(f"❌ [Fail] {ticker} Tick Speed Low ({ticks_count} ticks) - 거래량 부족", flush=True)
+                continue
+
+            # ✅ Soft Update (점수 미세 조정)
+            bonus_score = 0
+            if price_delta > 0.3: bonus_score += 5
+            if ticks_count > 30: bonus_score += 5 # 틱 속도가 빠르면(활발하면) 가산점
+            
+            final_score = min(100, int(hybrid_score + bonus_score))
+            
+            if final_score < 65: # 최종 컷라인
+                print(f"❌ [Drop] {ticker} 최종 점수 미달 (Final: {final_score})", flush=True)
+                continue
+
+            # ==================================================================
+            # 6. 최종 기록 및 알림 (Entry/TP/SL 정보 포함)
+            # ==================================================================
+            entry_target = task.get('entry_price', current_price)
+            tp_target = task.get('tp_price', current_price * 1.03)
+            sl_target = task.get('sl_price', current_price * 0.99)
+            
+            is_new = log_recommendation(ticker, float(current_price), final_score)
+            
             if is_new:
-                # [수정됨] await 추가
-                await send_discord_alert(ticker, float(price_now), "recommendation", score)
-                await send_fcm_notification(ticker, float(price_now), score)
+                await send_discord_alert(ticker, float(current_price), "hybrid_signal", final_score)
+                await send_fcm_notification(
+                    ticker, float(current_price), final_score, 
+                    entry=entry_target, tp=tp_target, sl=sl_target
+                )
+                
+                print(f"🏁 FINAL ENTRY: {ticker} | Hybrid: {final_score} | Δ10s: {price_delta:+.2f}% | Ticks: {ticks_count}", flush=True)
+                print(f"   🎯 [Action] 진입: ${entry_target:.4f} | 익절: ${tp_target:.4f} | 손절: ${sl_target:.4f}", flush=True)
                 
         except Exception as e:
-            print(f"❌ [Worker 오류] {e}")
+            print(f"❌ [Worker 오류] {ticker}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
         finally:
             ai_request_queue.task_done()
 
@@ -815,42 +966,50 @@ async def run_f1_analysis_and_signal(ticker, df):
     try:
         if len(df) < 60: return 
 
-        # 1. 퀀트 지표 계산
+        # ==================================================================
+        # 1. 퀀트 지표 계산 (가장 먼저 해야 함)
+        # ==================================================================
         indicators = calculate_quant_indicators(df)
         if indicators is None: return
         
         price_now = indicators['close']
-        
-        # 2. Feature Engineering
+        atr_val = indicators.get('atr', price_now * 0.01) # ATR 없으면 1%로 대체
+
+        # ==================================================================
+        # 2. Feature Engineering (핵심 변수 정의)
+        # ==================================================================
+        # Pump & Pullback
         pump_strength = ((price_now - indicators['prev_close_5']) / indicators['prev_close_5']) * 100
         pullback = ((indicators['recent_high'] - price_now) / indicators['recent_high']) * 100
+        
+        # VWAP Distance
         vwap_dist = ((price_now - indicators['vwap']) / indicators['vwap']) * 100 if indicators['vwap'] != 0 else 0
 
         # 데이터 패킷 준비 (점수 계산용)
         score_data = {
             'rvol': indicators['rvol'],
-            'rvol_slope': indicators['rvol_slope'],             
-            'rvol_consecutive': indicators['rvol_consecutive'], 
+            'rvol_slope': indicators.get('rvol_slope', 0),
+            'rvol_consecutive': indicators.get('rvol_consecutive', False),
             'pump': pump_strength,
-            'pump_accel': indicators['pump_accel'],
+            'pump_accel': indicators.get('pump_accel', 0),
             'rsi': indicators['rsi'],
             'vwap_dist': vwap_dist,
-            'vwap_slope': indicators['vwap_slope'],
-            'squeeze_ratio': indicators.get('squeeze_ratio', 1.0),
+            'vwap_slope': indicators.get('vwap_slope', 0),
+            'squeeze_ratio': indicators.get('squeeze_ratio', 1.0), # 필수
             'volatility_z': indicators['volatility_z'],
             'order_imbalance': indicators['order_imbalance']
         }
 
-        # 3. [V17.0] Soft Gate Scoring (점수 산출)
+        # ==================================================================
+        # 3. Soft Gate Scoring & Tier 분류 (이제 계산 가능)
+        # ==================================================================
         tech_score, score_reasons = calculate_soft_gate_score(score_data, indicators['session'])
         
-        # 4. Tier 분류
         tier = "TRASH"
-        if tech_score >= 85: tier = "ELITE"   # 즉시 진입급
-        elif tech_score >= 70: tier = "VALID" # AI 확인 필요
-        elif tech_score >= 50: tier = "WATCH" # 관망
+        if tech_score >= 85: tier = "ELITE"
+        elif tech_score >= 60: tier = "VALID" # 60점으로 하향 조정
         
-        # ELITE나 VALID 등급만 AI 프로세스 태움 (API 비용 절약)
+        # ELITE나 VALID 등급만 처리
         if tier in ["ELITE", "VALID"]:
             
             # 쿨다운 체크
@@ -859,37 +1018,90 @@ async def run_f1_analysis_and_signal(ticker, df):
             if ticker in ai_cooldowns:
                 if current_ts - ai_cooldowns[ticker] < 60: return 
 
-            reason_str = ", ".join(score_reasons)
-            print(f"✨ [{tier}] {ticker} | Score: {tech_score} | {reason_str}")
+            # ==================================================================
+            # 4. Entry / TP / SL 공식 적용 (Tier 확인 후 계산)
+            # ==================================================================
+            
+            # 1) Entry Price
+            entry_price = price_now + (atr_val * 0.15)
+            
+            # 2) Take Profit (TP)
+            is_super_setup = (indicators.get('squeeze_ratio', 1.0) < 0.6) and \
+                             (indicators.get('rvol_consecutive', False)) and \
+                             (indicators.get('pump_accel', 0) > 0.2)
+            tp_multiplier = 1.8 if is_super_setup else 1.2
+            tp_price = entry_price + (atr_val * tp_multiplier)
+            
+            # 3) Stop Loss (SL)
+            sl_price = entry_price - (atr_val * 0.5)
+            
+            # 손익비 계산
+            reward = tp_price - entry_price
+            risk = entry_price - sl_price
+            rr_ratio = round(reward / risk, 2) if risk > 0 else 0
 
-            # 🔥 [V18.1 Final] AI에게 보낼 데이터 풀세트 (빠짐없이 다 넣음)
+            # ==================================================================
+            # 5. Entry Suitability Score (구조적 적합성 평가)
+            # ==================================================================
+            # (이제 vwap_dist, pullback 등이 정의되었으므로 에러 안 남)
+            entry_suitability = 0
+            
+            # 1. ATR 적합성
+            atr_pct = (atr_val / price_now) * 100
+            if 0.5 <= atr_pct <= 2.0: entry_suitability += 40 
+            elif atr_pct > 2.0: entry_suitability += 20 
+            else: entry_suitability += 10 
+            
+            # 2. VWAP 구조 점수
+            if 0 <= abs(vwap_dist) <= 1.5: entry_suitability += 30 
+            elif abs(vwap_dist) < 3.0: entry_suitability += 15
+            
+            # 3. Pullback 건강도
+            if 0 <= pullback <= 5.0: entry_suitability += 30 
+            elif pullback > 5.0: entry_suitability += 10 
+
+            # ==================================================================
+            # 6. 데이터 전송 및 출력 (모든 변수가 준비됨)
+            # ==================================================================
+            reason_str = ", ".join(score_reasons)
+            print(f"✨ [{tier}] {ticker} | Score: {tech_score} | Suitability: {entry_suitability}")
+
+            # AI에게 보낼 데이터 패키징
             ai_data = {
                 "technical_score": int(tech_score),
+                "entry_suitability": int(entry_suitability),
                 "tier": tier,
                 
                 # 1. VWAP 관련
                 "vwap_dist": float(round(vwap_dist, 2)),
-                "vwap_slope": float(round(indicators.get('vwap_slope', 0), 4)), # ✅ 추가됨
+                "vwap_slope": float(round(indicators.get('vwap_slope', 0), 4)),
                 
-                # 2. Squeeze (키 이름 통일: squeeze -> squeeze_ratio)
-                "squeeze_ratio": float(round(indicators['squeeze_ratio'], 2)),  # ✅ 키 변경됨
+                # 2. Squeeze
+                "squeeze_ratio": float(round(indicators['squeeze_ratio'], 2)),
                 
                 # 3. Pump & Accel
                 "pump": float(round(pump_strength, 2)),
-                "pump_accel": float(round(indicators.get('pump_accel', 0), 2)), # ✅ 추가됨
+                "pump_accel": float(round(indicators.get('pump_accel', 0), 2)),
                 "pullback": float(round(pullback, 2)),
                 
                 # 4. Volume & RVOL
                 "rvol": float(round(indicators['rvol'], 2)),
-                "rvol_slope": float(round(indicators.get('rvol_slope', 0), 2)), # ✅ 추가됨
-                "rvol_consecutive": bool(indicators.get('rvol_consecutive', False)), # ✅ 추가됨
+                "rvol_slope": float(round(indicators.get('rvol_slope', 0), 2)),
+                "rvol_consecutive": bool(indicators.get('rvol_consecutive', False)),
                 
                 # 5. 기타 지표
                 "rsi": float(round(indicators['rsi'], 2)),
                 "volatility_z": float(round(indicators['volatility_z'], 2)),
                 "order_imbalance": float(round(indicators['order_imbalance'], 2)),
                 "trend_align": int(indicators['trend_align']),
-                "session": int(indicators['session'])
+                "session": int(indicators['session']),
+                
+                # 6. 트레이딩 셋업 정보
+                "setup_atr": float(round(atr_val, 4)),
+                "target_entry": float(round(entry_price, 4)),
+                "target_tp": float(round(tp_price, 4)),
+                "target_sl": float(round(sl_price, 4)),
+                "rr_ratio": float(rr_ratio)
             }
             
             task_payload = {
@@ -897,10 +1109,13 @@ async def run_f1_analysis_and_signal(ticker, df):
                 'price': price_now,
                 'ai_data': ai_data,
                 'strat': f"SoftGate {tier}", 
-                
-                # 🔥 [수정] Worker가 헷갈리지 않게 키 이름 통일
                 'squeeze_ratio': ai_data['squeeze_ratio'], 
-                'pump': ai_data['pump']
+                'pump': ai_data['pump'],
+                
+                # Worker에게 전달할 가격 정보
+                'entry_price': entry_price,
+                'tp_price': tp_price,
+                'sl_price': sl_price
             }
             
             ai_cooldowns[ticker] = current_ts
