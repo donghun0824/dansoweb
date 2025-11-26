@@ -195,9 +195,8 @@ async def send_discord_alert(ticker, price, type="signal", probability_score=50)
     except Exception as e: 
         print(f"[알림 오류] {ticker} 디스코드 전송 실패: {e}")
 
-# 1. _send_fcm_sync 함수 (교체용)
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
-    """FCM 전송 (Entry/TP/SL 포함 & 즉시 알림 표시)"""
+    """FCM 전송 (Entry/TP/SL 포함 & 즉시 알림 표시) - 갤럭시 최적화"""
     if not firebase_admin._apps: return
 
     conn = None
@@ -212,16 +211,15 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             db_pool.putconn(conn)
             return
 
-        # 1. 알림 제목 (이모지 + 티커 + 점수)
-        noti_title = f"💎 {ticker} 신호 감지 (점수: {probability_score})"
+        # 1. 알림 내용 구성
+        noti_title = f"💎 {ticker} 신호 (점수: {probability_score})"
         
-        # 2. 알림 내용 (전략 정보 표시)
         if entry and tp and sl:
-            noti_body = f"진입: ${entry:.4f}\n익절: ${tp:.4f} | 손절: ${sl:.4f}"
+            noti_body = f"진입: ${entry:.4f} | 익절: ${tp:.4f} | 손절: ${sl:.4f}"
         else:
             noti_body = f"현재가: ${price:.4f} | AI 점수: {probability_score}점"
 
-        # 3. 데이터 페이로드 (앱 내부 처리용)
+        # 2. 데이터 페이로드 (앱 백그라운드 처리용 + 중복 정보)
         data_payload = {
             'type': 'hybrid_signal',
             'ticker': ticker,
@@ -229,7 +227,9 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             'score': str(probability_score),
             'entry': str(entry) if entry else "",
             'tp': str(tp) if tp else "",
-            'sl': str(sl) if sl else ""
+            'sl': str(sl) if sl else "",
+            'title': noti_title,  # 데이터에도 제목/내용 넣어줌
+            'body': noti_body
         }
         
         send_count = 0
@@ -245,21 +245,35 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             try:
                 message = messaging.Message(
                     token=token,
-                    # 🔥 [핵심] 이 부분이 있어야 폰 잠금화면에 바로 뜹니다!
+                    # 🔥 [핵심] notification 필드 (잠금화면 노출용)
                     notification=messaging.Notification(
                         title=noti_title,
                         body=noti_body
                     ),
                     data=data_payload,
+                    
+                    # 안드로이드 설정 (중요도 높임 & 내용 공개)
                     android=messaging.AndroidConfig(
                         priority='high',
                         notification=messaging.AndroidNotification(
-                            channel_id='high_importance_channel' 
+                            channel_id='high_importance_channel', # 앱 채널 ID와 일치해야 함
+                            priority='high',
+                            default_sound=True,
+                            visibility='public' # 잠금화면에서도 내용 표시 (갤럭시 필수)
                         )
                     ),
+                    
+                    # iOS 설정
                     apns=messaging.APNSConfig(
                         payload=messaging.APNSPayload(
-                            aps=messaging.Aps(sound="default")
+                            aps=messaging.Aps(
+                                alert=messaging.ApsAlert(
+                                    title=noti_title,
+                                    body=noti_body
+                                ),
+                                sound="default",
+                                content_available=True
+                            )
                         )
                     )
                 )
@@ -281,7 +295,6 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
     finally:
         if conn: db_pool.putconn(conn)
 
-# 2. send_fcm_notification 함수 (교체용)
 async def send_fcm_notification(ticker, price, probability_score, entry=None, tp=None, sl=None):
     """비동기 래퍼: 인자 추가됨"""
     loop = asyncio.get_running_loop()
