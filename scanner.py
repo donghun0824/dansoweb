@@ -580,8 +580,9 @@ and to strictly **avoid late-chasing entries** or **peak traps**.
    - dist > 5% → Mean reversion danger / Late entry
 
 5. **Pullback (`pullback`)**
-   - 0% ~ 2% → High Tight Flag (Best condition)
-   - > 7% → Broken structure (invalid)
+   - 0% ~ 5% → High Tight Flag (Best condition)
+   - 5% ~ 12% → Deep Pullback (ACCEPTABLE IF squeeze_ratio < 0.8)  <-- 핵심!
+   - > 15% → Broken structure (invalid)
 
 6. **Session Context (`session`)**
    - Session 2 (14:00~16:00): Strong signals matter more
@@ -594,14 +595,10 @@ and to strictly **avoid late-chasing entries** or **peak traps**.
 - squeeze_ratio > 2.5 → Unstable / Score < 50
 
 ### [SCORING TIERS]
-- **95-99 (Diamond / Pre-Breakout Sniper)**  
-  squeeze < 0.9 AND pump_accel > 0.2 AND vwap_dist < 1.0 AND rvol_consecutive = TRUE
-- **80-94 (Gold / Valid Breakout)**  
-  rvol > 3.0 AND vwap_slope > 0 AND acceleration positive
-- **60-79 (Silver / Watch)**  
-  Needs confirmation (low energy or unstable slope)
-- **0-59 (Pass)**  
-  Negative accel, far from VWAP, squeeze loose, or overextended pump
+- **95-99 (Diamond / Pre-Breakout Sniper)** (squeeze < 0.75 AND pump_accel > 0.1) OR (squeeze < 0.9 AND pump_accel > 0.2 AND vwap_dist < 1.5)
+- **80-94 (Gold / Valid Breakout)** rvol > 3.0 AND vwap_slope > 0 AND acceleration positive
+- **60-79 (Silver / Watch)** Needs confirmation (low energy or unstable slope)
+- **0-59 (Pass)** Negative accel, far from VWAP, squeeze loose, or overextended pump
 
 ### [OUTPUT FORMAT]
 Return ONLY JSON:
