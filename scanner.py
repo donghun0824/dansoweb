@@ -420,8 +420,8 @@ async def fetch_initial_data(ticker):
 
 def calculate_quant_indicators(df):
     """
-    [V4.0 백테스트 로직 이식]
-    기존 WAE/Cloud 대신 검증된 퀀트 지표(VWAP, RVOL, Volatility_Z, Order_Imbalance 등)를 계산합니다.
+    [V18.0 Logic] 가속도, 기울기, 연속성을 포함한 퀀트 지표 계산
+    기존의 단순 수치 계산에서 벗어나 변화량(Slope)과 질(Quality)을 측정합니다.
     """
     try:
         # 데이터 전처리
@@ -437,6 +437,11 @@ def calculate_quant_indicators(df):
         cum_vp = np.cumsum(vp)
         cum_vol = np.cumsum(volumes)
         vwap = np.divide(cum_vp, cum_vol, out=np.zeros_like(cum_vp), where=cum_vol!=0)
+
+        # ✅ [NEW] VWAP 기울기 (최근 3분간 변화량)
+        vwap_slope = 0.0
+        if len(vwap) >= 4:
+            vwap_slope = (vwap[-1] - vwap[-4]) / vwap[-4] * 10000
         
         # 2. Squeeze Ratio (BB Width / BB Avg)
         def get_bb_width(c, n=20):
@@ -444,14 +449,27 @@ def calculate_quant_indicators(df):
             std = pd.Series(c).rolling(n).std().values
             up = sma + (std * 2.0)
             low = sma - (std * 2.0)
-            # 0 나누기 방지
             return np.nan_to_num((up - low) / c)
             
         bb_width = get_bb_width(closes)
         bb_avg = pd.Series(bb_width).rolling(20).mean().values
         squeeze_ratio = np.divide(bb_width, bb_avg, out=np.ones_like(bb_width), where=bb_avg!=0)
 
-        # 3. RSI (14)
+        # 3. Pump (상승) 가속도 계산
+        # 현재 5분 등락률
+        price_now = closes[-1]
+        price_5m_ago = closes[-6] if len(closes) > 6 else closes[0]
+        current_pump = ((price_now - price_5m_ago) / price_5m_ago) * 100 if price_5m_ago != 0 else 0
+        
+        # ✅ [NEW] 2분 전 시점의 5분 등락률 (과거의 모멘텀)
+        price_2m_ago = closes[-3] if len(closes) > 3 else closes[0]
+        price_7m_ago = closes[-8] if len(closes) > 8 else closes[0]
+        prev_pump = ((price_2m_ago - price_7m_ago) / price_7m_ago) * 100 if price_7m_ago != 0 else 0
+        
+        # 가속도 = 현재 모멘텀 - 과거 모멘텀 (양수면 가속, 음수면 감속/설거지)
+        pump_acceleration = current_pump - prev_pump
+
+        # 4. RSI (14)
         delta = np.diff(closes, prepend=closes[0])
         gain = np.where(delta > 0, delta, 0)
         loss = np.where(delta < 0, -delta, 0)
@@ -460,17 +478,26 @@ def calculate_quant_indicators(df):
         rs = avg_gain / (avg_loss + 1e-10)
         rsi = 100 - (100 / (1 + rs))
 
-        # 4. RVOL (Relative Volume)
+        # 5. RVOL (Relative Volume)
         vol_ma20 = pd.Series(volumes).rolling(20).mean().values
         rvol = np.divide(volumes, vol_ma20, out=np.zeros_like(volumes), where=vol_ma20!=0)
+
+        # ✅ [NEW] RVOL 3틱 연속 증가 확인 & 기울기
+        rvol_consecutive_up = False
+        rvol_slope = 0.0
+        if len(rvol) >= 4:
+            # 3틱 연속 증가: t-2 < t-1 < t
+            rvol_consecutive_up = (rvol[-1] > rvol[-2]) and (rvol[-2] > rvol[-3])
+            # 기울기: 현재 - 3분전 (추세 강도)
+            rvol_slope = rvol[-1] - rvol[-3]
         
-        # 5. Volatility Z-Score
+        # 6. Volatility Z-Score & Order Imbalance
         candle_range = highs - lows
         range_ma = pd.Series(candle_range).rolling(20).mean().values
         range_std = pd.Series(candle_range).rolling(20).std().values
-        volatility_z = (candle_range - range_ma) / (range_std + 1e-10)
+        # 0 나누기 방지
+        volatility_z = np.divide((candle_range - range_ma), (range_std + 1e-10))
         
-        # 6. Order Imbalance (매수/매도 압력 불균형)
         range_span = highs - lows
         clv = ((closes - lows) - (highs - closes)) / (range_span + 1e-10)
         order_imbalance = clv * volumes 
@@ -482,25 +509,27 @@ def calculate_quant_indicators(df):
 
         # 8. Session Bucket (시간대)
         def get_session_val(t):
-            # t는 timestamp
             total_min = t.hour * 60 + t.minute
             if 570 <= total_min < 630: return 0  # 09:30 ~ 10:30 (Opening)
             elif 630 <= total_min < 840: return 1 # 10:30 ~ 14:00 (Mid-Day)
             elif 840 <= total_min < 960: return 2 # 14:00 ~ 16:00 (Power Hour)
             else: return 3 # Others
-            
-        # df.index가 datetime 객체라고 가정
+  
         session_bucket = np.array([get_session_val(t) for t in times])
 
-        # 마지막 시점(Current)의 값들을 딕셔너리로 반환
         idx = -1
         return {
             "close": closes[idx],
             "volume": volumes[idx],
             "vwap": vwap[idx],
+            "vwap_slope": vwap_slope,                # ✅ 추가됨
             "squeeze_ratio": squeeze_ratio[idx],
             "rsi": rsi[idx],
             "rvol": rvol[idx],
+            "rvol_slope": rvol_slope,                # ✅ 추가됨
+            "rvol_consecutive": rvol_consecutive_up, # ✅ 추가됨
+            "pump": current_pump,
+            "pump_accel": pump_acceleration,         # ✅ 추가됨
             "volatility_z": volatility_z[idx],
             "order_imbalance": order_imbalance_ma[idx],
             "trend_align": int(trend_align[idx]),
@@ -525,29 +554,60 @@ async def get_gemini_probability(ticker, conditions_data):
         return 50
 
     system_prompt = """
-Your goal is to predict the probability of a **+3% profit within 10 minutes**.
+You are a **Senior Scalping Risk Manager**. 
+Your mission is to predict the probability of achieving a **+3% profit within 10 minutes**.
 
-**[CRITICAL: Feature Interpretation Guide]**
-Analyze the input data based on these trained patterns:
+Your top priority is to detect **early breakout setups** (before explosive movement begins) 
+and to strictly **avoid late-chasing entries** or **peak traps**.
 
-1.  **`rvol` (Relative Volume):** Must be > 1.5. High volume validates the move.
-2.  **`volatility_z` (Z-Score):** Values > 2.0 indicate an explosive breakout.
-3.  **`order_imbalance`:** Positive values mean aggressive buying. Negative means selling.
-4.  **`squeeze`:** Values < 0.10 indicate extreme energy compression (Ready to explode).
-5.  **`pump`:** 2% ~ 5% is ideal. > 10% is dangerous (Chasing).
-6.  **`pullback`:** Must be < 5.0%. Ideally 0~2% (High Tight Flag).
-7.  **`trend_align`:** 1 is Bullish (Price > EMA60). -1 is Bearish.
+### [FEATURE INTERPRETATION RULES]
 
-**[SCORING RULES]**
-* **90-99 (Diamond):** Perfect Setup. `rvol` > 3.0, `squeeze` < 0.1, `volatility_z` > 2.0, `order_imbalance` > 0.
-* **80-89 (Gold):** Strong Momentum. Good volume and trend alignment.
-* **60-79 (Silver):** Decent, but maybe chasing or low volume.
-* **0-59 (Pass):** Weak volume, huge pullback (>10%), or negative order imbalance.
+1. **Squeeze Ratio (`squeeze_ratio`)**
+   - < 0.85 → High compression / Pre-breakout energy
+   - 0.85 ~ 1.10 → Stable coil zone
+   - > 2.5 → Overextended volatility / High risk
 
-Respond ONLY with JSON:
+2. **Pump Acceleration (`pump_accel`)**
+   - > 0.2 → Momentum building (ideal early entry)
+   - < 0.0 while pump > 5% → Peak Trap / Must downgrade hard
+
+3. **Relative Volume Dynamics (`rvol`, `rvol_slope`, `rvol_consecutive`)**
+   - rvol_consecutive = TRUE & slope > 0.5 → True accumulation
+   - rvol decreasing → Losing interest (avoid entry)
+
+4. **VWAP Structure (`vwap_dist`, `vwap_slope`)**
+   - |dist| < 1.5% AND slope > 0 → Perfect pullback support
+   - dist > 5% → Mean reversion danger / Late entry
+
+5. **Pullback (`pullback`)**
+   - 0% ~ 2% → High Tight Flag (Best condition)
+   - > 7% → Broken structure (invalid)
+
+6. **Session Context (`session`)**
+   - Session 2 (14:00~16:00): Strong signals matter more
+   - Session 1 (Mid-Day): Many fake breakouts → downgrade if borderline
+
+### [HARD REJECTION RULES]
+- pump > 8% → Immediate Score < 50 (chasing)
+- pump > 5% AND pump_accel < 0 → Peak Trap / Score < 50
+- vwap_slope < 0 → Downtrend / Score < 50
+- squeeze_ratio > 2.5 → Unstable / Score < 50
+
+### [SCORING TIERS]
+- **95-99 (Diamond / Pre-Breakout Sniper)**  
+  squeeze < 0.9 AND pump_accel > 0.2 AND vwap_dist < 1.0 AND rvol_consecutive = TRUE
+- **80-94 (Gold / Valid Breakout)**  
+  rvol > 3.0 AND vwap_slope > 0 AND acceleration positive
+- **60-79 (Silver / Watch)**  
+  Needs confirmation (low energy or unstable slope)
+- **0-59 (Pass)**  
+  Negative accel, far from VWAP, squeeze loose, or overextended pump
+
+### [OUTPUT FORMAT]
+Return ONLY JSON:
 {
   "probability_score": <int>,
-  "reasoning": "<Short explanation based on rvol, z-score, and imbalance>"
+  "reasoning": "<IF REJECTED: Start with 'REJECTED: [Reason]'. IF BUY: Focus on Squeeze & Accel>"
 }
 """
     user_prompt = f"""
@@ -658,69 +718,98 @@ async def ai_worker():
 
 def calculate_soft_gate_score(data, session):
     """
-    [V17.0 Soft Gate] Binary Logic -> Weighted Scoring Logic
-    각 지표를 점수화하여 종합 점수(Fusion Score)를 산출합니다.
+    [V18.0 Logic] Momentum Acceleration & Support Validation
+    단순 펌핑(Pump)이 아니라 '가속도'와 'VWAP 지지'를 봅니다.
+    설거지(고점 추격) 방지에 최적화된 로직입니다.
     """
     score = 0
     reasons = []
 
-    # 1. 🌊 RVOL (거래량 에너지) - 가장 중요 (30점 만점)
-    if data['rvol'] >= 5.0:
-        score += 30; reasons.append("RVOL 폭발")
-    elif data['rvol'] >= 3.0:
-        score += 20
-    elif data['rvol'] >= 1.5:
-        score += 10
-    else:
-        score -= 10 # 거래량 부족 페널티
-
-    # 2. 🚀 Pump Strength (상승 강도) - (25점 만점)
-    pump = data['pump']
-    if 2.0 <= pump <= 5.0:
-        score += 25; reasons.append("Golden Pump")
-    elif 1.0 <= pump < 2.0:
-        score += 10 # 시동 거는 중
-    elif 5.0 < pump <= 8.0:
-        score += 15 # 강하지만 추격 위험 있음
-    elif pump > 8.0:
-        score += 5; reasons.append("Too High(Risk)") # 과열 감점
-
-    # 3. 📉 RSI & Session Context (20점 만점)
-    rsi = data['rsi']
-    # 오후장(Session 2 이상)은 RSI 필터가 핵심
-    if session >= 2:
-        if 50 <= rsi <= 75:
-            score += 20; reasons.append("PM Safe Zone")
-        elif rsi > 75:
-            score -= 5 # 오후장 과매수는 위험
+    # 0. 💥 Squeeze (에너지 응축) - [NEW] 선취매 핵심 로직
+    # squeeze_ratio < 1.0 (밴드 수축), 낮을수록 에너지가 강하게 모인 것
+    squeeze = data.get('squeeze_ratio', 1.0)
+    vwap_slope = data.get('vwap_slope', 0)
+    
+    # 극도로 수축됨 (폭발 임박) + VWAP가 살아있음
+    if squeeze <= 0.8:
+        if vwap_slope >= 0:
+            score += 30; reasons.append("Super Squeeze (Ready)")
         else:
-            score += 5
-    # 오전장/점심장
-    else:
-        if 50 <= rsi <= 80:
-            score += 20
-        elif rsi > 80:
-            score += 10 # 초반 슈팅 인정
+            score += 10 # 수축은 좋은데 추세가 없어서 관망
+    # 적당히 수축됨 (안전한 진입 구간)
+    elif 0.8 < squeeze <= 1.1:
+        score += 15
+    # 이미 밴드가 찢어짐 (이미 폭발 중이거나 변동성 과다)
+    elif squeeze > 2.0:
+        score -= 10 # 추격 매수 위험
 
-    # 4. 🎯 VWAP Distance (눌림목) - (15점 만점)
-    vwap_dist = data['vwap_dist']
-    if 0 <= vwap_dist <= 2.0:
-        score += 15; reasons.append("Perfect Pullback")
-    elif 2.0 < vwap_dist <= 4.0:
+    # 1. 🌊 RVOL (거래량의 질) - '연속성'과 '기울기' 중심
+    # 기존: 단순히 크면 장땡 -> 수정: 3틱 연속 증가하며 기울기가 가파른가?
+    rvol = data.get('rvol', 0)
+    rvol_slope = data.get('rvol_slope', 0)
+    is_consecutive = data.get('rvol_consecutive', False)
+
+    if is_consecutive and rvol_slope > 0.5:
+        score += 30; reasons.append("Volume Surge (3-Tick)") # 진짜 수급
+    elif rvol >= 3.0 and rvol_slope > 0:
+        score += 20; reasons.append("High Vol & Rising")
+    elif rvol >= 1.5:
         score += 5
-    elif vwap_dist < 0:
-        score -= 5 # 역배열 위험
+    elif rvol_slope < 0:
+        score -= 10 # 거래량 죽는 중 (진입 금지)
 
-    # 5. 🔬 Microstructure (OAR & Volatility) - (10점 만점)
+    # 2. 🚀 Pump Acceleration (상승 가속도)
+    pump = data.get('pump', 0)
+    pump_accel = data.get('pump_accel', 0)
+
+    # 🚨 설거지 방지: 이미 많이 올랐는데 힘 빠지면 감점
+    if pump > 5.0 and pump_accel < 0:
+        score -= 50; reasons.append("Peak Out(High Risk)")
+    elif pump > 8.0:
+        score -= 20
+    # ✅ 선취매 보정: Squeeze가 좋은데 Pump가 막 시작될 때 가산점
+    elif pump_accel > 0.2 and squeeze <= 1.1:
+        score += 20; reasons.append("Early Breakout") 
+    elif pump_accel > 0.5:
+        score += 15
+    
+    # 3. 🎯 VWAP Support (지지 검증)
+    # 기존: 대충 근처면 OK -> 수정: 딱 붙어서(1%이내) 지지받고 고개를 들었나(Slope>0)?
+    vwap_dist = data.get('vwap_dist', 0)
+    vwap_slope = data.get('vwap_slope', 0)
+    vwap_dist_abs = abs(vwap_dist) # 위아래 상관없이 거리 절대값
+
+    if vwap_dist_abs <= 1.0 and vwap_slope > 0:
+        score += 25; reasons.append("VWAP Perfect Support") # 완벽한 눌림목
+    elif vwap_dist_abs <= 2.0 and vwap_slope >= 0:
+        score += 10
+    elif vwap_dist < -2.0:
+        score -= 10 # 역배열 (VWAP 아래)
+    elif vwap_dist > 5.0:
+        score -= 10 # 이격도 과다 (회귀 본능 위험)
+
+    # 4. 📉 RSI Context (과열 방지)
+    rsi = data['rsi']
+    if session >= 2: # 오후장
+        if 45 <= rsi <= 65:
+            score += 15; reasons.append("PM Safe Zone")
+        elif rsi > 70:
+            score -= 10 # 오후장 과매수는 쥐약
+    else: # 오전장
+        if 50 <= rsi <= 75:
+            score += 10
+        elif rsi > 80:
+            score -= 5 # 초반이라도 과열은 주의
+
+    # 5. 🔬 Microstructure (보너스 점수)
     if data['volatility_z'] > 2.0:
         score += 5
     if data['order_imbalance'] > 0:
         score += 5
 
-    # 6. ⚖️ Session Weight (세션별 가중치/페널티)
-    # 점심장(1)은 가짜가 많으므로 전체 점수에서 10점 깎고 시작 (Iron Dome)
-    if session == 1:
-        score -= 10
+    # 6. ⚖️ Session Penalty
+    if session == 1: # 점심시간 (Lunch Lull)
+        score -= 20 # 점심시간엔 가짜 돌파가 많으므로 페널티 강화
         
     return score, reasons
 
@@ -743,9 +832,14 @@ async def run_f1_analysis_and_signal(ticker, df):
         # 데이터 패킷 준비 (점수 계산용)
         score_data = {
             'rvol': indicators['rvol'],
+            'rvol_slope': indicators['rvol_slope'],             
+            'rvol_consecutive': indicators['rvol_consecutive'], 
             'pump': pump_strength,
+            'pump_accel': indicators['pump_accel'],
             'rsi': indicators['rsi'],
             'vwap_dist': vwap_dist,
+            'vwap_slope': indicators['vwap_slope'],
+            'squeeze_ratio': indicators.get('squeeze_ratio', 1.0),
             'volatility_z': indicators['volatility_z'],
             'order_imbalance': indicators['order_imbalance']
         }
@@ -771,16 +865,30 @@ async def run_f1_analysis_and_signal(ticker, df):
             reason_str = ", ".join(score_reasons)
             print(f"✨ [{tier}] {ticker} | Score: {tech_score} | {reason_str}")
 
-            # AI에게 보낼 데이터
+            # 🔥 [V18.1 Final] AI에게 보낼 데이터 풀세트 (빠짐없이 다 넣음)
             ai_data = {
                 "technical_score": int(tech_score),
                 "tier": tier,
+                
+                # 1. VWAP 관련
                 "vwap_dist": float(round(vwap_dist, 2)),
-                "squeeze": float(round(indicators['squeeze_ratio'], 2)),
-                "rsi": float(round(indicators['rsi'], 2)),
+                "vwap_slope": float(round(indicators.get('vwap_slope', 0), 4)), # ✅ 추가됨
+                
+                # 2. Squeeze (키 이름 통일: squeeze -> squeeze_ratio)
+                "squeeze_ratio": float(round(indicators['squeeze_ratio'], 2)),  # ✅ 키 변경됨
+                
+                # 3. Pump & Accel
                 "pump": float(round(pump_strength, 2)),
+                "pump_accel": float(round(indicators.get('pump_accel', 0), 2)), # ✅ 추가됨
                 "pullback": float(round(pullback, 2)),
+                
+                # 4. Volume & RVOL
                 "rvol": float(round(indicators['rvol'], 2)),
+                "rvol_slope": float(round(indicators.get('rvol_slope', 0), 2)), # ✅ 추가됨
+                "rvol_consecutive": bool(indicators.get('rvol_consecutive', False)), # ✅ 추가됨
+                
+                # 5. 기타 지표
+                "rsi": float(round(indicators['rsi'], 2)),
                 "volatility_z": float(round(indicators['volatility_z'], 2)),
                 "order_imbalance": float(round(indicators['order_imbalance'], 2)),
                 "trend_align": int(indicators['trend_align']),
@@ -792,9 +900,12 @@ async def run_f1_analysis_and_signal(ticker, df):
                 'price': price_now,
                 'ai_data': ai_data,
                 'strat': f"SoftGate {tier}", 
-                'squeeze': ai_data['squeeze'],
+                
+                # 🔥 [수정] Worker가 헷갈리지 않게 키 이름 통일
+                'squeeze_ratio': ai_data['squeeze_ratio'], 
                 'pump': ai_data['pump']
             }
+            
             ai_cooldowns[ticker] = current_ts
             ai_request_queue.put_nowait(task_payload)
 
