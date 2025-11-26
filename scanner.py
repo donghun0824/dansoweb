@@ -694,7 +694,7 @@ async def ai_worker():
             price_now = task['price']
             ai_data = task['ai_data']
             strat = task['strat']
-            squeeze_val = task['squeeze']
+            squeeze_val = task['squeeze_ratio']
             pump_val = task['pump']
 
             score = await get_gemini_probability(ticker, ai_data)
