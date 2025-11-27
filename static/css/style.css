@@ -506,3 +506,43 @@ h1, h2, h3 {
     .status-card, .settings-card, .community-section { padding: 20px; }
     .modal-content { width: 95%; margin: 10% auto; }
 }
+/* --- [NEW] Sniper Console Button (Inherits Notification Style) --- */
+.sniper-link-btn {
+    /* 1. notification-button의 기본 스타일 복사 */
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    padding: 10px 24px; 
+    border: 1px solid var(--border-primary); 
+    border-radius: var(--radius-full);
+    font-family: var(--font-primary);
+    font-weight: 600;
+    font-size: 14px; 
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center; /* 텍스트 중앙 정렬 */
+    gap: 10px; 
+    transition: all 0.3s ease;
+    backdrop-filter: blur(4px);
+    text-decoration: none; /* 링크 밑줄 제거 */
+    
+    /* 2. 배치 조정 (알림 버튼 아래로) */
+    float: right;
+    clear: right;
+    margin: 10px 0 20px 0;
+}
+
+/* 3. 호버 효과 (notification-button과 동일한 Green Glow) */
+.sniper-link-btn:hover {
+    background: rgba(255, 255, 255, 0.15); 
+    border-color: var(--neon-green);
+    color: #fff;
+    box-shadow: var(--shadow-glow-green);
+    transform: translateY(-2px);
+}
+
+/* 4. 버튼 내부 아이콘 (필요시 사용) */
+.sniper-link-btn i {
+    color: var(--neon-green);
+    font-size: 16px;
+}

@@ -1,0 +1,137 @@
+/* sts.css - Sniper Console Style (Consistent with Landing Page) */
+
+/* 1. 폰트 및 기본 설정 (Pro Design) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=JetBrains+Mono:wght@500&display=swap');
+
+:root {
+    /* 랜딩 페이지와 동일한 네온 컬러 팔레트 */
+    --neon-green: #00ff9d;
+    --neon-cyan: #00e0ff;
+    --glass-bg: rgba(13, 18, 30, 0.65);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-highlight: rgba(255, 255, 255, 0.15);
+    --deep-space: #05070a;
+    --text-primary: #FFFFFF;
+    --text-secondary: #94a3b8;
+}
+
+/* 전체 테마 */
+.stApp {
+    background-color: var(--deep-space);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 2. 메트릭 카드 (패널) - 글래스모피즘 적용 */
+.metric-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-top: 1px solid var(--glass-highlight);
+    border-radius: 16px; /* 둥근 모서리 강화 */
+    padding: 24px;
+    margin-bottom: 20px;
+    
+    /* 글래스 효과 */
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.metric-card:hover {
+    transform: translateY(-5px);
+    border-color: var(--neon-green);
+    box-shadow: 0 0 20px rgba(0, 255, 157, 0.2);
+}
+
+/* 3. 헤더 (티커 & 가격) */
+.header-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ticker-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--neon-green); /* 네온 그린 */
+    letter-spacing: -0.5px;
+    text-shadow: 0 0 10px rgba(0, 255, 157, 0.3);
+}
+
+.current-price {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+/* 4. 서브 정보 (VWAP 등) */
+.sub-info {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    text-align: right;
+}
+
+/* 5. 상태 박스 (Sniper Signal) */
+.status-box {
+    padding: 14px;
+    border-radius: 12px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 15px;
+    margin-top: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.status-sniper {
+    background: rgba(255, 75, 75, 0.15);
+    border: 1px solid #FF4B4B;
+    color: #FF4B4B;
+    box-shadow: 0 0 15px rgba(255, 75, 75, 0.2);
+    animation: pulse-red 1.5s infinite;
+}
+
+.status-watch {
+    background: rgba(255, 204, 0, 0.1);
+    border: 1px solid #FFCC00;
+    color: #FFCC00;
+}
+
+.status-idle {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #64748b;
+}
+
+/* 6. 애니메이션 정의 */
+@keyframes pulse-red {
+    0% { box-shadow: 0 0 0 0 rgba(255, 75, 75, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 75, 75, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 75, 75, 0); }
+}
+
+/* 7. Streamlit 커스텀 오버라이드 */
+/* Progress Bar 색상 변경 */
+.stProgress > div > div > div > div {
+    background: linear-gradient(90deg, var(--neon-green), var(--neon-cyan));
+    border-radius: 99px;
+}
+
+/* 메트릭 캡션 스타일 */
+.stCaption {
+    font-family: 'Inter', sans-serif;
+    color: var(--text-secondary) !important;
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 4px;
+}

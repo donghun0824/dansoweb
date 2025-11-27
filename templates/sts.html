@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="/static/css/sts.css">
+    <title>STS Sniper Console</title>
+</head>
+<body>
+    <nav class="landing-header">
+        <div class="header-logo"><img src="/static/images/danso_logo.png" alt="Danso"></div>
+        <div class="header-nav">
+            <a href="/dashboard" class="nav-button secondary">Dashboard</a>
+            <a href="/sts" class="nav-button primary">Sniper Console</a> </div>
+    </nav>
+
+    <div class="sts-container">
+        <div class="sts-header">
+            <div class="system-status">
+                <span class="status-dot"></span> SYSTEM ONLINE
+            </div>
+            <div class="latency-info">📶 12ms</div>
+            <div class="last-update">Last Update: <span id="last-update-time">--:--:--</span></div>
+        </div>
+
+        <div class="sniper-grid" id="sniper-grid">
+            <div class="loading-message">📡 Connecting to Sniper Network...</div>
+        </div>
+
+        <div class="log-panel">
+            <div class="log-title">📜 Live Trade Log</div>
+            <div class="log-content" id="trade-log">
+                </div>
+        </div>
+    </div>
+
+    <script src="/static/js/sts.js"></script>
+</body>
+</html>
