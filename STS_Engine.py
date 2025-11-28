@@ -36,6 +36,12 @@ STS_MAX_SPREAD_PCT = 0.8
 STS_MAX_VPIN = 0.65           # [V5.3] 필터 완화 (0.55 -> 0.65)
 OBI_LEVELS = 20               # [V5.3] 오더북 깊이 확장 (5 -> 20)
 
+# 후보 선정(Target Selector) 필터 기준
+STS_MIN_DOLLAR_VOL = 300000  # 최소 거래대금 $300k (약 4억원)
+STS_MAX_PRICE = 30.0         # 최대 가격 $30 (저가주 집중)
+STS_MIN_RVOL = 2.0           # (SniperBot 단계) 최소 상대 거래량
+STS_MAX_SPREAD_ENTRY = 0.7   # (SniperBot 단계) 진입 허용 스프레드
+
 # AI & Risk Params
 MODEL_FILE = "sts_xgboost_model.json"
 AI_PROB_THRESHOLD = 0.85      
@@ -405,15 +411,17 @@ class TargetSelector:
     def __init__(self):
         self.snapshots = {} 
         self.last_gc_time = time.time()
+        # [NEW] 시장 평균 거래량 추적용 (RVOL 대용)
+        self.market_vol_tracker = defaultdict(float)
 
     def update(self, agg_data):
         t = agg_data['sym']
-        # 초기화 시 'start_price' (시가 혹은 최초 발견가) 저장
+        # 데이터 수신
         if t not in self.snapshots: 
             self.snapshots[t] = {
                 'o': agg_data['o'], 'h': agg_data['h'], 'l': agg_data['l'], 
-                'c': agg_data['c'], 'v': 0, 
-                'start_price': agg_data['o'], # 등락률 계산 기준점
+                'c': agg_data['c'], 'v': 0, 'vwap': agg_data.get('vw', agg_data['c']),
+                'start_price': agg_data['o'], 
                 'last_updated': time.time()
             }
         
@@ -422,42 +430,63 @@ class TargetSelector:
         d['h'] = max(d['h'], agg_data['h'])
         d['l'] = min(d['l'], agg_data['l'])
         d['v'] += agg_data['v'] # 누적 거래량
+        d['vwap'] = agg_data.get('vw', d['c']) # VWAP 업데이트
         d['last_updated'] = time.time()
 
     def get_atr(self, ticker):
         if ticker in self.snapshots:
             d = self.snapshots[ticker]
-            # 간이 ATR 계산 (고가-저가)
             return (d['h'] - d['l']) * 0.1 
         return 0.05
 
-    # [수정] 3분 주기: 등락률 기준 Top 10 후보군 선정
+    # [핵심 수정] 3분 주기: RVOL 및 Liquidity 기반 Top 10 선정
     def get_top_gainers_candidates(self, limit=10):
         scored = []
         now = time.time()
+        
+        # 1. 전체 스캔
         for t, d in self.snapshots.items():
             if now - d['last_updated'] > 600: continue # 죽은 데이터 제외
             
-            # 등락률 계산
+            # [Filter 1] Price Cap: $30 이하 (저유동성/작전주 타겟팅)
+            if d['c'] > STS_MAX_PRICE: continue
+            
+            # [Filter 2] Liquidity Floor: 거래대금 $300k 미만 칼같이 제외 (핵심)
+            dollar_vol = d['c'] * d['v']
+            if dollar_vol < STS_MIN_DOLLAR_VOL: continue
+
+            # [Score Logic] 등락률 + 거래대금 가중치
+            # 단순히 많이 오른 놈(X) -> 돈이 몰리면서 오르는 놈(O)
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
             
-            # 최소 거래량 필터 (노이즈 제거)
-            if d['v'] < 1000: continue 
+            # 등락률이 최소 1%는 되어야 의미 있음
+            if change_pct < 1.0: continue
+
+            # 점수 산정: 등락률 * log(거래대금) 
+            # -> 거래량이 받쳐주는 상승일수록 높은 점수
+            score = change_pct * np.log1p(dollar_vol)
             
-            scored.append((t, change_pct))
+            scored.append((t, score, change_pct, dollar_vol))
         
-        # 등락률 내림차순 정렬
+        # 점수 내림차순 정렬
         scored.sort(key=lambda x: x[1], reverse=True)
+        
+        # 로그 출력 (디버깅용)
+        if scored:
+            print(f"🔎 [Scanner] Top Candidate: {scored[0][0]} (Chg:{scored[0][2]:.1f}% $Vol:{scored[0][3]/1000:.0f}k)", flush=True)
+
         return [x[0] for x in scored[:limit]]
 
-    # [수정] 1분 주기: 후보군 중 거래량/활동성 Top 3 선정
+    # [수정] 1분 주기: 후보군 중 거래량 가속도(Volume Velocity) Top 3 선정
     def get_best_snipers(self, candidates, limit=3):
         scored = []
         for t in candidates:
             if t not in self.snapshots: continue
             d = self.snapshots[t]
-            # 거래량 가중치로 최종 타격 대상 선정
-            scored.append((t, d['v']))
+            # 여기서는 단순히 누적 거래량이 아니라 '거래대금'이 가장 큰 놈을 우선시
+            # (이미 Top 10에서 필터링 되었으므로, 그 중 대장주를 뽑음)
+            dollar_vol = d['c'] * d['v']
+            scored.append((t, dollar_vol))
         
         scored.sort(key=lambda x: x[1], reverse=True)
         return [x[0] for x in scored[:limit]]
@@ -491,11 +520,26 @@ class SniperBot:
             self.atr = self.selector.get_atr(self.ticker)
 
         m = self.analyzer.get_metrics()
-        if not m: return
+        
+        # [수정 1] 데이터 예열 중(Warm-up)이라도 화면에 띄우기
+        if not m:
+            now = time.time()
+            # 2초마다 DB에 생존 신고 (화면에 'WARM_UP' 표시됨)
+            if now - self.last_db_update > 2.0:
+                dummy_metrics = {
+                    'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 
+                    'tick_speed': 0, 'vwap_dist': 0
+                }
+                update_dashboard_db(self.ticker, dummy_metrics, 0, "WARM_UP")
+                self.last_db_update = now
+            return
 
-        # [V5.3] 필터 완화 (0.55 -> 0.65)
-        if m['spread'] > STS_MAX_SPREAD_PCT or m['vpin'] > STS_MAX_VPIN: return
+        # [수정 2] 스프레드/RVOL 필터 (DB 저장 전에 return 하지 않음!)
+        # 상태 메시지를 결정하기 위한 플래그
+        is_bad_spread = m['spread'] > STS_MAX_SPREAD_ENTRY # 0.7% 이상이면 나쁨
+        is_low_vol = m['vol_ratio_60'] < 1.0 # 평소보다 거래량 없으면 나쁨
 
+        # [기존 AI 로직]
         prob = 0.0
         if self.model:
             try:
@@ -511,19 +555,35 @@ class SniperBot:
                 prob = sum(self.prob_history) / len(self.prob_history)
             except: pass
 
-        # DB Throttling
+        # [수정 3] DB 업데이트를 가장 먼저 수행 (화면 표시 보장)
         now = time.time()
-        state_changed = (self.state != self.last_logged_state)
         is_hot = (prob * 100) >= 60
-        update_interval = 2.0 if is_hot else 10.0
+        force_update = (self.state != self.last_logged_state)
         
-        if state_changed or (now - self.last_db_update > update_interval):
-            score_to_save = prob * 100 if 'prob' in locals() else 0
-            update_dashboard_db(self.ticker, m, score_to_save, self.state)
+        # 상태 메시지 결정 (화면에 보여줄 텍스트)
+        display_status = self.state
+        if self.state == "WATCHING":
+            if is_bad_spread: display_status = "BAD_SPREAD"
+            elif is_low_vol: display_status = "LOW_VOL"
+
+        # VPIN(독성)이 너무 높으면 필터링 (단, DB엔 기록 남김)
+        if m['vpin'] > STS_MAX_VPIN:
+             if self.state == "WATCHING": display_status = "TOXIC_FLOW"
+
+        if force_update or (now - self.last_db_update > (1.0 if is_hot else 2.0)):
+            score_to_save = prob * 100
+            update_dashboard_db(self.ticker, m, score_to_save, display_status)
             self.last_db_update = now
             self.last_logged_state = self.state
-        
-        # [V5.3] Replay Log에 ATR, VWAP 저장 (m에 포함됨)
+
+        # [수정 4] 실제 진입 로직 차단 (Bad Condition일 경우)
+        # 이미 진입한 상태(FIRED)가 아니라면, 조건 나쁠 때 진입 금지
+        if self.state != "FIRED":
+            if is_bad_spread or is_low_vol or m['vpin'] > STS_MAX_VPIN:
+                return 
+
+        # --- FSM (상태 머신) ---
+        # [V5.3] Replay Log 저장
         self.logger.log_replay({
             'timestamp': m['timestamp'], 'ticker': self.ticker, 
             'price': m['last_price'], 'vwap': m['vwap'], 'atr': self.atr,
@@ -531,20 +591,20 @@ class SniperBot:
             'ai_prob': prob
         })
 
-        # --- FSM ---
         if self.state == "WATCHING":
             dist = (m['last_price'] - self.vwap) / self.vwap * 100
             cond_dist = 0.2 < dist < 2.0
             cond_sqz = m['squeeze_flag'] == 1
             cond_accel = m['tick_accel'] > 0
             
-            if cond_dist and (cond_sqz or prob > 0.7) and cond_accel:
+            # [핵심] RVOL > 2.0 (평소 대비 2배 거래량) 조건 추가
+            cond_vol = m['vol_ratio_60'] >= STS_MIN_RVOL 
+            
+            if cond_dist and (cond_sqz or prob > 0.7) and cond_accel and cond_vol:
                 self.state = "AIMING"
-                print(f"👀 [조준] {self.ticker} (Prob:{prob:.2f} | Sqz:{cond_sqz})", flush=True)
+                print(f"👀 [조준] {self.ticker} (Prob:{prob:.2f} | RVOL:{m['vol_ratio_60']:.1f})", flush=True)
 
         elif self.state == "AIMING":
-            # [V5.3] Fast Fail 조건 완화
-            # 틱 가속도가 조금 줄어도 확률이 어느 정도 되면 버팀
             if m['tick_accel'] < -3 and prob < 0.55:
                 self.state = "WATCHING"
                 return
