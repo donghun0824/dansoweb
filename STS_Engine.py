@@ -65,7 +65,7 @@ def init_db():
     try:
         if db_pool is None:
             # 봇용 연결 1개 (최적화)
-            db_pool = psycopg2.pool.SimpleConnectionPool(1, 1, dsn=DATABASE_URL)
+            db_pool = psycopg2.pool.SimpleConnectionPool(2, 5, dsn=DATABASE_URL)
             print("✅ [DB] Connection Pool Initialized (Limit: 1)")
             
         conn = db_pool.getconn()
@@ -122,17 +122,45 @@ def get_db_connection():
     return db_pool.getconn()
 
 def init_firebase():
+    """Firebase Admin SDK 초기화 (JSON 파싱 에러 방지 강화판)"""
     try:
-        if not FIREBASE_ADMIN_SDK_JSON_STR: 
-            print("⚠️ Firebase Key Missing")
+        # 1. 환경변수 확인
+        if not FIREBASE_ADMIN_SDK_JSON_STR:
+            print("⚠️ [FCM Warning] FIREBASE_ADMIN_SDK_JSON 환경변수가 비어있습니다. 푸시 알림을 건너뜁니다.", flush=True)
             return
+
+        # 2. 이미 초기화되었는지 확인
+        if firebase_admin._apps:
+            return
+
+        # 3. JSON 문자열 다듬기 (이게 핵심!)
+        # 실수로 들어간 줄바꿈이나, 이스케이프된 줄바꿈(\n)을 모두 실제 줄바꿈으로 통일하거나 제거
+        json_str = FIREBASE_ADMIN_SDK_JSON_STR.strip()
         
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(json.loads(FIREBASE_ADMIN_SDK_JSON_STR))
-            firebase_admin.initialize_app(cred)
-            print("✅ [FCM] Initialized")
+        # 따옴표 문제나 줄바꿈 문자가 꼬였을 때를 대비한 전처리
+        if json_str.startswith("'") and json_str.endswith("'"):
+            json_str = json_str[1:-1] # 앞뒤 불필요한 따옴표 제거
+        
+        try:
+            cred_dict = json.loads(json_str)
+        except json.JSONDecodeError:
+            # 실패하면 혹시 모르니 줄바꿈 문자를 수동으로 교체해서 재시도
+            print("⚠️ [FCM] 1차 JSON 파싱 실패. 줄바꿈 문자 보정 후 재시도...", flush=True)
+            fixed_str = json_str.replace('\\n', '\n') # 문자열 "\n"을 실제 엔터로 변경
+            cred_dict = json.loads(fixed_str)
+
+        # 4. 초기화
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+        print(f"✅ [FCM] Firebase 초기화 성공 (Project: {cred_dict.get('project_id', 'Unknown')})", flush=True)
+
+    except json.JSONDecodeError as je:
+        print(f"❌ [FCM Critical] JSON 형식이 깨져있습니다. 환경변수를 다시 복사하세요.", flush=True)
+        print(f"   에러 위치: {je}", flush=True)
+        # 보안상 전체 키를 찍진 말고 앞부분만 확인
+        print(f"   입력된 값(앞 20자): {FIREBASE_ADMIN_SDK_JSON_STR[:20]}...", flush=True)
     except Exception as e:
-        print(f"❌ [FCM Error] {e}")
+        print(f"❌ [FCM Error] 초기화 중 알 수 없는 오류: {e}", flush=True)
 
 def update_dashboard_db(ticker, metrics, score, status):
     conn = None
@@ -720,3 +748,26 @@ class STSPipeline:
 
             except Exception as e:
                 print(f"❌ Manager Error: {e}")
+                # ==============================================================================
+# 5. MAIN EXECUTION (실행 진입점)
+# ==============================================================================
+if __name__ == "__main__":
+    # 윈도우 환경에서 실행 시 asyncio 루프 정책 충돌 방지 (혹시 로컬 테스트할 경우 대비)
+    if os.name == 'nt':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    try:
+        print("🚀 [System] Initializing STS Sniper Bot...", flush=True)
+        
+        # 파이프라인 인스턴스 생성
+        pipeline = STSPipeline()
+        
+        # 비동기 루프 시작 (여기서 무한 루프가 돕니다)
+        asyncio.run(pipeline.connect())
+
+    except KeyboardInterrupt:
+        print("\n🛑 [System] Bot stopped by user.", flush=True)
+    except Exception as e:
+        print(f"❌ [Fatal Error] Main loop crashed: {e}", flush=True)
+        # 치명적 오류 발생 시 5초 대기 후 종료 (로그 확인할 시간 확보)
+        time.sleep(5)
