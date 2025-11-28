@@ -888,7 +888,7 @@ class STSPipeline:
             try: self.msg_queue.put_nowait(msg)
             except asyncio.QueueFull: pass 
 
-    # [5] Worker (데이터 연결 로직 수정됨)
+   # [5] Worker (데이터 연결 로직 수정됨 - 1초봉 강제 구동 추가)
     async def worker(self):
         while True:
             msg = await self.msg_queue.get()
@@ -901,6 +901,22 @@ class STSPipeline:
                         self.selector.update(item)
                         # [수정 2] 실시간 Agg 데이터를 딕셔너리에 저장해둠 (캐싱)
                         self.last_agg[t] = item
+                        
+                        # 🔥 [긴급 수정] T(체결) 데이터가 안 들어올 때를 대비해
+                        # A(1초봉) 데이터가 들어오면 강제로 봇을 구동시킵니다.
+                        if t in self.snipers:
+                            # A 데이터를 T 데이터인 척 위장해서 봇에게 먹입니다.
+                            pseudo_tick = {
+                                'p': item['c'],      # 현재가 = 종가
+                                's': item['v'],      # 거래량
+                                't': item['e']       # 시간
+                            }
+                            # 봇에게 강제 주입 -> 이러면 Pulse 로그가 무조건 찍힙니다!
+                            self.snipers[t].on_data(
+                                pseudo_tick, 
+                                self.last_quotes.get(t, {'bids':[],'asks':[]}), 
+                                item
+                            )
                     
                     elif ev == 'Q':
                         self.last_quotes[t] = {
@@ -908,20 +924,17 @@ class STSPipeline:
                             'asks': [{'p':item.get('ap'),'s':item.get('as')}]
                         }
                     
-                    # Top 3 종목 정밀 타격 로직
+                    # Top 3 종목 정밀 타격 로직 (원래 로직 유지)
                     elif ev == 'T' and t in self.snipers:
-                        # [수정 3] item(T) 대신 저장해둔 last_agg(A)를 넘김
-                        # 이렇게 해야 VWAP, High, Low 정보를 봇이 계산할 수 있음
                         current_agg = self.last_agg.get(t)
-                        
                         self.snipers[t].on_data(
                             item, 
                             self.last_quotes.get(t, {'bids':[],'asks':[]}), 
-                            current_agg  # <-- 여기가 T대신 A를 넘기는 핵심 포인트
+                            current_agg 
                         )
             except Exception: pass
             finally:
-                self.msg_queue.task_done()
+                self.msg_queue.task_done() 
 
     # [6] Scanner (20초 주기)
     async def task_global_scan(self):
