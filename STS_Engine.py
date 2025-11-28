@@ -339,6 +339,28 @@ class MicrostructureAnalyzer:
         self.prev_tick_speed = 0
         self.prev_obi = 0
 
+    def inject_history(self, aggs):
+        """Polygon 1초봉 데이터를 있는 그대로 주입 (가상 변환 X)"""
+        if not aggs: return
+        
+        # 시간순 정렬
+        aggs.sort(key=lambda x: x['t'])
+        
+        for bar in aggs:
+            ts = pd.to_datetime(bar['t'], unit='ms')
+            
+            # 1초봉(Agg) 하나를 하나의 '틱'처럼 그대로 사용
+            # 이렇게 하면 VWAP, 볼린저 밴드 계산 시 왜곡 없이 정확함
+            self.raw_ticks.append({
+                't': ts,
+                'p': bar['c'],       # 종가(Close)를 기준 가격으로 사용
+                's': bar.get('v', 0), # 거래량(Volume)
+                'bid': bar['c'] - 0.01, 
+                'ask': bar['c'] + 0.01
+            })
+            
+        print(f"📥 [Analyzer] History Loaded: {len(aggs)} seconds of data ready.", flush=True)
+
     def update_tick(self, tick_data, current_quotes):
         best_bid = current_quotes['bids'][0]['p'] if current_quotes['bids'] else 0
         best_ask = current_quotes['asks'][0]['p'] if current_quotes['asks'] else 0
@@ -614,6 +636,39 @@ class SniperBot:
 
         elif self.state == "FIRED":
             self.manage_position(m['last_price'])
+    
+    async def warmup(self):
+        """최근 3분간의 1초 봉 데이터를 가져와서 분석기를 예열함"""
+        print(f"🔥 [Warmup] Fetching history for {self.ticker}...", flush=True)
+        try:
+            # 현재 시간 기준 3분 전부터 조회
+            to_ts = int(time.time() * 1000)
+            from_ts = to_ts - (180 * 1000) 
+            
+            url = f"https://api.polygon.io/v2/aggs/ticker/{self.ticker}/range/1/second/{from_ts}/{to_ts}"
+            params = {
+                "adjusted": "true",
+                "sort": "asc",
+                "limit": 500,
+                "apiKey": POLYGON_API_KEY
+            }
+            
+            # [수정] 여기서부터 들여쓰기가 try 안쪽으로 들어와야 합니다.
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, params=params, timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if 'results' in data and data['results']:
+                        # 분석기에 주입
+                        self.analyzer.inject_history(data['results'])
+                        print(f"✅ [Warmup] {self.ticker} Ready! ({len(data['results'])} bars loaded)", flush=True)
+                    else:
+                        print(f"⚠️ [Warmup] No history data for {self.ticker}", flush=True)
+                else:
+                    print(f"❌ [Warmup] API Error: {resp.status_code}", flush=True)
+                    
+        except Exception as e:
+            print(f"❌ [Warmup] Failed: {e}", flush=True)
 
     def fire(self, price, prob, metrics):
         print(f"🔫 [격발] {self.ticker} AI_Prob:{prob:.4f} Price:${price:.4f}", flush=True)
@@ -793,10 +848,10 @@ class STSPipeline:
 
     # [신규] 3분 주기: Top 10 후보군 갱신
     async def task_global_scan(self):
-        print("🔭 [Scanner] Started (3 min interval)", flush=True)
+        print("🔭 [Scanner] Started (Fast Mode: 20s)", flush=True)
         while True:
             try:
-                await asyncio.sleep(180) # 3분 대기
+                await asyncio.sleep(20) # 20초
                 self.candidates = self.selector.get_top_gainers_candidates(limit=10)
                 print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
                 self.selector.garbage_collect()
@@ -804,10 +859,10 @@ class STSPipeline:
 
     async def task_focus_manager(self, ws, candidates=None): # candidates 인자 유연하게 처리
         """[1분 주기] Top 10 중 Top 3 선정 및 구독 변경"""
-        print("🎯 [Manager] Started (1 min interval)", flush=True)
+        print("🎯 [Manager] Started (5s interval)", flush=True)
         while True:
             try:
-                await asyncio.sleep(60) # 1분 대기
+                await asyncio.sleep(5) # 5초 대기
                 if not self.candidates: continue
 
                 # Top 10 후보군 중에서 Top 3 선정
@@ -836,10 +891,19 @@ class STSPipeline:
                     await self.subscribe(ws, subscribe_params)
                     
                     for t in to_add:
-                        self.snipers[t] = SniperBot(t, self.logger, self.selector, self.shared_model)
+                        # [수정] 봇 객체를 먼저 생성하고
+                        new_bot = SniperBot(t, self.logger, self.selector, self.shared_model)
+                        
+                        # [핵심] 과거 데이터 3분치를 로딩할 때까지 대기 (Warmup)
+                        # 이 줄 덕분에 봇은 등록되자마자 즉시 매매가 가능해집니다.
+                        await new_bot.warmup()
+                        
+                        # [완료] 준비된 봇을 리스트에 등록
+                        self.snipers[t] = new_bot
 
             except Exception as e:
-                print(f"❌ Manager Error: {e}")
+                print(f"❌ Manager Error: {e}", flush=True)
+                await asyncio.sleep(5)
                 # ==============================================================================
 # 5. MAIN EXECUTION (실행 진입점)
 # ==============================================================================
