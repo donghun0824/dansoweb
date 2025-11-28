@@ -486,6 +486,39 @@ class TargetSelector:
             return (d['h'] - d['l']) * 0.1 
         return 0.05
 
+    # 🔥 [추가된 기능] DB 저장 메소드 (이게 없어서 UI가 안 떴던 것임)
+    def save_candidates_to_db(self, candidates):
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # 현재 감지된 Top 10을 DB에 갱신
+            for t, score, change, vol in candidates:
+                d = self.snapshots.get(t)
+                if not d: continue
+                
+                # status를 'SCANNING'으로 저장하여 UI가 후보군임을 알게 함
+                query = """
+                INSERT INTO sts_live_targets 
+                (ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status, last_updated)
+                VALUES (%s, %s, %s, 0, 0, 0, 0, 'SCANNING', NOW())
+                ON CONFLICT (ticker) DO UPDATE SET
+                    price = EXCLUDED.price,
+                    ai_score = EXCLUDED.ai_score,
+                    last_updated = NOW()
+                WHERE sts_live_targets.status != 'FIRED'; -- 이미 발사된 건 건드리지 않음
+                """
+                cursor.execute(query, (t, d['c'], score)) 
+            
+            conn.commit()
+            cursor.close()
+        except Exception as e:
+            print(f"❌ [DB Save Error] {e}", flush=True)
+            if conn: conn.rollback()
+        finally:
+            if conn: db_pool.putconn(conn)
+
     # [핵심 수정] 3분 주기: RVOL 및 Liquidity 기반 Top 10 선정
     def get_top_gainers_candidates(self, limit=10):
         scored = []
@@ -495,34 +528,34 @@ class TargetSelector:
         for t, d in self.snapshots.items():
             if now - d['last_updated'] > 600: continue # 죽은 데이터 제외
             
-            # [Filter 1] Price Cap: $30 이하 (저유동성/작전주 타겟팅)
+            # [Filter 1] Price Cap: $50 이하
             if d['c'] > STS_MAX_PRICE: continue
             
-            # [Filter 2] Liquidity Floor: 거래대금 $300k 미만 칼같이 제외 (핵심)
+            # [Filter 2] Liquidity Floor: 거래대금 필터
             dollar_vol = d['c'] * d['v']
             if dollar_vol < STS_MIN_DOLLAR_VOL: continue
 
             # [Score Logic] 등락률 + 거래대금 가중치
-            # 단순히 많이 오른 놈(X) -> 돈이 몰리면서 오르는 놈(O)
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
             
-            # 등락률이 최소 1%는 되어야 의미 있음
             if change_pct < 1.0: continue
 
-            # 점수 산정: 등락률 * log(거래대금) 
-            # -> 거래량이 받쳐주는 상승일수록 높은 점수
             score = change_pct * np.log1p(dollar_vol)
-            
             scored.append((t, score, change_pct, dollar_vol))
         
         # 점수 내림차순 정렬
         scored.sort(key=lambda x: x[1], reverse=True)
         
-        # 로그 출력 (디버깅용)
-        if scored:
-            print(f"🔎 [Scanner] Top Candidate: {scored[0][0]} (Chg:{scored[0][2]:.1f}% $Vol:{scored[0][3]/1000:.0f}k)", flush=True)
+        # Top 10 추출
+        top_list = scored[:limit]
 
-        return [x[0] for x in scored[:limit]]
+        # 로그 출력
+        if top_list:
+            # 🔥 [핵심] 찾은 놈들을 DB에 저장해라! (그래야 UI에 뜸)
+            self.save_candidates_to_db(top_list)
+            print(f"🔎 [Scanner] Top Candidate: {top_list[0][0]} (Chg:{top_list[0][2]:.1f}%) -> Saved to DB", flush=True)
+
+        return [x[0] for x in top_list]
 
     # [수정] 1분 주기: 후보군 중 거래량 가속도(Volume Velocity) Top 3 선정
     def get_best_snipers(self, candidates, limit=3):
@@ -530,8 +563,6 @@ class TargetSelector:
         for t in candidates:
             if t not in self.snapshots: continue
             d = self.snapshots[t]
-            # 여기서는 단순히 누적 거래량이 아니라 '거래대금'이 가장 큰 놈을 우선시
-            # (이미 Top 10에서 필터링 되었으므로, 그 중 대장주를 뽑음)
             dollar_vol = d['c'] * d['v']
             scored.append((t, dollar_vol))
         
