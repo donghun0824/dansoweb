@@ -509,7 +509,7 @@ class TargetSelector:
                     last_updated = NOW()
                 WHERE sts_live_targets.status != 'FIRED'; -- 이미 발사된 건 건드리지 않음
                 """
-                cursor.execute(query, (t, d['c'], score)) 
+                cursor.execute(query, (t, float(d['c']), float(score))) 
             
             conn.commit()
             cursor.close()
