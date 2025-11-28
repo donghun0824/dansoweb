@@ -598,8 +598,10 @@ class STSPipeline:
         init_firebase()
         
         if not POLYGON_API_KEY:
-            print("❌ Error: No API Key", flush=True)
-            return
+            print("❌ [CRITICAL] POLYGON_API_KEY가 없습니다! 환경변수를 확인하세요.", flush=True)
+            # return을 지우고 무한 대기
+            while True:
+                await asyncio.sleep(60)
 
         while True:
             try:
