@@ -121,11 +121,11 @@
                     <div class="stat-flex">
                         <div class="stat-box">
                             <div class="label">WIN RATE</div>
-                            <div class="val mono-text text-green">72%</div>
+                            <div id="session-winrate" class="val mono-text text-green">--%</div>
                         </div>
                         <div class="stat-box">
                             <div class="label">SIGNALS</div>
-                            <div class="val mono-text">14</div>
+                            <div id="session-signals" class="val mono-text">0</div>
                         </div>
                     </div>
                     <div class="chart-mini">
@@ -151,14 +151,12 @@
                     </div>
                     <div class="micro-item mt-15">
                         <span class="label">SPIKE DETECTED</span>
-                        <span class="mono-text text-green">NVVE, OSRH</span>
+                        <span id="spike-list" class="mono-text text-green">SCANNING...</span>
                     </div>
                 </div>
             </div>
 
-        </div> 
-
     <script src="{{ url_for('static', filename='js/sts.js') }}"></script>
-    
+
 </body>
 </html>

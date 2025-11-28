@@ -219,7 +219,7 @@ function renderTable(targets) {
 }
 
 function renderMicroPanel(topItem) {
-    // 1위 종목의 상세 정보를 왼쪽 패널에 표시
+    // 1. [기존 기능] 왼쪽 상단 Microstructure 패널 업데이트
     const obi = (topItem.obi || 0).toFixed(2);
     const vpin = (topItem.vpin || 0).toFixed(2);
     const speed = topItem.tick_speed || 0;
@@ -249,8 +249,42 @@ function renderMicroPanel(topItem) {
             <span class="mono-text text-highlight">⚡ ${speed} ticks/s</span>
         </div>
     `;
-}
 
+    // 2. [추가 기능] Risk Engine 패널 업데이트 (가짜 데이터 제거 및 실시간 연동)
+    // 현재가(price)가 있으면 그것을 쓰고, 없으면 0 처리
+    const price = parseFloat(topItem.price || 0);
+    const prob = (topItem.ai_prob || 0) * 100; // 0.85 -> 85
+    
+    // 단순화된 시뮬레이션 계산 (실제 봇 로직과 비슷하게 화면에 보여주기 위함)
+    const atrSim = price * 0.005; // 0.5% 변동성 가정
+    const target = price + (atrSim * 1.5);
+    const stop = price - atrSim;
+
+    // HTML에 id="risk-entry" 등을 추가했으므로 여기서 값을 넣어줌
+    const entryEl = document.getElementById('risk-entry');
+    if (entryEl) entryEl.innerText = '$' + price.toFixed(2);
+
+    const targetEl = document.getElementById('risk-target');
+    if (targetEl) targetEl.innerText = '$' + target.toFixed(2);
+
+    const stopEl = document.getElementById('risk-stop');
+    if (stopEl) stopEl.innerText = '$' + stop.toFixed(2);
+    
+    const probEl = document.getElementById('risk-prob');
+    if (probEl) {
+        probEl.innerText = prob.toFixed(1) + '%';
+        // 확률 80% 이상이면 초록색 강조
+        if(prob >= 80) probEl.className = "value mono-text text-green";
+        else probEl.className = "value mono-text";
+    }
+
+    // 3. [추가 기능] Spike Detected 업데이트 (Heat Map 아래)
+    const spikeEl = document.getElementById('spike-list');
+    if (spikeEl) {
+        // 현재 1위 종목 이름 표시
+        spikeEl.innerText = topItem.ticker; 
+    }
+}
 // 유틸리티: VPIN 기반 리스크 레벨 텍스트
 function calculateRiskLevel(vpin) {
     if (vpin > 0.6) return 'Extreme';
@@ -262,3 +296,13 @@ function calculateRiskLevel(vpin) {
 // 엔진 시작 (1.5초마다 데이터 갱신)
 setInterval(updateDashboard, 1500);
 updateDashboard();
+// updateDashboard 함수 내부, renderTable 호출 직후에 추가
+if (data.targets) {
+    // 임시로 발견된 종목 수를 Signals에 표시
+    const signalEl = document.getElementById('session-signals');
+    if(signalEl) signalEl.innerText = data.targets.length;
+    
+    // 승률은 아직 계산 로직이 없으므로 'CALC...'로 표시
+    const winRateEl = document.getElementById('session-winrate');
+    if(winRateEl) winRateEl.innerText = "CALC...";
+}
