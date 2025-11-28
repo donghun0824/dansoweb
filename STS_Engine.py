@@ -594,39 +594,19 @@ class SniperBot:
     def on_data(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
         
-        # [수정 1] VWAP 안전 확보 (Agg가 없으면 Analyzer나 현재가로 대체)
+        # [수정 1] VWAP 안전 확보
         if agg_data and agg_data.get('vwap'):
             self.vwap = agg_data.get('vwap')
         
-        # [복구 완료] ATR 업데이트 (이게 있어야 TP/SL이 종목에 맞춰짐)
+        # [복구 완료] ATR 업데이트
         if agg_data:
-            # agg_data가 있을 때만 갱신 (없으면 기존 값 유지)
             current_atr = self.selector.get_atr(self.ticker)
             if current_atr > 0:
                 self.atr = current_atr
 
         m = self.analyzer.get_metrics()
 
-        # [핵심] 데이터 부족으로 지표(m)가 없으면 -> 'WARM_UP' 상태로 DB 업데이트하고 종료
-        if not m:
-            now = time.time()
-            # 2초마다 갱신 (너무 자주 DB 때리지 않게)
-            if now - self.last_db_update > 2.0:
-                # 점수 0점, 상태 'WARM_UP'으로 저장 -> UI에서 필터링 가능
-                dummy_metrics = {'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 'tick_speed': 0, 'vwap_dist': 0}
-                update_dashboard_db(self.ticker, dummy_metrics, 0, "WARM_UP")
-                self.last_db_update = now
-            return # 여기서 끝냄. (억지로 아래 로직 실행 안 함)
-        
-        # [수정 2] VWAP 2차 방어 (Agg 데이터가 없을 때)
-        if self.vwap == 0 and m and m.get('vwap'):
-            self.vwap = m['vwap']
-            
-        # [수정 3] VWAP 3차 방어 (정 안되면 현재가 사용 - 0 나누기 에러 방지)
-        if self.vwap == 0:
-            self.vwap = tick_data['p']
-
-        # 데이터 예열 중 처리
+        # 데이터 부족 시 WARM_UP 처리
         if not m:
             now = time.time()
             if now - self.last_db_update > 2.0:
@@ -634,10 +614,17 @@ class SniperBot:
                 update_dashboard_db(self.ticker, dummy_metrics, 0, "WARM_UP")
                 self.last_db_update = now
             return
+        
+        # VWAP 방어 로직
+        if self.vwap == 0 and m and m.get('vwap'):
+            self.vwap = m['vwap']
+        if self.vwap == 0:
+            self.vwap = tick_data['p']
 
         is_bad_spread = m['spread'] > STS_MAX_SPREAD_ENTRY 
         is_low_vol = m['vol_ratio_60'] < 1.0 
 
+        # AI 예측
         prob = 0.0
         if self.model:
             try:
@@ -652,8 +639,13 @@ class SniperBot:
                 self.prob_history.append(raw_prob)
                 prob = sum(self.prob_history) / len(self.prob_history)
             except Exception as e:
-                print(f"⚠️ [AI Fail] {self.ticker}: {e}", flush=True)
+                # print(f"⚠️ [AI Fail] {self.ticker}: {e}", flush=True)
                 pass
+
+        # 🔥 [로그 추가] 여기가 질문하신 "어디?" 입니다. (AI 계산 직후)
+        # 봇이 데이터를 씹고 있는지 확인하는 심박수 로그
+        if m:
+            print(f"💓 [Pulse] {self.ticker} Price:${m['last_price']} | Score:{prob*100:.1f} | OBI:{m['obi']:.2f}", flush=True)
 
         now = time.time()
         is_hot = (prob * 100) >= 60
@@ -686,16 +678,22 @@ class SniperBot:
                 dist = (m['last_price'] - self.vwap) / self.vwap * 100
             else:
                 dist = 0
-                
-            cond_dist = 0.2 < dist < 2.0
+            
+            # 🔥 [설정 변경] VWAP보다 15% 비싸도 따라붙게 수정 (기존 2.0 -> 15.0)
+            cond_dist = 0.2 < dist < 15.0
+            
             cond_sqz = m['squeeze_flag'] == 1
             cond_accel = m['tick_accel'] > 0
             cond_vol = m['vol_ratio_60'] >= STS_MIN_RVOL 
             
+            # 🔥 [설정 변경] AI 점수가 낮아도 거래량이 5배 터지면 진입 (strong_momentum)
+            strong_momentum = (m['vol_ratio_60'] > 5.0)
+
             if prob > 0.5:
                 print(f"🧐 [Watch] {self.ticker} P:{prob:.2f} V:{cond_vol} S:{cond_sqz}", flush=True)
 
-            if cond_dist and (cond_sqz or prob > 0.65) and cond_accel and cond_vol:
+            # 진입 조건 완화 적용
+            if cond_dist and (cond_sqz or prob > 0.65 or strong_momentum) and cond_accel and cond_vol:
                 self.state = "AIMING"
                 print(f"👀 [조준] {self.ticker} (Prob:{prob:.2f} | RVOL:{m['vol_ratio_60']:.1f})", flush=True)
 
@@ -703,7 +701,10 @@ class SniperBot:
             if m['tick_accel'] < -3 and prob < 0.55:
                 self.state = "WATCHING"
                 return
-            if prob >= AI_PROB_THRESHOLD:
+            
+            # 격발 조건 (확률 0.85 이상이면 발사)
+            # 만약 AI 없이 거래량만으로 쏘고 싶으면 여기도 strong_momentum을 추가해야 함
+            if prob >= AI_PROB_THRESHOLD: 
                 self.fire(m['last_price'], prob, m)
 
         elif self.state == "FIRED":
