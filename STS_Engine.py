@@ -32,15 +32,15 @@ WS_URI = "wss://socket.polygon.io/stocks"
 # 전략 설정
 STS_TARGET_COUNT = 3
 STS_MIN_VOLUME_DOLLAR = 1e6
-STS_MAX_SPREAD_PCT = 0.8      
+STS_MAX_SPREAD_PCT = 1.0      
 STS_MAX_VPIN = 0.65           # [V5.3] 필터 완화 (0.55 -> 0.65)
 OBI_LEVELS = 20               # [V5.3] 오더북 깊이 확장 (5 -> 20)
 
 # 후보 선정(Target Selector) 필터 기준
-STS_MIN_DOLLAR_VOL = 300000  # 최소 거래대금 $300k (약 4억원)
-STS_MAX_PRICE = 30.0         # 최대 가격 $30 (저가주 집중)
-STS_MIN_RVOL = 2.0           # (SniperBot 단계) 최소 상대 거래량
-STS_MAX_SPREAD_ENTRY = 0.7   # (SniperBot 단계) 진입 허용 스프레드
+STS_MIN_DOLLAR_VOL = 200000  # 최소 거래대금 $300k (약 4억원)
+STS_MAX_PRICE = 50.0         # 최대 가격 $30 (저가주 집중)
+STS_MIN_RVOL = 1.5           # (SniperBot 단계) 최소 상대 거래량
+STS_MAX_SPREAD_ENTRY = 0.9   # (SniperBot 단계) 진입 허용 스프레드
 
 # AI & Risk Params
 MODEL_FILE = "sts_xgboost_model.json"
@@ -723,9 +723,14 @@ class STSPipeline:
         self.snipers = {}       # 현재 활성 Top 3 봇
         self.candidates = []    # Top 10 후보군 리스트
         self.last_quotes = {}
+        
+        # [수정 1] ★핵심★: 마지막 Agg(A) 데이터를 저장할 공간 초기화
+        # (이게 없으면 T 이벤트가 들어올 때 VWAP 계산을 못함)
+        self.last_agg = {}      
+        
         self.logger = DataLogger()
         
-        # [핵심 변경] 수신과 처리를 분리할 큐 생성
+        # 수신과 처리를 분리할 큐 생성
         self.msg_queue = asyncio.Queue(maxsize=100000)
         
         self.shared_model = None
@@ -736,47 +741,47 @@ class STSPipeline:
                 self.shared_model.load_model(MODEL_FILE)
             except Exception as e: print(f"❌ Load Error: {e}")
 
-            # ==========================================================
-    # [누락된 함수 추가] STSPipeline 클래스 내부 메서드로 추가하세요
-    # ==========================================================
+    # [1] 구독 요청 함수
     async def subscribe(self, ws, params):
-        """Polygon 웹소켓 구독 요청 전송"""
         try:
-            # 리스트로 들어오면 콤마로 합치기, 문자열이면 그대로 사용
-            if isinstance(params, list):
-                params_str = ",".join(params)
-            else:
-                params_str = params
-                
+            if isinstance(params, list): params_str = ",".join(params)
+            else: params_str = params
             req = {"action": "subscribe", "params": params_str}
             await ws.send(json.dumps(req))
             print(f"📡 [Sub] Request sent: {params_str}", flush=True)
-        except Exception as e:
-            print(f"❌ [Sub Error] {e}", flush=True)
+        except Exception as e: print(f"❌ [Sub Error] {e}", flush=True)
 
+    # [2] 구독 취소 함수
     async def unsubscribe(self, ws, params):
-        """Polygon 웹소켓 구독 취소 요청 전송"""
         try:
-            if isinstance(params, list):
-                params_str = ",".join(params)
-            else:
-                params_str = params
-                
+            if isinstance(params, list): params_str = ",".join(params)
+            else: params_str = params
             req = {"action": "unsubscribe", "params": params_str}
             await ws.send(json.dumps(req))
             print(f"🔕 [Unsub] Request sent: {params_str}", flush=True)
-        except Exception as e:
-            print(f"❌ [Unsub Error] {e}", flush=True)
+        except Exception as e: print(f"❌ [Unsub Error] {e}", flush=True)
 
+    # [3] 메인 연결 함수
     async def connect(self):
         init_db()
         init_firebase()
+
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM fcm_tokens")
+            count = cur.fetchone()[0]
+            print(f"📱 [System] Registered FCM Tokens: {count} devices", flush=True)
+            if count == 0:
+                print("⚠️ [Warning] No devices registered! Notifications will not be sent.", flush=True)
+            cur.close()
+            db_pool.putconn(conn)
+        except Exception as e:
+            print(f"⚠️ [System] Token check failed: {e}", flush=True)
         
         if not POLYGON_API_KEY:
-            print("❌ [CRITICAL] POLYGON_API_KEY가 없습니다! 환경변수를 확인하세요.", flush=True)
-            # return을 지우고 무한 대기
-            while True:
-                await asyncio.sleep(60)
+            print("❌ [CRITICAL] POLYGON_API_KEY가 없습니다!", flush=True)
+            while True: await asyncio.sleep(60)
 
         while True:
             try:
@@ -786,18 +791,15 @@ class STSPipeline:
                     await ws.send(json.dumps({"action": "auth", "params": POLYGON_API_KEY}))
                     _ = await ws.recv()
 
-                    # 1. 초기 구독: 전체 Agg(A.*)만 구독하여 Top 10 발굴 시작
+                    # 초기 구독: 전체 Agg(A.*) 구독
                     await self.subscribe(ws, ["A.*"])
 
-                    # 2. 태스크 분리 실행 (Producer는 아래 메인 루프에서 실행)
-                    # Consumer (데이터 처리 워커)
-                    worker_task = asyncio.create_task(self.worker())
-                    # 3분 주기 스캐너 (Top 10)
-                    scanner_task = asyncio.create_task(self.task_global_scan())
-                    # 1분 주기 매니저 (Top 3 & 구독 관리)
-                    manager_task = asyncio.create_task(self.task_focus_manager(ws))
+                    # 태스크 실행
+                    asyncio.create_task(self.worker())
+                    asyncio.create_task(self.task_global_scan())
+                    asyncio.create_task(self.task_focus_manager(ws))
 
-                    # 3. 메인 루프: 데이터 수신 (Producer) - 멈추지 않음
+                    # 메인 루프: 데이터 수신
                     await self.producer(ws)
 
             except (websockets.ConnectionClosed, asyncio.TimeoutError):
@@ -807,27 +809,25 @@ class STSPipeline:
                 print(f"❌ Critical Error: {e}", flush=True)
                 await asyncio.sleep(5)
 
-    # [신규] Producer: 데이터를 큐에 넣기만 함 (논블로킹)
+    # [4] Producer
     async def producer(self, ws):
         async for msg in ws:
-            try:
-                self.msg_queue.put_nowait(msg)
-            except asyncio.QueueFull:
-                pass # 큐가 꽉 차면 최신 데이터를 위해 드랍
+            try: self.msg_queue.put_nowait(msg)
+            except asyncio.QueueFull: pass 
 
-    # [신규] Consumer: 큐에서 꺼내서 파싱 및 처리
+    # [5] Worker (데이터 연결 로직 수정됨)
     async def worker(self):
         while True:
             msg = await self.msg_queue.get()
             try:
-                # [위치 이동] JSON 파싱을 여기서 수행
                 data = json.loads(msg)
-                
                 for item in data:
                     ev, t = item.get('ev'), item.get('sym')
                     
                     if ev == 'A': 
-                        self.selector.update(item) # 전체 감시
+                        self.selector.update(item)
+                        # [수정 2] 실시간 Agg 데이터를 딕셔너리에 저장해둠 (캐싱)
+                        self.last_agg[t] = item
                     
                     elif ev == 'Q':
                         self.last_quotes[t] = {
@@ -835,70 +835,74 @@ class STSPipeline:
                             'asks': [{'p':item.get('ap'),'s':item.get('as')}]
                         }
                     
-                    # Top 3 종목만 정밀 타격 로직(AI) 수행
+                    # Top 3 종목 정밀 타격 로직
                     elif ev == 'T' and t in self.snipers:
+                        # [수정 3] item(T) 대신 저장해둔 last_agg(A)를 넘김
+                        # 이렇게 해야 VWAP, High, Low 정보를 봇이 계산할 수 있음
+                        current_agg = self.last_agg.get(t)
+                        
                         self.snipers[t].on_data(
                             item, 
                             self.last_quotes.get(t, {'bids':[],'asks':[]}), 
-                            item 
+                            current_agg  # <-- 여기가 T대신 A를 넘기는 핵심 포인트
                         )
             except Exception: pass
             finally:
                 self.msg_queue.task_done()
 
-    # [신규] 3분 주기: Top 10 후보군 갱신
+    # [6] Scanner (20초 주기)
     async def task_global_scan(self):
         print("🔭 [Scanner] Started (Fast Mode: 20s)", flush=True)
         while True:
             try:
-                await asyncio.sleep(20) # 20초
+                # 봇 켜자마자 바로 한번 스캔
                 self.candidates = self.selector.get_top_gainers_candidates(limit=10)
-                print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
+                if self.candidates:
+                    print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
+                
                 self.selector.garbage_collect()
-            except Exception: pass
+                await asyncio.sleep(20) # 20초 대기
+            except Exception as e:
+                print(f"⚠️ Scanner Warning: {e}", flush=True)
+                await asyncio.sleep(5)
 
-    async def task_focus_manager(self, ws, candidates=None): # candidates 인자 유연하게 처리
-        """[1분 주기] Top 10 중 Top 3 선정 및 구독 변경"""
-        print("🎯 [Manager] Started (5s interval)", flush=True)
+    # [7] Manager (5초 주기 & Warmup 적용)
+    async def task_focus_manager(self, ws, candidates=None):
+        print("🎯 [Manager] Started (Fast Mode: 5s)", flush=True)
         while True:
             try:
-                await asyncio.sleep(5) # 5초 대기
+                await asyncio.sleep(5)
                 if not self.candidates: continue
 
-                # Top 10 후보군 중에서 Top 3 선정
                 target_top3 = self.selector.get_best_snipers(self.candidates, limit=STS_TARGET_COUNT)
                 
                 current_set = set(self.snipers.keys())
                 new_set = set(target_top3)
                 
-                # 1. 탈락한 종목 -> 구독 해지 (수정됨)
+                # Detach
                 to_remove = current_set - new_set
                 if to_remove:
                     print(f"👋 Detach: {list(to_remove)}", flush=True)
-                    # [FIX] T.* 와 Q.*를 명확히 분리하여 리스트 병합
                     unsubscribe_params = [f"T.{t}" for t in to_remove] + [f"Q.{t}" for t in to_remove]
                     await self.unsubscribe(ws, unsubscribe_params)
-                    
                     for t in to_remove: 
                         if t in self.snipers: del self.snipers[t]
 
-                # 2. 신규 진입 종목 -> 구독 시작 (수정됨)
+                # Attach
                 to_add = new_set - current_set
                 if to_add:
                     print(f"🚀 Attach: {list(to_add)}", flush=True)
-                    # [FIX] T.* 와 Q.*를 명확히 분리하여 리스트 병합
                     subscribe_params = [f"T.{t}" for t in to_add] + [f"Q.{t}" for t in to_add]
                     await self.subscribe(ws, subscribe_params)
                     
                     for t in to_add:
-                        # [수정] 봇 객체를 먼저 생성하고
+                        # 봇 생성
                         new_bot = SniperBot(t, self.logger, self.selector, self.shared_model)
                         
-                        # [핵심] 과거 데이터 3분치를 로딩할 때까지 대기 (Warmup)
-                        # 이 줄 덕분에 봇은 등록되자마자 즉시 매매가 가능해집니다.
-                        await new_bot.warmup()
+                        # [핵심] 과거 데이터 로딩 대기 (Warmup)
+                        await new_bot.warmup() 
                         
-                        # [완료] 준비된 봇을 리스트에 등록
+                        # 준비 완료된 봇 등록
                         self.snipers[t] = new_bot
 
             except Exception as e:
