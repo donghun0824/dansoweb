@@ -159,3 +159,33 @@ def compute_vol_ratio_60(volumes):
     ratio = vol_60 / (vol_600_mean * 60) # 단위 맞춤 (평균은 1초당 평균이므로 * 60)
     # 0 나누기 방지
     return ratio.fillna(1.0).replace([np.inf, -np.inf], 1.0)
+# [indicators_sts.py 파일 맨 끝에 이 코드를 붙여넣으세요]
+
+# =============================================================================
+# 9. Trade Classification (The Missing Link)
+# =============================================================================
+def classify_trade_sign(price, best_bid, best_ask):
+    """
+    현재 체결이 매수(1)인지 매도(-1)인지 판별하는 함수 (Lee-Ready 알고리즘 변형)
+    이 함수가 없어서 봇이 계산 도중 멈췄던 것입니다.
+    """
+    # 1. 호가가 없거나 비정상이면 중립(0)
+    if best_bid <= 0 or best_ask <= 0:
+        return 0.0
+
+    # 2. 매수 호가보다 높거나 같으면 -> 매수 체결 (Buy)
+    if price >= best_ask:
+        return 1.0
+    
+    # 3. 매도 호가보다 낮거나 같으면 -> 매도 체결 (Sell)
+    if price <= best_bid:
+        return -1.0
+    
+    # 4. 스프레드 사이에 체결된 경우 (중간값 기준)
+    mid_price = (best_bid + best_ask) / 2
+    if price > mid_price:
+        return 1.0  # 중간보다 높으면 매수 우위
+    elif price < mid_price:
+        return -1.0 # 중간보다 낮으면 매도 우위
+        
+    return 0.0 # 정확히 중간이면 판단 불가
