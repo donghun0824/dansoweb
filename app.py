@@ -83,6 +83,13 @@ def login_page():
 def dashboard_page():
     return render_template('dashboard.html', user=current_user)
 
+# 1. [페이지] 사용자가 접속하는 화면 (HTML 렌더링)
+@app.route('/sts')
+@login_required  # 로그인한 사람만 볼 수 있게 하려면 추가
+def sts_page():
+    # templates/sts.html 파일을 찾아서 보여줌
+    return render_template('sts.html')
+
 @app.route('/api/sts/status')
 def get_sts_status():
     conn = None
