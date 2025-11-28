@@ -384,50 +384,75 @@ class MicrostructureAnalyzer:
         return df_res.dropna()
 
     def get_metrics(self):
-        df = self._resample_ohlc()
-        if df is None or len(df) < 60: return None 
+        # 1. 틱이 너무 적으면(5개 미만) 아예 계산 포기 (정상)
+        if len(self.raw_ticks) < 5: return None
         
-        df['vwap'] = ind.compute_intraday_vwap_series(df, 'close', 'volume')
-        df['fibo_pos'] = ind.compute_fibo_pos(df['high'], df['low'], df['close'], lookback=600)
-        _, df['bb_width_norm'], df['squeeze_flag'] = ind.compute_bb_squeeze(df['close'], window=20, mult=2, norm_window=300)
-        df['rv_60'] = ind.compute_rv_60(df['close'])
-        df['vol_ratio_60'] = ind.compute_vol_ratio_60(df['volume'])
-        df['tick_accel'] = df['tick_speed'].diff().fillna(0)
+        df = pd.DataFrame(self.raw_ticks).set_index('t')
+        ohlcv = df['p'].resample('1s').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'})
+        volume = df['s'].resample('1s').sum()
+        tick_count = df['s'].resample('1s').count()
+        
+        df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
+        df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
+        
+        # [중요] 거래 없는 시간은 직전 가격 유지
+        df = df_res.ffill().fillna(0)
+        
+        # 보정 후에도 데이터가 5개 미만이면 리턴
+        if len(df) < 5: return None 
+        
+        try:
+            # [수정됨] 여기서부터 들여쓰기가 한 칸 더 들어가야 합니다!
+            df['vwap'] = ind.compute_intraday_vwap_series(df, 'close', 'volume')
+            df['fibo_pos'] = ind.compute_fibo_pos(df['high'], df['low'], df['close'], lookback=600)
+            _, df['bb_width_norm'], df['squeeze_flag'] = ind.compute_bb_squeeze(df['close'], window=20, mult=2, norm_window=300)
+            df['rv_60'] = ind.compute_rv_60(df['close'])
+            df['vol_ratio_60'] = ind.compute_vol_ratio_60(df['volume'])
+            df['tick_accel'] = df['tick_speed'].diff().fillna(0)
+            
+            # NaN을 0으로 채움 (AI 입력 오류 방지)
+            df = df.fillna(0)
 
-        last = df.iloc[-1]
-        
-        raw_df = pd.DataFrame(list(self.raw_ticks)[-100:]) 
-        signs = [ind.classify_trade_sign(r.p, r.bid, r.ask) for r in raw_df.itertuples()]
-        signed_vol = raw_df['s'].values * np.array(signs)
-        vpin = ind.compute_vpin(signed_vol)
-        
-        # [V5.3] OBI 깊이 20으로 확장
-        bids = np.array([q['s'] for q in self.quotes.get('bids', [])[:OBI_LEVELS]])
-        asks = np.array([q['s'] for q in self.quotes.get('asks', [])[:OBI_LEVELS]])
-        obi = ind.compute_order_book_imbalance(bids, asks)
-        
-        obi_mom = obi - self.prev_obi
-        self.prev_obi = obi
-        
-        vwap_dist = (last['close'] - last['vwap']) / last['vwap'] * 100 if last['vwap'] > 0 else 0
-        fibo_dist_382 = abs(last['fibo_pos'] - 0.382)
-        fibo_dist_618 = abs(last['fibo_pos'] - 0.618)
-        
-        best_bid = self.raw_ticks[-1]['bid']
-        best_ask = self.raw_ticks[-1]['ask']
-        spread = (best_ask - best_bid) / best_bid * 100 if best_bid > 0 else 0
+            last = df.iloc[-1]
+            raw_df = pd.DataFrame(list(self.raw_ticks)[-100:]) 
+            
+            if len(raw_df) < 1: return None 
 
-        # [V5.3] vwap 값도 리턴 (Replay Log 저장용)
-        return {
-            'obi': obi, 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'],
-            'vpin': vpin, 'vwap_dist': vwap_dist,
-            'fibo_pos': last['fibo_pos'], 'fibo_dist_382': fibo_dist_382, 'fibo_dist_618': fibo_dist_618,
-            'bb_width_norm': last['bb_width_norm'], 'squeeze_flag': last['squeeze_flag'],
-            'rv_60': last['rv_60'], 'vol_ratio_60': last['vol_ratio_60'],
-            'spread': spread, 'last_price': last['close'], 'tick_speed': last['tick_speed'], 
-            'timestamp': raw_df.iloc[-1]['t'],
-            'vwap': last['vwap'] # 추가됨
-        }
+            signs = [ind.classify_trade_sign(r.p, r.bid, r.ask) for r in raw_df.itertuples()]
+            signed_vol = raw_df['s'].values * np.array(signs)
+            vpin = ind.compute_vpin(signed_vol)
+            
+            bids = np.array([q['s'] for q in self.quotes.get('bids', [])[:OBI_LEVELS]])
+            asks = np.array([q['s'] for q in self.quotes.get('asks', [])[:OBI_LEVELS]])
+            obi = ind.compute_order_book_imbalance(bids, asks)
+            
+            obi_mom = obi - self.prev_obi
+            self.prev_obi = obi
+            
+            vwap_dist = (last['close'] - last['vwap']) / last['vwap'] * 100 if last['vwap'] > 0 else 0
+            
+            best_bid = self.raw_ticks[-1]['bid']
+            best_ask = self.raw_ticks[-1]['ask']
+            # 0 나누기 방지
+            if best_bid > 0:
+                spread = (best_ask - best_bid) / best_bid * 100 
+            else:
+                spread = 0
+
+            return {
+                'obi': obi, 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'],
+                'vpin': vpin, 'vwap_dist': vwap_dist,
+                'fibo_pos': last['fibo_pos'], 
+                'fibo_dist_382': abs(last['fibo_pos'] - 0.382),
+                'fibo_dist_618': abs(last['fibo_pos'] - 0.618),
+                'bb_width_norm': last['bb_width_norm'], 'squeeze_flag': last['squeeze_flag'],
+                'rv_60': last['rv_60'], 'vol_ratio_60': last['vol_ratio_60'],
+                'spread': spread, 'last_price': last['close'], 'tick_speed': last['tick_speed'], 
+                'timestamp': raw_df.iloc[-1]['t'], 'vwap': last['vwap']
+            }
+        except Exception as e:
+            # print(f"Metric Calc Error: {e}")
+            return None
 
 class TargetSelector:
     def __init__(self):
@@ -537,31 +562,51 @@ class SniperBot:
 
     def on_data(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
+        
+        # [수정 1] VWAP 안전 확보 (Agg가 없으면 Analyzer나 현재가로 대체)
+        if agg_data and agg_data.get('vwap'):
+            self.vwap = agg_data.get('vwap')
+        
+        # [복구 완료] ATR 업데이트 (이게 있어야 TP/SL이 종목에 맞춰짐)
         if agg_data:
-            self.vwap = agg_data.get('vwap', tick_data['p'])
-            self.atr = self.selector.get_atr(self.ticker)
+            # agg_data가 있을 때만 갱신 (없으면 기존 값 유지)
+            current_atr = self.selector.get_atr(self.ticker)
+            if current_atr > 0:
+                self.atr = current_atr
 
         m = self.analyzer.get_metrics()
-        
-        # [수정 1] 데이터 예열 중(Warm-up)이라도 화면에 띄우기
+
+        # [핵심] 데이터 부족으로 지표(m)가 없으면 -> 'WARM_UP' 상태로 DB 업데이트하고 종료
         if not m:
             now = time.time()
-            # 2초마다 DB에 생존 신고 (화면에 'WARM_UP' 표시됨)
+            # 2초마다 갱신 (너무 자주 DB 때리지 않게)
             if now - self.last_db_update > 2.0:
-                dummy_metrics = {
-                    'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 
-                    'tick_speed': 0, 'vwap_dist': 0
-                }
+                # 점수 0점, 상태 'WARM_UP'으로 저장 -> UI에서 필터링 가능
+                dummy_metrics = {'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 'tick_speed': 0, 'vwap_dist': 0}
+                update_dashboard_db(self.ticker, dummy_metrics, 0, "WARM_UP")
+                self.last_db_update = now
+            return # 여기서 끝냄. (억지로 아래 로직 실행 안 함)
+        
+        # [수정 2] VWAP 2차 방어 (Agg 데이터가 없을 때)
+        if self.vwap == 0 and m and m.get('vwap'):
+            self.vwap = m['vwap']
+            
+        # [수정 3] VWAP 3차 방어 (정 안되면 현재가 사용 - 0 나누기 에러 방지)
+        if self.vwap == 0:
+            self.vwap = tick_data['p']
+
+        # 데이터 예열 중 처리
+        if not m:
+            now = time.time()
+            if now - self.last_db_update > 2.0:
+                dummy_metrics = {'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 'tick_speed': 0, 'vwap_dist': 0}
                 update_dashboard_db(self.ticker, dummy_metrics, 0, "WARM_UP")
                 self.last_db_update = now
             return
 
-        # [수정 2] 스프레드/RVOL 필터 (DB 저장 전에 return 하지 않음!)
-        # 상태 메시지를 결정하기 위한 플래그
-        is_bad_spread = m['spread'] > STS_MAX_SPREAD_ENTRY # 0.7% 이상이면 나쁨
-        is_low_vol = m['vol_ratio_60'] < 1.0 # 평소보다 거래량 없으면 나쁨
+        is_bad_spread = m['spread'] > STS_MAX_SPREAD_ENTRY 
+        is_low_vol = m['vol_ratio_60'] < 1.0 
 
-        # [기존 AI 로직]
         prob = 0.0
         if self.model:
             try:
@@ -575,22 +620,20 @@ class SniperBot:
                 raw_prob = self.model.predict(dtest)[0]
                 self.prob_history.append(raw_prob)
                 prob = sum(self.prob_history) / len(self.prob_history)
-            except: pass
+            except Exception as e:
+                print(f"⚠️ [AI Fail] {self.ticker}: {e}", flush=True)
+                pass
 
-        # [수정 3] DB 업데이트를 가장 먼저 수행 (화면 표시 보장)
         now = time.time()
         is_hot = (prob * 100) >= 60
         force_update = (self.state != self.last_logged_state)
-        
-        # 상태 메시지 결정 (화면에 보여줄 텍스트)
         display_status = self.state
+        
         if self.state == "WATCHING":
             if is_bad_spread: display_status = "BAD_SPREAD"
             elif is_low_vol: display_status = "LOW_VOL"
 
-        # VPIN(독성)이 너무 높으면 필터링 (단, DB엔 기록 남김)
-        if m['vpin'] > STS_MAX_VPIN:
-             if self.state == "WATCHING": display_status = "TOXIC_FLOW"
+        if m['vpin'] > STS_MAX_VPIN and self.state == "WATCHING": display_status = "TOXIC_FLOW"
 
         if force_update or (now - self.last_db_update > (1.0 if is_hot else 2.0)):
             score_to_save = prob * 100
@@ -598,31 +641,30 @@ class SniperBot:
             self.last_db_update = now
             self.last_logged_state = self.state
 
-        # [수정 4] 실제 진입 로직 차단 (Bad Condition일 경우)
-        # 이미 진입한 상태(FIRED)가 아니라면, 조건 나쁠 때 진입 금지
         if self.state != "FIRED":
-            if is_bad_spread or is_low_vol or m['vpin'] > STS_MAX_VPIN:
-                return 
+            if is_bad_spread or is_low_vol or m['vpin'] > STS_MAX_VPIN: return 
 
-        # --- FSM (상태 머신) ---
-        # [V5.3] Replay Log 저장
         self.logger.log_replay({
-            'timestamp': m['timestamp'], 'ticker': self.ticker, 
-            'price': m['last_price'], 'vwap': m['vwap'], 'atr': self.atr,
-            'obi': m['obi'], 'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 
-            'ai_prob': prob
+            'timestamp': m['timestamp'], 'ticker': self.ticker, 'price': m['last_price'], 
+            'vwap': self.vwap, 'atr': self.atr, 'obi': m['obi'], 
+            'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': prob
         })
 
         if self.state == "WATCHING":
-            dist = (m['last_price'] - self.vwap) / self.vwap * 100
+            if self.vwap > 0:
+                dist = (m['last_price'] - self.vwap) / self.vwap * 100
+            else:
+                dist = 0
+                
             cond_dist = 0.2 < dist < 2.0
             cond_sqz = m['squeeze_flag'] == 1
             cond_accel = m['tick_accel'] > 0
-            
-            # [핵심] RVOL > 2.0 (평소 대비 2배 거래량) 조건 추가
             cond_vol = m['vol_ratio_60'] >= STS_MIN_RVOL 
             
-            if cond_dist and (cond_sqz or prob > 0.7) and cond_accel and cond_vol:
+            if prob > 0.5:
+                print(f"🧐 [Watch] {self.ticker} P:{prob:.2f} V:{cond_vol} S:{cond_sqz}", flush=True)
+
+            if cond_dist and (cond_sqz or prob > 0.65) and cond_accel and cond_vol:
                 self.state = "AIMING"
                 print(f"👀 [조준] {self.ticker} (Prob:{prob:.2f} | RVOL:{m['vol_ratio_60']:.1f})", flush=True)
 
@@ -630,7 +672,6 @@ class SniperBot:
             if m['tick_accel'] < -3 and prob < 0.55:
                 self.state = "WATCHING"
                 return
-
             if prob >= AI_PROB_THRESHOLD:
                 self.fire(m['last_price'], prob, m)
 
@@ -899,8 +940,9 @@ class STSPipeline:
                         # 봇 생성
                         new_bot = SniperBot(t, self.logger, self.selector, self.shared_model)
                         
-                        # [핵심] 과거 데이터 로딩 대기 (Warmup)
-                        await new_bot.warmup() 
+                        # [수정 후] 백그라운드 태스크로 실행 (멈추지 않고 바로 다음으로 넘어감)
+                        self.snipers[t] = new_bot # 봇 먼저 등록
+                        asyncio.create_task(new_bot.warmup()) # 웜업은 알아서 하라고 던져둠
                         
                         # 준비 완료된 봇 등록
                         self.snipers[t] = new_bot

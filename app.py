@@ -94,24 +94,37 @@ def sts_page():
 def get_sts_status():
     conn = None
     try:
-        conn = get_db_connection() # 기존 함수 재사용 (Pool 없이 직접 연결)
-        cursor = conn.cursor(cursor_factory=RealDictCursor) # 딕셔너리로 받기 위해 수정
+        conn = get_db_connection() 
+        # 딕셔너리 형태로 데이터를 받기 위해 RealDictCursor 사용
+        cursor = conn.cursor(cursor_factory=RealDictCursor) 
         
-        # 1. 활성 타겟 정보 가져오기
-        # (테이블이 없으면 에러나지 않게 예외처리 or 테이블 생성 확인 필요)
-        cursor.execute("""
+        # [핵심 수정] 
+        # 1. FIRED(격발) > AIMING(조준) > 점수 높은 순 정렬
+        # 2. 상위 3개만 조회 (LIMIT 3) -> 화면이 깔끔해짐
+        query = """
             SELECT ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status 
             FROM sts_live_targets 
-            ORDER BY ai_score DESC
-        """)
+            ORDER BY 
+                CASE 
+                    WHEN status = 'FIRED' THEN 1 
+                    WHEN status = 'AIMING' THEN 2 
+                    ELSE 3 
+                END ASC,
+                ai_score DESC
+            LIMIT 3
+        """
+        cursor.execute(query)
         rows = cursor.fetchall()
         
         targets = []
         for r in rows:
+            # DB에 점수가 없으면(None) 0으로 처리
+            raw_score = r.get('ai_score') or 0
+            
             targets.append({
                 'ticker': r['ticker'],
                 'price': r['price'],
-                'ai_prob': (r['ai_score'] or 0) / 100.0, # None 방지
+                'ai_prob': raw_score / 100.0, # 100점 만점 -> 0.xx 확률로 변환
                 'obi': r['obi'],
                 'vpin': r['vpin'],
                 'tick_speed': r['tick_speed'],
@@ -119,22 +132,24 @@ def get_sts_status():
                 'status': r['status']
             })
             
-        # 2. 최근 로그 가져오기 (기존 signals 테이블 활용)
-        cursor.execute("""
-            SELECT time, ticker, price, 'ENTRY' as action 
-            FROM signals 
-            ORDER BY time DESC LIMIT 10
-        """)
-        log_rows = cursor.fetchall()
-        
+        # 2. 최근 신호 로그 (필요 시 활성화, 없으면 빈 리스트)
+        try:
+            cursor.execute("""
+                SELECT time, ticker, price, score 
+                FROM signals 
+                ORDER BY time DESC LIMIT 5
+            """)
+            log_rows = cursor.fetchall()
+        except:
+            log_rows = []
+
         logs = []
         for l in log_rows:
             logs.append({
                 'timestamp': l['time'].strftime('%H:%M:%S'),
-                'action': l['action'], 
                 'ticker': l['ticker'],
                 'price': l['price'],
-                'score': '99' # 로그 테이블에 점수가 없으면 임시값
+                'score': l['score']
             })
             
         cursor.close()
@@ -145,17 +160,17 @@ def get_sts_status():
         })
         
     except psycopg2.errors.UndefinedTable:
-        # 테이블이 아직 안 만들어졌을 경우 (봇이 아직 실행 안 됨)
+        # 봇이 아직 한 번도 실행되지 않아 테이블이 없는 경우
         if conn: conn.rollback()
         return jsonify({'targets': [], 'logs': []})
         
     except Exception as e:
-        print(f"API Error: {e}")
-        return jsonify({'targets': [], 'logs': []})
+        print(f"❌ API Error: {e}")
+        return jsonify({'targets': [], 'logs': [], 'error': str(e)})
         
     finally:
         if conn: 
-            conn.close() # db_pool 대신 conn.close() 사용
+            conn.close()
 
 # --- 7. 인증(Auth) 라우트 ---
 
