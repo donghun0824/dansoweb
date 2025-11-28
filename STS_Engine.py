@@ -621,6 +621,38 @@ class STSPipeline:
                 self.shared_model.load_model(MODEL_FILE)
             except Exception as e: print(f"❌ Load Error: {e}")
 
+            # ==========================================================
+    # [누락된 함수 추가] STSPipeline 클래스 내부 메서드로 추가하세요
+    # ==========================================================
+    async def subscribe(self, ws, params):
+        """Polygon 웹소켓 구독 요청 전송"""
+        try:
+            # 리스트로 들어오면 콤마로 합치기, 문자열이면 그대로 사용
+            if isinstance(params, list):
+                params_str = ",".join(params)
+            else:
+                params_str = params
+                
+            req = {"action": "subscribe", "params": params_str}
+            await ws.send(json.dumps(req))
+            print(f"📡 [Sub] Request sent: {params_str}", flush=True)
+        except Exception as e:
+            print(f"❌ [Sub Error] {e}", flush=True)
+
+    async def unsubscribe(self, ws, params):
+        """Polygon 웹소켓 구독 취소 요청 전송"""
+        try:
+            if isinstance(params, list):
+                params_str = ",".join(params)
+            else:
+                params_str = params
+                
+            req = {"action": "unsubscribe", "params": params_str}
+            await ws.send(json.dumps(req))
+            print(f"🔕 [Unsub] Request sent: {params_str}", flush=True)
+        except Exception as e:
+            print(f"❌ [Unsub Error] {e}", flush=True)
+
     async def connect(self):
         init_db()
         init_firebase()
