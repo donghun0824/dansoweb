@@ -6,6 +6,7 @@ import time
 import numpy as np
 import pandas as pd
 import csv
+import httpx
 import xgboost as xgb
 import psycopg2
 from psycopg2 import pool
@@ -13,6 +14,7 @@ from collections import deque, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
+from concurrent.futures import ThreadPoolExecutor # [V5.3] 추가
 import firebase_admin
 from firebase_admin import credentials, messaging
 
@@ -30,24 +32,25 @@ WS_URI = "wss://socket.polygon.io/stocks"
 # 전략 설정
 STS_TARGET_COUNT = 3
 STS_MIN_VOLUME_DOLLAR = 1e6
-STS_MAX_SPREAD_PCT = 0.8      # [V5.2] 리스크 필터 (0.8% 초과 시 무시)
-STS_MAX_VPIN = 0.55           # [V5.2] 독성 필터
-OBI_LEVELS = 5
+STS_MAX_SPREAD_PCT = 0.8      
+STS_MAX_VPIN = 0.65           # [V5.3] 필터 완화 (0.55 -> 0.65)
+OBI_LEVELS = 20               # [V5.3] 오더북 깊이 확장 (5 -> 20)
 
 # AI & Risk Params
 MODEL_FILE = "sts_xgboost_model.json"
-AI_PROB_THRESHOLD = 0.85      # 격발 기준 확률
-ATR_TRAIL_MULT = 1.5          # 익절 트레일링 계수
-HARD_STOP_PCT = 0.015         # 하드 스탑 (-1.5%)
+AI_PROB_THRESHOLD = 0.85      
+ATR_TRAIL_MULT = 1.5          
+HARD_STOP_PCT = 0.015         
 
 # Logging
 TRADE_LOG_FILE = "sts_trade_log_v5.csv"
 REPLAY_LOG_FILE = "sts_replay_data_v5.csv"
 
 # System Optimization
-DB_UPDATE_INTERVAL = 3.0      # DB 업데이트 주기 (초)
-GC_INTERVAL = 300             # 가비지 컬렉션 주기 (5분)
-GC_TTL = 600                  # 데이터 유효 시간 (10분)
+DB_UPDATE_INTERVAL = 3.0      # 3초
+GC_INTERVAL = 300             
+GC_TTL = 600                  
+THREAD_POOL = ThreadPoolExecutor(max_workers=3) # [V5.3] 알림 전송용 풀
 
 # Global DB Pool
 db_pool = None
@@ -61,8 +64,9 @@ def init_db():
     if not DATABASE_URL: return
     try:
         if db_pool is None:
-            db_pool = psycopg2.pool.SimpleConnectionPool(1, 5, dsn=DATABASE_URL)
-            print("✅ [DB] Connection Pool Initialized")
+            # 봇용 연결 1개 (최적화)
+            db_pool = psycopg2.pool.SimpleConnectionPool(1, 1, dsn=DATABASE_URL)
+            print("✅ [DB] Connection Pool Initialized (Limit: 1)")
             
         conn = db_pool.getconn()
         cursor = conn.cursor()
@@ -80,11 +84,13 @@ def init_db():
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        # [V5.3] score 컬럼 추가
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id SERIAL PRIMARY KEY, 
             ticker TEXT NOT NULL, 
             price REAL NOT NULL, 
+            score REAL, 
             time TIMESTAMP NOT NULL
         );
         """)
@@ -97,6 +103,14 @@ def init_db():
         );
         """)
         conn.commit()
+        
+        # 컬럼 추가 마이그레이션 (기존 테이블 대응)
+        try:
+            cursor.execute("ALTER TABLE signals ADD COLUMN score REAL")
+            conn.commit()
+        except psycopg2.Error:
+            conn.rollback()
+            
         cursor.close()
         db_pool.putconn(conn)
     except Exception as e:
@@ -151,24 +165,27 @@ def update_dashboard_db(ticker, metrics, score, status):
     finally:
         if conn: db_pool.putconn(conn)
 
-def log_signal_to_db(ticker, price):
+def log_signal_to_db(ticker, price, score):
+    """[V5.3] Score 포함 저장"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO signals (ticker, price, time) VALUES (%s, %s, %s)", 
-                       (ticker, price, datetime.now()))
+        cursor.execute("INSERT INTO signals (ticker, price, score, time) VALUES (%s, %s, %s, %s)", 
+                       (ticker, price, float(score), datetime.now()))
         conn.commit()
         cursor.close()
     except Exception as e:
-        print(f"❌ [DB Signal Error] {e}")
+        # print(f"❌ [DB Signal Error] {e}")
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)
 
 # --- FCM Sending Logic ---
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
+    """[V5.3] ThreadPoolExecutor에서 실행될 동기 함수"""
     if not firebase_admin._apps: return
+
     conn = None
     try:
         conn = get_db_connection()
@@ -178,13 +195,15 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         cursor.close()
         
         if not subscribers:
-            db_pool.putconn(conn); return
+            db_pool.putconn(conn)
+            return
 
+        # 알림 내용 구성
         noti_title = f"💎 {ticker} 신호 (점수: {probability_score})"
-        if entry: 
+        if entry and tp and sl:
             noti_body = f"진입: ${entry:.4f} | 익절: ${tp:.4f} | 손절: ${sl:.4f}"
-        else: 
-            noti_body = f"현재가: ${price:.4f}"
+        else:
+            noti_body = f"현재가: ${price:.4f} | AI 점수: {probability_score}점"
 
         data_payload = {
             'type': 'hybrid_signal', 'ticker': ticker, 'price': str(price),
@@ -195,23 +214,23 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         failed_tokens = []
         for row in subscribers:
             token = row[0]
-            user_min_score = row[1] if row[1] is not None else 0
+            user_min_score = row[1] if row[1] is not None else 0 
             if probability_score < user_min_score: continue
 
             try:
-                msg = messaging.Message(
+                message = messaging.Message(
                     token=token,
                     notification=messaging.Notification(title=noti_title, body=noti_body),
                     data=data_payload,
                     android=messaging.AndroidConfig(
                         priority='high', 
-                        notification=messaging.AndroidNotification(channel_id='high_importance_channel', visibility='public', default_sound=True)
+                        notification=messaging.AndroidNotification(channel_id='high_importance_channel', priority='high', default_sound=True, visibility='public')
                     ),
                     apns=messaging.APNSConfig(
                         payload=messaging.APNSPayload(aps=messaging.Aps(alert=messaging.ApsAlert(title=noti_title, body=noti_body), sound="default"))
                     )
                 )
-                messaging.send(msg)
+                messaging.send(message)
             except Exception as e:
                 if "Requested entity was not found" in str(e): failed_tokens.append(token)
         
@@ -227,8 +246,11 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         if conn: db_pool.putconn(conn)
 
 async def send_fcm_notification(ticker, price, probability_score, entry=None, tp=None, sl=None):
+    """[V5.3] ThreadPoolExecutor 사용"""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, partial(_send_fcm_sync, ticker, price, probability_score, entry, tp, sl))
+    # THREAD_POOL 사용으로 메인 루프 블로킹 방지
+    await loop.run_in_executor(THREAD_POOL, partial(_send_fcm_sync, ticker, price, probability_score, entry, tp, sl))
+
 
 # ==============================================================================
 # 3. CORE CLASSES (Analyzer, Selector, Bot)
@@ -249,6 +271,7 @@ class DataLogger:
                 ])
         if not os.path.exists(self.replay_file):
             with open(self.replay_file, 'w', newline='') as f:
+                # [V5.3] vwap, atr 필드 추가
                 csv.writer(f).writerow([
                     'timestamp', 'ticker', 'price', 'vwap', 'atr',
                     'obi', 'tick_speed', 'vpin', 'ai_prob'
@@ -267,6 +290,7 @@ class DataLogger:
 
     def log_replay(self, data):
         with open(self.replay_file, 'a', newline='') as f:
+            # [V5.3] vwap, atr 저장
             csv.writer(f).writerow([
                 data['timestamp'], data['ticker'], data['price'], 
                 f"{data.get('vwap', 0):.4f}", f"{data.get('atr', 0):.4f}",
@@ -321,6 +345,7 @@ class MicrostructureAnalyzer:
         signed_vol = raw_df['s'].values * np.array(signs)
         vpin = ind.compute_vpin(signed_vol)
         
+        # [V5.3] OBI 깊이 20으로 확장
         bids = np.array([q['s'] for q in self.quotes.get('bids', [])[:OBI_LEVELS]])
         asks = np.array([q['s'] for q in self.quotes.get('asks', [])[:OBI_LEVELS]])
         obi = ind.compute_order_book_imbalance(bids, asks)
@@ -336,63 +361,84 @@ class MicrostructureAnalyzer:
         best_ask = self.raw_ticks[-1]['ask']
         spread = (best_ask - best_bid) / best_bid * 100 if best_bid > 0 else 0
 
+        # [V5.3] vwap 값도 리턴 (Replay Log 저장용)
         return {
             'obi': obi, 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'],
             'vpin': vpin, 'vwap_dist': vwap_dist,
             'fibo_pos': last['fibo_pos'], 'fibo_dist_382': fibo_dist_382, 'fibo_dist_618': fibo_dist_618,
             'bb_width_norm': last['bb_width_norm'], 'squeeze_flag': last['squeeze_flag'],
             'rv_60': last['rv_60'], 'vol_ratio_60': last['vol_ratio_60'],
-            'spread': spread, 'last_price': last['close'], 'tick_speed': last['tick_speed'], 'timestamp': raw_df.iloc[-1]['t']
+            'spread': spread, 'last_price': last['close'], 'tick_speed': last['tick_speed'], 
+            'timestamp': raw_df.iloc[-1]['t'],
+            'vwap': last['vwap'] # 추가됨
         }
 
 class TargetSelector:
     def __init__(self):
         self.snapshots = {} 
-        self.top_targets = []
         self.last_gc_time = time.time()
 
     def update(self, agg_data):
         t = agg_data['sym']
+        # 초기화 시 'start_price' (시가 혹은 최초 발견가) 저장
         if t not in self.snapshots: 
-            self.snapshots[t] = {'h': deque(maxlen=60), 'l': deque(maxlen=60), 
-                                 'c': deque(maxlen=60), 'v': deque(maxlen=60),
-                                 'last_updated': time.time()}
+            self.snapshots[t] = {
+                'o': agg_data['o'], 'h': agg_data['h'], 'l': agg_data['l'], 
+                'c': agg_data['c'], 'v': 0, 
+                'start_price': agg_data['o'], # 등락률 계산 기준점
+                'last_updated': time.time()
+            }
         
-        s = self.snapshots[t]
-        s['h'].append(agg_data['h'])
-        s['l'].append(agg_data['l'])
-        s['c'].append(agg_data['c'])
-        s['v'].append(agg_data['v'])
-        s['last_updated'] = time.time()
+        d = self.snapshots[t]
+        d['c'] = agg_data['c']
+        d['h'] = max(d['h'], agg_data['h'])
+        d['l'] = min(d['l'], agg_data['l'])
+        d['v'] += agg_data['v'] # 누적 거래량
+        d['last_updated'] = time.time()
 
     def get_atr(self, ticker):
-        if ticker not in self.snapshots: return 0.05
-        d = self.snapshots[ticker]
-        return ind.compute_atr(list(d['h']), list(d['l']), list(d['c']))
+        if ticker in self.snapshots:
+            d = self.snapshots[ticker]
+            # 간이 ATR 계산 (고가-저가)
+            return (d['h'] - d['l']) * 0.1 
+        return 0.05
 
-    def rank_targets(self):
+    # [수정] 3분 주기: 등락률 기준 Top 10 후보군 선정
+    def get_top_gainers_candidates(self, limit=10):
         scored = []
+        now = time.time()
         for t, d in self.snapshots.items():
-            if len(d['c']) < 10: continue
-            rv = ind.compute_realized_vol(np.array(d['c']))
-            vol = np.sum(d['v'])
-            scored.append((t, rv * 1000 + vol * 0.0001))
+            if now - d['last_updated'] > 600: continue # 죽은 데이터 제외
+            
+            # 등락률 계산
+            change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
+            
+            # 최소 거래량 필터 (노이즈 제거)
+            if d['v'] < 1000: continue 
+            
+            scored.append((t, change_pct))
+        
+        # 등락률 내림차순 정렬
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [x[0] for x in scored[:limit]]
+
+    # [수정] 1분 주기: 후보군 중 거래량/활동성 Top 3 선정
+    def get_best_snipers(self, candidates, limit=3):
+        scored = []
+        for t in candidates:
+            if t not in self.snapshots: continue
+            d = self.snapshots[t]
+            # 거래량 가중치로 최종 타격 대상 선정
+            scored.append((t, d['v']))
         
         scored.sort(key=lambda x: x[1], reverse=True)
-        return [x[0] for x in scored[:STS_TARGET_COUNT]]
+        return [x[0] for x in scored[:limit]]
 
     def garbage_collect(self):
-        """[Risk 3 해결] 메모리 청소"""
         now = time.time()
         if now - self.last_gc_time < GC_INTERVAL: return
-
-        # print("🧹 [GC] Cleaning memory...", flush=True)
         to_remove = [t for t, d in self.snapshots.items() if now - d['last_updated'] > GC_TTL]
-        
-        for t in to_remove:
-            del self.snapshots[t]
-            
-        # print(f"🧹 [GC] Removed {len(to_remove)} inactive tickers.", flush=True)
+        for t in to_remove: del self.snapshots[t]
         self.last_gc_time = now
 
 class SniperBot:
@@ -408,6 +454,7 @@ class SniperBot:
         self.position = {} 
         self.prob_history = deque(maxlen=5)
         self.last_db_update = 0
+        self.last_logged_state = "WATCHING"
 
     def on_data(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
@@ -418,10 +465,9 @@ class SniperBot:
         m = self.analyzer.get_metrics()
         if not m: return
 
-        # [V5.2] Risk Filter (Spread & VPIN)
+        # [V5.3] 필터 완화 (0.55 -> 0.65)
         if m['spread'] > STS_MAX_SPREAD_PCT or m['vpin'] > STS_MAX_VPIN: return
 
-        # --- AI Inference (상시 수행) ---
         prob = 0.0
         if self.model:
             try:
@@ -433,40 +479,33 @@ class SniperBot:
                 ]])
                 dtest = xgb.DMatrix(input_data)
                 raw_prob = self.model.predict(dtest)[0]
-                
                 self.prob_history.append(raw_prob)
                 prob = sum(self.prob_history) / len(self.prob_history)
-            except Exception as e:
-                # print(f"⚠️ AI Error: {e}")
-                pass
+            except: pass
 
-       # [Risk 2 해결] DB Throttling (안전장치 강화)
+        # DB Throttling
         now = time.time()
+        state_changed = (self.state != self.last_logged_state)
+        is_hot = (prob * 100) >= 60
+        update_interval = 2.0 if is_hot else 10.0
         
-        # 1. 평소(WATCHING)에는 3초(DB_UPDATE_INTERVAL)마다 저장
-        # 2. 급할 때(AIMING/FIRED)는 0.5초마다 저장 (0.1초마다 쏘면 DB 죽음)
-        is_urgent = (self.state != "WATCHING")
-        time_passed = (now - self.last_db_update > DB_UPDATE_INTERVAL)
-        
-        if time_passed or (is_urgent and (now - self.last_db_update > 0.5)):
-            # prob가 계산 안 된 상태일 수 있으므로 안전 처리
+        if state_changed or (now - self.last_db_update > update_interval):
             score_to_save = prob * 100 if 'prob' in locals() else 0
             update_dashboard_db(self.ticker, m, score_to_save, self.state)
             self.last_db_update = now
-
-        # Replay Log
+            self.last_logged_state = self.state
+        
+        # [V5.3] Replay Log에 ATR, VWAP 저장 (m에 포함됨)
         self.logger.log_replay({
             'timestamp': m['timestamp'], 'ticker': self.ticker, 
-            'price': m['last_price'], 'vwap': self.vwap, 'atr': self.atr,
+            'price': m['last_price'], 'vwap': m['vwap'], 'atr': self.atr,
             'obi': m['obi'], 'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 
             'ai_prob': prob
         })
 
-        # --- FSM Logic ---
+        # --- FSM ---
         if self.state == "WATCHING":
             dist = (m['last_price'] - self.vwap) / self.vwap * 100
-            
-            # [V5.2] 진입 조건 강화 (VWAP + Squeeze + Accel)
             cond_dist = 0.2 < dist < 2.0
             cond_sqz = m['squeeze_flag'] == 1
             cond_accel = m['tick_accel'] > 0
@@ -476,7 +515,9 @@ class SniperBot:
                 print(f"👀 [조준] {self.ticker} (Prob:{prob:.2f} | Sqz:{cond_sqz})", flush=True)
 
         elif self.state == "AIMING":
-            if m['tick_accel'] < -5 or prob < 0.6:
+            # [V5.3] Fast Fail 조건 완화
+            # 틱 가속도가 조금 줄어도 확률이 어느 정도 되면 버팀
+            if m['tick_accel'] < -3 and prob < 0.55:
                 self.state = "WATCHING"
                 return
 
@@ -495,9 +536,12 @@ class SniperBot:
             'atr': self.atr
         }
         
-        log_signal_to_db(self.ticker, price)
+        # [V5.3] Score 포함 저장
+        log_signal_to_db(self.ticker, price, prob*100)
         
         tp_price = price + (self.atr * ATR_TRAIL_MULT)
+        
+        # [V5.3] ThreadPool로 알림 전송
         asyncio.create_task(send_fcm_notification(
             self.ticker, price, int(prob*100), 
             entry=price, tp=tp_price, sl=self.position['sl']
@@ -505,7 +549,7 @@ class SniperBot:
         
         self.logger.log_trade({
             'ticker': self.ticker, 'action': 'ENTRY', 'price': price, 'ai_prob': prob,
-            'obi': metrics['obi'], 'obi_mom': metrics['obi_momentum'],
+            'obi': metrics['obi'], 'obi_mom': metrics['obi_mom'],
             'tick_accel': metrics['tick_accel'], 'vpin': metrics['vpin'], 
             'vwap_dist': metrics['vwap_dist'], 'profit': 0
         })
@@ -533,10 +577,13 @@ class SniperBot:
 class STSPipeline:
     def __init__(self):
         self.selector = TargetSelector()
-        self.snipers = {}
-        self.last_agg = {}
+        self.snipers = {}       # 현재 활성 Top 3 봇
+        self.candidates = []    # Top 10 후보군 리스트
         self.last_quotes = {}
         self.logger = DataLogger()
+        
+        # [핵심 변경] 수신과 처리를 분리할 큐 생성
+        self.msg_queue = asyncio.Queue(maxsize=100000)
         
         self.shared_model = None
         if os.path.exists(MODEL_FILE):
@@ -544,10 +591,7 @@ class STSPipeline:
             try:
                 self.shared_model = xgb.Booster()
                 self.shared_model.load_model(MODEL_FILE)
-            except Exception as e:
-                print(f"❌ Model Load Failed: {e}", flush=True)
-        else:
-            print(f"⚠️ [Warning] Model file not found!", flush=True)
+            except Exception as e: print(f"❌ Load Error: {e}")
 
     async def connect(self):
         init_db()
@@ -557,76 +601,120 @@ class STSPipeline:
             print("❌ Error: No API Key", flush=True)
             return
 
-        # [Risk 1 해결] 재연결 로직
-        retry_delay = 1
         while True:
             try:
                 async with websockets.connect(WS_URI, ping_interval=20, ping_timeout=20) as ws:
-                    print("✅ [STS V5.2] Final Engine Started", flush=True)
-                    retry_delay = 1
+                    print("✅ [STS V5.3] Pipeline Started with Scheduler", flush=True)
                     
                     await ws.send(json.dumps({"action": "auth", "params": POLYGON_API_KEY}))
-                    await ws.recv()
+                    _ = await ws.recv()
+
+                    # 1. 초기 구독: 전체 Agg(A.*)만 구독하여 Top 10 발굴 시작
                     await self.subscribe(ws, ["A.*"])
-                    await self.msg_handler(ws)
-                    
-            except (websockets.ConnectionClosed, asyncio.TimeoutError) as e:
-                print(f"⚠️ Connection Lost: {e}. Reconnecting in {retry_delay}s...", flush=True)
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 60)
+
+                    # 2. 태스크 분리 실행 (Producer는 아래 메인 루프에서 실행)
+                    # Consumer (데이터 처리 워커)
+                    worker_task = asyncio.create_task(self.worker())
+                    # 3분 주기 스캐너 (Top 10)
+                    scanner_task = asyncio.create_task(self.task_global_scan())
+                    # 1분 주기 매니저 (Top 3 & 구독 관리)
+                    manager_task = asyncio.create_task(self.task_focus_manager(ws))
+
+                    # 3. 메인 루프: 데이터 수신 (Producer) - 멈추지 않음
+                    await self.producer(ws)
+
+            except (websockets.ConnectionClosed, asyncio.TimeoutError):
+                print("⚠️ Reconnecting...", flush=True)
+                await asyncio.sleep(2)
             except Exception as e:
                 print(f"❌ Critical Error: {e}", flush=True)
                 await asyncio.sleep(5)
 
-    async def subscribe(self, ws, params):
-        await ws.send(json.dumps({"action": "subscribe", "params": ",".join(params)}))
-
-    async def unsubscribe(self, ws, params):
-        await ws.send(json.dumps({"action": "unsubscribe", "params": ",".join(params)}))
-
-    async def manage_snipers(self, ws, new_targets):
-        if not new_targets: return
-        curr, new = set(self.snipers.keys()), set(new_targets)
-        
-        to_del = curr - new
-        if to_del:
-            await self.unsubscribe(ws, [f"T.{t},Q.{t}" for t in to_del])
-            for t in to_del: del self.snipers[t]
-            
-        to_add = new - curr
-        if to_add:
-            await self.subscribe(ws, [f"T.{t},Q.{t}" for t in to_add])
-            for t in to_add: 
-                self.snipers[t] = SniperBot(t, self.logger, self.selector, self.shared_model) 
-
-    async def msg_handler(self, ws):
-        while True:
+    # [신규] Producer: 데이터를 큐에 넣기만 함 (논블로킹)
+    async def producer(self, ws):
+        async for msg in ws:
             try:
-                msg = await ws.recv()
+                self.msg_queue.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass # 큐가 꽉 차면 최신 데이터를 위해 드랍
+
+    # [신규] Consumer: 큐에서 꺼내서 파싱 및 처리
+    async def worker(self):
+        while True:
+            msg = await self.msg_queue.get()
+            try:
+                # [위치 이동] JSON 파싱을 여기서 수행
                 data = json.loads(msg)
+                
                 for item in data:
                     ev, t = item.get('ev'), item.get('sym')
+                    
                     if ev == 'A': 
-                        self.selector.update(item)
-                        self.last_agg[t] = item
+                        self.selector.update(item) # 전체 감시
+                    
                     elif ev == 'Q':
-                        self.last_quotes[t] = {'bids': [{'p':item.get('bp'),'s':item.get('bs')}], 
-                                               'asks': [{'p':item.get('ap'),'s':item.get('as')}]}
+                        self.last_quotes[t] = {
+                            'bids': [{'p':item.get('bp'),'s':item.get('bs')}], 
+                            'asks': [{'p':item.get('ap'),'s':item.get('as')}]
+                        }
+                    
+                    # Top 3 종목만 정밀 타격 로직(AI) 수행
                     elif ev == 'T' and t in self.snipers:
-                        self.snipers[t].on_data(item, self.last_quotes.get(t,{'bids':[],'asks':[]}), self.last_agg.get(t))
-                
-                new = self.selector.rank_targets()
-                if new: await self.manage_snipers(ws, new)
-                
-                # [Risk 3 해결] GC 호출
-                self.selector.garbage_collect()
-                
-            except Exception as e:
-                # print(f"Error: {e}")
-                break
+                        self.snipers[t].on_data(
+                            item, 
+                            self.last_quotes.get(t, {'bids':[],'asks':[]}), 
+                            item 
+                        )
+            except Exception: pass
+            finally:
+                self.msg_queue.task_done()
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(STSPipeline().connect())
-    except KeyboardInterrupt:
-        print("🛑 System Halted")
+    # [신규] 3분 주기: Top 10 후보군 갱신
+    async def task_global_scan(self):
+        print("🔭 [Scanner] Started (3 min interval)", flush=True)
+        while True:
+            try:
+                await asyncio.sleep(180) # 3분 대기
+                self.candidates = self.selector.get_top_gainers_candidates(limit=10)
+                print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
+                self.selector.garbage_collect()
+            except Exception: pass
+
+    async def task_focus_manager(self, ws, candidates=None): # candidates 인자 유연하게 처리
+        """[1분 주기] Top 10 중 Top 3 선정 및 구독 변경"""
+        print("🎯 [Manager] Started (1 min interval)", flush=True)
+        while True:
+            try:
+                await asyncio.sleep(60) # 1분 대기
+                if not self.candidates: continue
+
+                # Top 10 후보군 중에서 Top 3 선정
+                target_top3 = self.selector.get_best_snipers(self.candidates, limit=STS_TARGET_COUNT)
+                
+                current_set = set(self.snipers.keys())
+                new_set = set(target_top3)
+                
+                # 1. 탈락한 종목 -> 구독 해지 (수정됨)
+                to_remove = current_set - new_set
+                if to_remove:
+                    print(f"👋 Detach: {list(to_remove)}", flush=True)
+                    # [FIX] T.* 와 Q.*를 명확히 분리하여 리스트 병합
+                    unsubscribe_params = [f"T.{t}" for t in to_remove] + [f"Q.{t}" for t in to_remove]
+                    await self.unsubscribe(ws, unsubscribe_params)
+                    
+                    for t in to_remove: 
+                        if t in self.snipers: del self.snipers[t]
+
+                # 2. 신규 진입 종목 -> 구독 시작 (수정됨)
+                to_add = new_set - current_set
+                if to_add:
+                    print(f"🚀 Attach: {list(to_add)}", flush=True)
+                    # [FIX] T.* 와 Q.*를 명확히 분리하여 리스트 병합
+                    subscribe_params = [f"T.{t}" for t in to_add] + [f"Q.{t}" for t in to_add]
+                    await self.subscribe(ws, subscribe_params)
+                    
+                    for t in to_add:
+                        self.snipers[t] = SniperBot(t, self.logger, self.selector, self.shared_model)
+
+            except Exception as e:
+                print(f"❌ Manager Error: {e}")
