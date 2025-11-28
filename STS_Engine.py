@@ -629,36 +629,40 @@ class SniperBot:
 
         # [SniperBot on_data 함수 내부 - AI 예측 부분]
 
+        # [SniperBot on_data 함수 내부 - 수정된 AI 예측 부분]
+
         # AI 예측
         prob = 0.0
         if self.model:
             try:
-                # 입력 데이터 구성 (순서가 학습할 때랑 똑같아야 함!)
+                # 🔥 [수정] 모델이 모르는 'fibo_dist_618' 제거! (총 11개)
                 features = [
                     m['obi'], m['obi_mom'], m['tick_accel'], m['vpin'], m['vwap_dist'],
-                    m['fibo_pos'], m['fibo_dist_382'], m['fibo_dist_618'], 
+                    m['fibo_pos'], m['fibo_dist_382'], 
+                    # m['fibo_dist_618'],  <-- 이거 때문에 에러난 겁니다. 삭제!
                     m['bb_width_norm'], m['squeeze_flag'],
                     m['rv_60'], m['vol_ratio_60']
                 ]
                 
-                # NaN이나 Infinity가 있는지 체크 (이게 있으면 XGBoost가 뻗음)
                 if any(np.isnan(x) or np.isinf(x) for x in features):
-                    print(f"⚠️ [AI Warning] {self.ticker}: Bad Input Data -> {features}", flush=True)
+                    print(f"⚠️ [AI Warning] {self.ticker}: Bad Input Data", flush=True)
                 else:
                     input_data = np.array([features])
+                    
+                    # 🔥 [수정] 여기 이름 목록에서도 'fibo_dist_618' 제거!
                     dtest = xgb.DMatrix(input_data, feature_names=[
                         'obi', 'obi_mom', 'tick_accel', 'vpin', 'vwap_dist',
-                        'fibo_pos', 'fibo_dist_382', 'fibo_dist_618',
+                        'fibo_pos', 'fibo_dist_382', 
+                        # 'fibo_dist_618', <-- 삭제
                         'bb_width_norm', 'squeeze_flag', 'rv_60', 'vol_ratio_60'
                     ])
+                    
                     raw_prob = self.model.predict(dtest)[0]
                     self.prob_history.append(raw_prob)
                     prob = sum(self.prob_history) / len(self.prob_history)
 
             except Exception as e:
-                # 🔥 [여기가 핵심] 제발 에러 좀 알려줘!
                 print(f"💀 [AI CRASH] {self.ticker}: {e}", flush=True)
-                # import traceback; traceback.print_exc() # 상세 로그 필요하면 주석 해제
                 pass
         else:
             # 모델이 없으면 없다고 말해!
