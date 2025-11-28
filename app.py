@@ -83,6 +83,72 @@ def login_page():
 def dashboard_page():
     return render_template('dashboard.html', user=current_user)
 
+@app.route('/api/sts/status')
+def get_sts_status():
+    conn = None
+    try:
+        conn = get_db_connection() # 기존 함수 재사용 (Pool 없이 직접 연결)
+        cursor = conn.cursor(cursor_factory=RealDictCursor) # 딕셔너리로 받기 위해 수정
+        
+        # 1. 활성 타겟 정보 가져오기
+        # (테이블이 없으면 에러나지 않게 예외처리 or 테이블 생성 확인 필요)
+        cursor.execute("""
+            SELECT ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status 
+            FROM sts_live_targets 
+            ORDER BY ai_score DESC
+        """)
+        rows = cursor.fetchall()
+        
+        targets = []
+        for r in rows:
+            targets.append({
+                'ticker': r['ticker'],
+                'price': r['price'],
+                'ai_prob': (r['ai_score'] or 0) / 100.0, # None 방지
+                'obi': r['obi'],
+                'vpin': r['vpin'],
+                'tick_speed': r['tick_speed'],
+                'vwap_dist': r['vwap_dist'],
+                'status': r['status']
+            })
+            
+        # 2. 최근 로그 가져오기 (기존 signals 테이블 활용)
+        cursor.execute("""
+            SELECT time, ticker, price, 'ENTRY' as action 
+            FROM signals 
+            ORDER BY time DESC LIMIT 10
+        """)
+        log_rows = cursor.fetchall()
+        
+        logs = []
+        for l in log_rows:
+            logs.append({
+                'timestamp': l['time'].strftime('%H:%M:%S'),
+                'action': l['action'], 
+                'ticker': l['ticker'],
+                'price': l['price'],
+                'score': '99' # 로그 테이블에 점수가 없으면 임시값
+            })
+            
+        cursor.close()
+        
+        return jsonify({
+            'targets': targets,
+            'logs': logs
+        })
+        
+    except psycopg2.errors.UndefinedTable:
+        # 테이블이 아직 안 만들어졌을 경우 (봇이 아직 실행 안 됨)
+        if conn: conn.rollback()
+        return jsonify({'targets': [], 'logs': []})
+        
+    except Exception as e:
+        print(f"API Error: {e}")
+        return jsonify({'targets': [], 'logs': []})
+        
+    finally:
+        if conn: 
+            conn.close() # db_pool 대신 conn.close() 사용
 
 # --- 7. 인증(Auth) 라우트 ---
 
