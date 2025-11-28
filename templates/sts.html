@@ -6,8 +6,8 @@
     <title>DANSO SNIPER CONSOLE</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='sts.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/sts.css') }}">
 </head>
 <body>
     
@@ -156,37 +156,9 @@
                 </div>
             </div>
 
-        </div> </div>
+        </div> 
 
-    <script>
-        // 시계 및 MOCK 데이터 로직 (테스트용)
-        function updateTime() {
-            document.getElementById('clock').innerText = new Date().toLocaleTimeString();
-        }
-        setInterval(updateTime, 1000); updateTime();
-
-        // (실제 데이터 연동 시 여기에 fetch 로직 추가)
-        const mockRow = `
-            <tr>
-                <td><span class="ticker-badge">$NVVE</span></td>
-                <td class="mono-text">$4.20</td>
-                <td class="mono-text text-green">92.5</td>
-                <td><div class="mini-bar"><div style="width:80%"></div></div></td>
-                <td><span class="text-dim">Low</span></td>
-                <td><span class="mono-text">Fib 0.618</span></td>
-                <td><span class="status-badge aiming">AIMING</span></td>
-            </tr>
-            <tr>
-                <td><span class="ticker-badge">$TSLA</span></td>
-                <td class="mono-text">$340.10</td>
-                <td class="mono-text text-green">88.1</td>
-                <td><div class="mini-bar"><div style="width:60%"></div></div></td>
-                <td><span class="text-dim">Med</span></td>
-                <td><span class="mono-text">Squeeze</span></td>
-                <td><span class="status-badge watching">WATCHING</span></td>
-            </tr>
-        `;
-        document.getElementById('target-table-body').innerHTML = mockRow;
-    </script>
+    <script src="{{ url_for('static', filename='js/sts.js') }}"></script>
+    
 </body>
 </html>
