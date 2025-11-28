@@ -133,28 +133,29 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// 2. 데이터 가져오기 (실제 API 호출)
 async function updateDashboard() {
     try {
-        // 작성하신 API 엔드포인트 호출
         const res = await fetch('/api/sts/status');
         if (!res.ok) throw new Error('Network Error');
         
         const data = await res.json();
-        
-        // 데이터가 없으면 종료
         if (!data || !data.targets) return;
 
-        // (A) Top Candidates Table 렌더링
         renderTable(data.targets);
         
-        // (B) 1위 종목에 대한 Microstructure 패널 업데이트
         if (data.targets.length > 0) {
             renderMicroPanel(data.targets[0]);
         }
         
-        // (C) 로그 데이터 처리 (필요시 구현)
-        // console.log("Recent Logs:", data.logs);
+        // --- 아까 밖으로 튀어나와 있던 코드를 여기로 이동 ---
+        // 임시로 발견된 종목 수를 Signals에 표시
+        const signalEl = document.getElementById('session-signals');
+        if(signalEl) signalEl.innerText = data.targets.length;
+        
+        // 승률 표시
+        const winRateEl = document.getElementById('session-winrate');
+        if(winRateEl) winRateEl.innerText = "CALC...";
+        // ------------------------------------------------
 
     } catch (e) {
         console.error("Dashboard Update Error:", e);
@@ -218,13 +219,19 @@ function renderTable(targets) {
     });
 }
 
+// [수정 1] renderMicroPanel 함수: 안전장치(if) 추가
 function renderMicroPanel(topItem) {
+    // 방어 코드: 패널이 없으면 실행 중단
+    if (!els.microPanel) {
+        console.warn("HTML에 'micro-panel' ID를 가진 요소가 없습니다.");
+        return;
+    }
+
     // 1. [기존 기능] 왼쪽 상단 Microstructure 패널 업데이트
     const obi = (topItem.obi || 0).toFixed(2);
     const vpin = (topItem.vpin || 0).toFixed(2);
     const speed = topItem.tick_speed || 0;
 
-    // 패널 HTML 직접 주입
     els.microPanel.innerHTML = `
         <div class="micro-row">
             <span>TARGET FOCUS</span>
@@ -250,17 +257,13 @@ function renderMicroPanel(topItem) {
         </div>
     `;
 
-    // 2. [추가 기능] Risk Engine 패널 업데이트 (가짜 데이터 제거 및 실시간 연동)
-    // 현재가(price)가 있으면 그것을 쓰고, 없으면 0 처리
+    // 2. Risk Engine 패널 업데이트 (요소 존재 여부 체크)
     const price = parseFloat(topItem.price || 0);
-    const prob = (topItem.ai_prob || 0) * 100; // 0.85 -> 85
-    
-    // 단순화된 시뮬레이션 계산 (실제 봇 로직과 비슷하게 화면에 보여주기 위함)
-    const atrSim = price * 0.005; // 0.5% 변동성 가정
+    const prob = (topItem.ai_prob || 0) * 100;
+    const atrSim = price * 0.005;
     const target = price + (atrSim * 1.5);
     const stop = price - atrSim;
 
-    // HTML에 id="risk-entry" 등을 추가했으므로 여기서 값을 넣어줌
     const entryEl = document.getElementById('risk-entry');
     if (entryEl) entryEl.innerText = '$' + price.toFixed(2);
 
@@ -273,18 +276,14 @@ function renderMicroPanel(topItem) {
     const probEl = document.getElementById('risk-prob');
     if (probEl) {
         probEl.innerText = prob.toFixed(1) + '%';
-        // 확률 80% 이상이면 초록색 강조
-        if(prob >= 80) probEl.className = "value mono-text text-green";
-        else probEl.className = "value mono-text";
+        probEl.className = prob >= 80 ? "value mono-text text-green" : "value mono-text";
     }
 
-    // 3. [추가 기능] Spike Detected 업데이트 (Heat Map 아래)
+    // 3. Spike Detected 업데이트
     const spikeEl = document.getElementById('spike-list');
-    if (spikeEl) {
-        // 현재 1위 종목 이름 표시
-        spikeEl.innerText = topItem.ticker; 
-    }
+    if (spikeEl) spikeEl.innerText = topItem.ticker; 
 }
+
 // 유틸리티: VPIN 기반 리스크 레벨 텍스트
 function calculateRiskLevel(vpin) {
     if (vpin > 0.6) return 'Extreme';
@@ -296,13 +295,3 @@ function calculateRiskLevel(vpin) {
 // 엔진 시작 (1.5초마다 데이터 갱신)
 setInterval(updateDashboard, 1500);
 updateDashboard();
-// updateDashboard 함수 내부, renderTable 호출 직후에 추가
-if (data.targets) {
-    // 임시로 발견된 종목 수를 Signals에 표시
-    const signalEl = document.getElementById('session-signals');
-    if(signalEl) signalEl.innerText = data.targets.length;
-    
-    // 승률은 아직 계산 로직이 없으므로 'CALC...'로 표시
-    const winRateEl = document.getElementById('session-winrate');
-    if(winRateEl) winRateEl.innerText = "CALC...";
-}
