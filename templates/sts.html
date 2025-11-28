@@ -1,37 +1,192 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
-    <link rel="stylesheet" href="/static/css/sts.css">
-    <title>STS Sniper Console</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DANSO SNIPER CONSOLE</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='sts.css') }}">
 </head>
 <body>
-    <nav class="landing-header">
-        <div class="header-logo"><img src="/static/images/danso_logo.png" alt="Danso"></div>
-        <div class="header-nav">
-            <a href="/dashboard" class="nav-button secondary">Dashboard</a>
-            <a href="/sts" class="nav-button primary">Sniper Console</a> </div>
-    </nav>
+    
+    <div id="heroCanvas"></div>
 
-    <div class="sts-container">
-        <div class="sts-header">
-            <div class="system-status">
-                <span class="status-dot"></span> SYSTEM ONLINE
+    <div class="main-container full-width">
+        <header class="sts-header">
+            <div class="brand-logo">
+                <i class="fa-solid fa-crosshairs fa-spin-pulse" style="--fa-animation-duration: 3s;"></i>
+                DANSO <span>SNIPER</span>
             </div>
-            <div class="latency-info">📶 12ms</div>
-            <div class="last-update">Last Update: <span id="last-update-time">--:--:--</span></div>
-        </div>
-
-        <div class="sniper-grid" id="sniper-grid">
-            <div class="loading-message">📡 Connecting to Sniper Network...</div>
-        </div>
-
-        <div class="log-panel">
-            <div class="log-title">📜 Live Trade Log</div>
-            <div class="log-content" id="trade-log">
+            <div class="system-status">
+                <div class="status-item">
+                    <span class="dot blink"></span> ENGINE LIVE
                 </div>
-        </div>
-    </div>
+                <div class="status-item">
+                    <i class="fa-solid fa-server"></i> <span class="mono-text">12ms</span>
+                </div>
+                <div class="status-item">
+                    <i class="fa-solid fa-database"></i> DB CONNECTED
+                </div>
+                <div class="status-item time-display">
+                    <span id="clock" class="mono-text">--:--:--</span>
+                </div>
+            </div>
+        </header>
 
-    <script src="/static/js/sts.js"></script>
+        <div class="sts-grid">
+            
+            <div class="glass-card full-span">
+                <div class="card-header">
+                    <h3><i class="fa-solid fa-list-ol"></i> TOP-3 REAL-TIME CANDIDATES</h3>
+                    <span class="badge-ai">AI MODEL: XGBOOST_V5.3</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="sts-table">
+                        <thead>
+                            <tr>
+                                <th>TICKER</th>
+                                <th>PRICE</th>
+                                <th>AI PROB</th>
+                                <th>MICRO STRUCTURE</th>
+                                <th>RISK / VOL</th>
+                                <th>TARGETING</th>
+                                <th>STATE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="target-table-body">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="col-left">
+                <div class="glass-card mb-20">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-magnifying-glass-chart"></i> LIVE MICROSTRUCTURE</h3>
+                    </div>
+                    <div id="micro-panel" class="panel-content">
+                        <div class="micro-row">
+                            <span>OBI (Imbalance)</span>
+                            <div class="progress-wrapper">
+                                <span class="val-text mono-text text-green">+0.75</span>
+                                <div class="progress-bg"><div class="progress-fill green" style="width: 75%;"></div></div>
+                            </div>
+                        </div>
+                        <div class="micro-row">
+                            <span>VPIN (Toxic Flow)</span>
+                            <div class="progress-wrapper">
+                                <span class="val-text mono-text text-warn">0.62</span>
+                                <div class="progress-bg"><div class="progress-fill warn" style="width: 62%;"></div></div>
+                            </div>
+                        </div>
+                        <div class="micro-item">
+                            <span>Tape Speed</span>
+                            <span class="mono-text text-highlight">🚀 High (120/s)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-calculator"></i> RISK ENGINE</h3>
+                    </div>
+                    <div class="risk-grid">
+                        <div class="risk-item">
+                            <span class="label">ENTRY</span>
+                            <span class="value mono-text">$345.20</span>
+                        </div>
+                        <div class="risk-item">
+                            <span class="label">TARGET (ATR 1.5x)</span>
+                            <span class="value mono-text text-green">$348.50</span>
+                        </div>
+                        <div class="risk-item">
+                            <span class="label">HARD STOP</span>
+                            <span class="value mono-text text-dim">$340.10</span>
+                        </div>
+                        <div class="risk-item highlight">
+                            <span class="label">WIN PROB</span>
+                            <span class="value mono-text">68.5%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-right">
+                <div class="glass-card mb-20">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-trophy"></i> SESSION PERF</h3>
+                    </div>
+                    <div class="stat-flex">
+                        <div class="stat-box">
+                            <div class="label">WIN RATE</div>
+                            <div class="val mono-text text-green">72%</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="label">SIGNALS</div>
+                            <div class="val mono-text">14</div>
+                        </div>
+                    </div>
+                    <div class="chart-mini">
+                        <div class="label">STRATEGY DIST</div>
+                        <div class="bar-chart">
+                            <div class="bar" style="height:30%"></div>
+                            <div class="bar" style="height:50%"></div>
+                            <div class="bar active" style="height:80%"></div>
+                            <div class="bar" style="height:60%"></div>
+                            <div class="bar" style="height:20%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-fire"></i> HEAT-MAP</h3>
+                    </div>
+                    <div class="heatmap-grid">
+                        <div class="heat-block hot">TECH</div>
+                        <div class="heat-block warm">BIO</div>
+                        <div class="heat-block cool">EV</div>
+                    </div>
+                    <div class="micro-item mt-15">
+                        <span class="label">SPIKE DETECTED</span>
+                        <span class="mono-text text-green">NVVE, OSRH</span>
+                    </div>
+                </div>
+            </div>
+
+        </div> </div>
+
+    <script>
+        // 시계 및 MOCK 데이터 로직 (테스트용)
+        function updateTime() {
+            document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+        }
+        setInterval(updateTime, 1000); updateTime();
+
+        // (실제 데이터 연동 시 여기에 fetch 로직 추가)
+        const mockRow = `
+            <tr>
+                <td><span class="ticker-badge">$NVVE</span></td>
+                <td class="mono-text">$4.20</td>
+                <td class="mono-text text-green">92.5</td>
+                <td><div class="mini-bar"><div style="width:80%"></div></div></td>
+                <td><span class="text-dim">Low</span></td>
+                <td><span class="mono-text">Fib 0.618</span></td>
+                <td><span class="status-badge aiming">AIMING</span></td>
+            </tr>
+            <tr>
+                <td><span class="ticker-badge">$TSLA</span></td>
+                <td class="mono-text">$340.10</td>
+                <td class="mono-text text-green">88.1</td>
+                <td><div class="mini-bar"><div style="width:60%"></div></div></td>
+                <td><span class="text-dim">Med</span></td>
+                <td><span class="mono-text">Squeeze</span></td>
+                <td><span class="status-badge watching">WATCHING</span></td>
+            </tr>
+        `;
+        document.getElementById('target-table-body').innerHTML = mockRow;
+    </script>
 </body>
 </html>

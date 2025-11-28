@@ -1,137 +1,189 @@
-/* sts.css - Sniper Console Style (Consistent with Landing Page) */
+/* --- STS ENGINE CONSOLE STYLE --- */
 
-/* 1. 폰트 및 기본 설정 (Pro Design) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=JetBrains+Mono:wght@500&display=swap');
-
-:root {
-    /* 랜딩 페이지와 동일한 네온 컬러 팔레트 */
-    --neon-green: #00ff9d;
-    --neon-cyan: #00e0ff;
-    --glass-bg: rgba(13, 18, 30, 0.65);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-highlight: rgba(255, 255, 255, 0.15);
-    --deep-space: #05070a;
-    --text-primary: #FFFFFF;
-    --text-secondary: #94a3b8;
+/* 1. Global Layout overrides for STS */
+.main-container.full-width {
+    max-width: 1400px; /* 대시보드는 더 넓게 */
+    padding: 20px;
 }
 
-/* 전체 테마 */
-.stApp {
-    background-color: var(--deep-space);
-    color: var(--text-primary);
-    font-family: 'Inter', sans-serif;
-    -webkit-font-smoothing: antialiased;
-}
-
-/* 2. 메트릭 카드 (패널) - 글래스모피즘 적용 */
-.metric-card {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-top: 1px solid var(--glass-highlight);
-    border-radius: 16px; /* 둥근 모서리 강화 */
-    padding: 24px;
-    margin-bottom: 20px;
-    
-    /* 글래스 효과 */
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-    
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.metric-card:hover {
-    transform: translateY(-5px);
-    border-color: var(--neon-green);
-    box-shadow: 0 0 20px rgba(0, 255, 157, 0.2);
-}
-
-/* 3. 헤더 (티커 & 가격) */
-.header-container {
+/* Header Specific */
+.sts-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-primary);
 }
 
-.ticker-name {
-    font-family: 'Inter', sans-serif;
-    font-size: 28px;
+.brand-logo {
+    font-family: var(--font-primary);
+    font-size: 24px;
     font-weight: 800;
-    color: var(--neon-green); /* 네온 그린 */
-    letter-spacing: -0.5px;
-    text-shadow: 0 0 10px rgba(0, 255, 157, 0.3);
+    font-style: italic;
+    color: #fff;
+    text-shadow: 0 0 15px rgba(0, 255, 157, 0.4);
 }
+.brand-logo span { color: var(--neon-green); }
 
-.current-price {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 20px;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-/* 4. 서브 정보 (VWAP 등) */
-.sub-info {
-    font-family: 'JetBrains Mono', monospace;
+.system-status {
+    display: flex; gap: 24px;
     font-size: 13px;
     color: var(--text-secondary);
-    margin-bottom: 20px;
-    text-align: right;
+}
+.status-item { display: flex; align-items: center; gap: 8px; }
+.dot {
+    width: 8px; height: 8px; background: var(--neon-green);
+    border-radius: 50%; box-shadow: 0 0 8px var(--neon-green);
+}
+.blink { animation: blinker 2s infinite; }
+@keyframes blinker { 50% { opacity: 0.3; } }
+
+/* 2. Grid System */
+.sts-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr; /* 1.5 : 1 비율 */
+    gap: 20px;
+}
+.full-span { grid-column: 1 / -1; } /* 첫번째 줄은 꽉 차게 */
+
+/* Mobile Responsive */
+@media (max-width: 900px) {
+    .sts-grid { grid-template-columns: 1fr; }
 }
 
-/* 5. 상태 박스 (Sniper Signal) */
-.status-box {
-    padding: 14px;
-    border-radius: 12px;
-    text-align: center;
-    font-weight: 700;
-    font-size: 15px;
-    margin-top: 20px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+/* 3. Glass Card & Typography Utils */
+.glass-card {
+    background: var(--bg-card);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border-primary);
+    border-top: 1px solid var(--glass-highlight);
+    border-radius: var(--radius-main);
+    padding: 24px;
+    box-shadow: var(--shadow-primary);
 }
 
-.status-sniper {
-    background: rgba(255, 75, 75, 0.15);
-    border: 1px solid #FF4B4B;
-    color: #FF4B4B;
-    box-shadow: 0 0 15px rgba(255, 75, 75, 0.2);
-    animation: pulse-red 1.5s infinite;
+.card-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 20px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-secondary);
+}
+.card-header h3 {
+    margin: 0; font-size: 16px; 
+    color: var(--text-primary);
+    display: flex; align-items: center; gap: 10px;
+}
+.card-header h3 i { color: var(--neon-green); }
+
+.mono-text { font-family: var(--font-mono); }
+.text-green { color: var(--neon-green); }
+.text-dim { color: var(--text-tertiary); }
+.text-warn { color: #f59e0b; } /* Attention Yellow */
+.text-highlight { color: #fff; font-weight: bold; }
+.mb-20 { margin-bottom: 20px; }
+.mt-15 { margin-top: 15px; }
+
+/* 4. Table Styles */
+.sts-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sts-table th {
+    text-align: left; color: var(--text-tertiary); font-weight: 500;
+    padding: 12px 8px; border-bottom: 1px solid var(--border-secondary);
+    font-size: 12px; letter-spacing: 1px;
+}
+.sts-table td {
+    padding: 16px 8px; border-bottom: 1px solid rgba(255,255,255,0.03);
+    color: var(--text-secondary); vertical-align: middle;
 }
 
-.status-watch {
-    background: rgba(255, 204, 0, 0.1);
-    border: 1px solid #FFCC00;
-    color: #FFCC00;
+.ticker-badge {
+    background: rgba(0, 255, 157, 0.1);
+    color: var(--neon-green);
+    padding: 6px 12px; border-radius: 6px;
+    font-family: var(--font-mono); font-weight: 700;
+    border: 1px solid rgba(0, 255, 157, 0.2);
 }
 
-.status-idle {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #64748b;
+.status-badge {
+    padding: 4px 10px; border-radius: 99px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+}
+.status-badge.aiming {
+    background: rgba(0, 255, 157, 0.15); color: var(--neon-green);
+    border: 1px solid var(--neon-green);
+    animation: pulse-border 1.5s infinite;
+}
+.status-badge.watching {
+    background: rgba(255, 255, 255, 0.05); color: var(--text-tertiary);
+    border: 1px solid var(--border-secondary);
+}
+@keyframes pulse-border {
+    0% { box-shadow: 0 0 0 0 rgba(0, 255, 157, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(0, 255, 157, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(0, 255, 157, 0); }
 }
 
-/* 6. 애니메이션 정의 */
-@keyframes pulse-red {
-    0% { box-shadow: 0 0 0 0 rgba(255, 75, 75, 0.4); }
-    70% { box-shadow: 0 0 0 10px rgba(255, 75, 75, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(255, 75, 75, 0); }
+/* 5. Microstructure & Risk Components */
+.micro-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px; font-size: 14px;
 }
-
-/* 7. Streamlit 커스텀 오버라이드 */
-/* Progress Bar 색상 변경 */
-.stProgress > div > div > div > div {
-    background: linear-gradient(90deg, var(--neon-green), var(--neon-cyan));
-    border-radius: 99px;
+.micro-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-top: 12px; border-top: 1px solid var(--border-secondary);
+    font-size: 14px;
 }
+.progress-wrapper { text-align: right; width: 60%; }
+.val-text { font-size: 14px; font-weight: bold; display: block; margin-bottom: 4px; }
+.progress-bg {
+    height: 4px; background: rgba(255,255,255,0.1);
+    border-radius: 2px; overflow: hidden;
+}
+.progress-fill { height: 100%; transition: width 0.5s; }
+.progress-fill.green { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
+.progress-fill.warn { background: #f59e0b; }
 
-/* 메트릭 캡션 스타일 */
-.stCaption {
-    font-family: 'Inter', sans-serif;
-    color: var(--text-secondary) !important;
-    font-size: 12px;
-    font-weight: 500;
-    margin-bottom: 4px;
+.risk-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.risk-item {
+    background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px;
+    display: flex; flex-direction: column; gap: 4px;
+}
+.risk-item .label { font-size: 11px; color: var(--text-tertiary); }
+.risk-item .value { font-size: 16px; font-weight: 700; color: #fff; }
+.risk-item.highlight { border: 1px solid var(--neon-green); background: rgba(0, 255, 157, 0.05); }
+
+/* 6. Performance & Heatmap */
+.stat-flex { display: flex; gap: 15px; margin-bottom: 20px; }
+.stat-box {
+    flex: 1; text-align: center;
+    background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px;
+}
+.stat-box .val { font-size: 24px; font-weight: 700; margin-top: 5px; }
+
+.chart-mini { margin-top: 10px; }
+.bar-chart {
+    display: flex; align-items: flex-end; gap: 4px;
+    height: 60px; margin-top: 10px;
+}
+.bar { flex: 1; background: rgba(255,255,255,0.1); border-radius: 2px 2px 0 0; }
+.bar.active { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
+
+.heatmap-grid { display: flex; gap: 8px; }
+.heat-block {
+    flex: 1; padding: 15px 0; text-align: center;
+    border-radius: 6px; font-weight: 700; font-size: 12px; color: #000;
+}
+.heat-block.hot { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
+.heat-block.warm { background: rgba(0, 255, 157, 0.5); color: #fff; }
+.heat-block.cool { background: rgba(255, 255, 255, 0.1); color: var(--text-secondary); }
+
+/* Mini Bar in Table */
+.mini-bar {
+    width: 80px; height: 4px; background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+}
+.mini-bar div {
+    height: 100%; background: var(--neon-green);
+    box-shadow: 0 0 5px var(--neon-green);
 }
