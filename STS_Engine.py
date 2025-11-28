@@ -45,7 +45,7 @@ TRADE_LOG_FILE = "sts_trade_log_v5.csv"
 REPLAY_LOG_FILE = "sts_replay_data_v5.csv"
 
 # System Optimization
-DB_UPDATE_INTERVAL = 1.0      # DB 업데이트 주기 (초)
+DB_UPDATE_INTERVAL = 3.0      # DB 업데이트 주기 (초)
 GC_INTERVAL = 300             # 가비지 컬렉션 주기 (5분)
 GC_TTL = 600                  # 데이터 유효 시간 (10분)
 
@@ -61,7 +61,7 @@ def init_db():
     if not DATABASE_URL: return
     try:
         if db_pool is None:
-            db_pool = psycopg2.pool.SimpleConnectionPool(1, 20, dsn=DATABASE_URL)
+            db_pool = psycopg2.pool.SimpleConnectionPool(1, 5, dsn=DATABASE_URL)
             print("✅ [DB] Connection Pool Initialized")
             
         conn = db_pool.getconn()
@@ -440,10 +440,18 @@ class SniperBot:
                 # print(f"⚠️ AI Error: {e}")
                 pass
 
-        # [Risk 2 해결] DB Throttling
+       # [Risk 2 해결] DB Throttling (안전장치 강화)
         now = time.time()
-        if self.state != "WATCHING" or (now - self.last_db_update > DB_UPDATE_INTERVAL):
-            update_dashboard_db(self.ticker, m, prob * 100, self.state)
+        
+        # 1. 평소(WATCHING)에는 3초(DB_UPDATE_INTERVAL)마다 저장
+        # 2. 급할 때(AIMING/FIRED)는 0.5초마다 저장 (0.1초마다 쏘면 DB 죽음)
+        is_urgent = (self.state != "WATCHING")
+        time_passed = (now - self.last_db_update > DB_UPDATE_INTERVAL)
+        
+        if time_passed or (is_urgent and (now - self.last_db_update > 0.5)):
+            # prob가 계산 안 된 상태일 수 있으므로 안전 처리
+            score_to_save = prob * 100 if 'prob' in locals() else 0
+            update_dashboard_db(self.ticker, m, score_to_save, self.state)
             self.last_db_update = now
 
         # Replay Log
