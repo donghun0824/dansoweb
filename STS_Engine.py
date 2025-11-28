@@ -17,7 +17,7 @@ from functools import partial
 from concurrent.futures import ThreadPoolExecutor # [V5.3] 추가
 import firebase_admin
 from firebase_admin import credentials, messaging
-
+import traceback
 # 커스텀 지표 모듈 임포트
 import indicators_sts as ind 
 
@@ -451,7 +451,10 @@ class MicrostructureAnalyzer:
                 'timestamp': raw_df.iloc[-1]['t'], 'vwap': last['vwap']
             }
         except Exception as e:
-            # print(f"Metric Calc Error: {e}")
+            # 🔥 [긴급 수정] 주석 해제하고 에러를 출력하게 변경!
+            import traceback
+            print(f"❌ [Metric Calc Error] {self.ticker if hasattr(self, 'ticker') else 'Unknown'}: {e}", flush=True)
+            traceback.print_exc() # 에러가 난 줄번호까지 추적
             return None
 
 class TargetSelector:
@@ -932,9 +935,13 @@ class STSPipeline:
                             self.last_quotes.get(t, {'bids':[],'asks':[]}), 
                             current_agg 
                         )
-            except Exception: pass
+            except Exception as e:
+                # 🔥 [긴급 수정] 에러 무시하지 말고 출력!
+                import traceback
+                print(f"❌ [Worker Critical Error] {e}", flush=True)
+                traceback.print_exc()
             finally:
-                self.msg_queue.task_done() 
+                self.msg_queue.task_done()
 
     # [6] Scanner (20초 주기)
     async def task_global_scan(self):
