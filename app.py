@@ -516,6 +516,83 @@ def init_db():
             conn.close()
         print(f"❌ [DB] Init failed: {e}")
 
+# ▼▼▼▼▼ [여기] 아래 코드를 붙여넣으세요 ▼▼▼▼
+@app.route('/admin/secret/count')
+def check_user_count():
+    """관리자용: 실시간 가입자 및 기기 수 확인 페이지"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. 회원가입한 사람 수 (users 테이블)
+        try:
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+        except:
+            user_count = 0 
+            conn.rollback()
+
+        # 2. 알림 켜놓은 기기 수 (fcm_tokens)
+        try:
+            cursor.execute("SELECT COUNT(*) FROM fcm_tokens")
+            device_count = cursor.fetchone()[0]
+        except:
+            device_count = 0
+            conn.rollback()
+        
+        cursor.close()
+        conn.close()
+        
+        # 실제 활성 사용자 수 (둘 중 큰 값 기준)
+        active_users = max(user_count, device_count)
+        remaining = 1000 - active_users
+        
+        # 대시보드 스타일의 HTML 반환
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Danso Launch Status</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {{ background-color: #05070a; color: #e0e0e0; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+                .container {{ text-align: center; border: 2px solid #00ff9d; padding: 40px; border-radius: 20px; box-shadow: 0 0 30px rgba(0, 255, 157, 0.2); background: #0a0f14; }}
+                h1 {{ color: #00ff9d; margin-bottom: 30px; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }}
+                .stat-box {{ margin: 20px 0; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 10px; }}
+                .number {{ font-size: 3em; font-weight: bold; color: #fff; display: block; margin-top: 10px; }}
+                .label {{ color: #888; font-size: 0.9em; text-transform: uppercase; }}
+                .remaining {{ color: #ff4d4d; font-weight: bold; margin-top: 30px; font-size: 1.2em; }}
+                hr {{ border-color: #333; opacity: 0.3; margin: 30px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🚀 Launch Status</h1>
+                
+                <div class="stat-box">
+                    <span class="label">Total Signed Up</span>
+                    <span class="number">{user_count}</span>
+                </div>
+                
+                <div class="stat-box">
+                    <span class="label">Active Devices (App)</span>
+                    <span class="number" style="color: #00e0ff;">{device_count}</span>
+                </div>
+
+                <hr>
+                
+                <div class="remaining">
+                    🔥 Spots Left: {remaining} / 1,000
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+    except Exception as e:
+        return f"Error: {e}"
+
 init_db()
 
 if __name__ == '__main__':
