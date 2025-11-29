@@ -233,7 +233,7 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             return
 
         # 알림 내용 구성
-        noti_title = f"💎 {ticker} SIGNAL (score {probability_score})"
+        noti_title = f"💎 {ticker} SIGNAL (SCORE {probability_score})"
         if entry and tp and sl:
             noti_body = f"진입: ${entry:.4f} | 익절: ${tp:.4f} | 손절: ${sl:.4f}"
         else:
@@ -772,7 +772,7 @@ class SniperBot:
             print(f"❌ [Warmup] Failed: {e}", flush=True)
 
     def fire(self, price, prob, metrics):
-        print(f"🔫 [격발] {self.ticker} AI_Prob:{prob:.4f} Price:${price:.4f}", flush=True)
+        print(f"🔫 [FIRE] {self.ticker} AI_Prob:{prob:.4f} Price:${price:.4f}", flush=True)
         self.state = "FIRED"
         self.position = {
             'entry': price, 'high': price,
@@ -1028,25 +1028,43 @@ class STSPipeline:
                 print(f"❌ Manager Error: {e}", flush=True)
                 await asyncio.sleep(5)
                 # ==============================================================================
+# ==============================================================================
 # 5. MAIN EXECUTION (실행 진입점)
 # ==============================================================================
+
+# 🔥 [추가] 봇 부팅 및 테스트를 위한 메인 함수
+async def main_startup():
+    # 1. 필수 서비스 먼저 초기화 (알림을 보내기 위해 필요)
+    init_db()
+    init_firebase()
+    
+    print("🚀 [System] Initializing STS Sniper Bot...", flush=True)
+    pipeline = STSPipeline()
+
+    # 2. 🔥 [테스트 알림 발송] 봇 켜질 때 '살아있다'고 신고
+    print("🔔 [System] Sending Startup Test Notification...", flush=True)
+    try:
+        # 가짜 종목(TEST-BOT)으로 99점짜리 알림을 쏴봅니다.
+        await send_fcm_notification("TEST-BOT", 123.45, 99, entry=123.45, tp=130.00, sl=120.00)
+        print("✅ [System] Test Notification Sent! (Check your phone)", flush=True)
+    except Exception as e:
+        print(f"❌ [System] Test Notification Failed: {e}", flush=True)
+
+    # 3. 진짜 봇 파이프라인 가동 (무한 루프)
+    await pipeline.connect()
+
 if __name__ == "__main__":
-    # 윈도우 환경에서 실행 시 asyncio 루프 정책 충돌 방지 (혹시 로컬 테스트할 경우 대비)
+    # 윈도우 환경 충돌 방지
     if os.name == 'nt':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     try:
-        print("🚀 [System] Initializing STS Sniper Bot...", flush=True)
-        
-        # 파이프라인 인스턴스 생성
-        pipeline = STSPipeline()
-        
-        # 비동기 루프 시작 (여기서 무한 루프가 돕니다)
-        asyncio.run(pipeline.connect())
+        # 기존: asyncio.run(pipeline.connect()) 
+        # 수정: 위에서 만든 main_startup 실행
+        asyncio.run(main_startup())
 
     except KeyboardInterrupt:
         print("\n🛑 [System] Bot stopped by user.", flush=True)
     except Exception as e:
         print(f"❌ [Fatal Error] Main loop crashed: {e}", flush=True)
-        # 치명적 오류 발생 시 5초 대기 후 종료 (로그 확인할 시간 확보)
         time.sleep(5)
