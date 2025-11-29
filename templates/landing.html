@@ -99,8 +99,69 @@
                 </footer>
 
             </div> 
-        </div> </div> <script>
+        </div> </div> 
+        </div> 
+    </div> 
+
+    <div id="landingPopup" class="popup-overlay">
+        <div class="popup-content">
+            <div class="popup-header">
+                <h2>🚀 GRAND LAUNCHING EVENT</h2>
+                <button class="close-btn" onclick="closePopup()">×</button>
+            </div>
+            
+            <div class="popup-body">
+                <div class="popup-section highlight-box">
+                    <h3>📅 1-Week Free Trial (Limited)</h3>
+                    <p>Full access is <strong>FREE</strong> until <strong>next Monday</strong>.</p>
+                    <ul class="bullet-list">
+                        <li>Service converts to <strong>Paid Membership</strong> afterwards.</li>
+                        <li>Limit: <strong>First 1,000 members</strong> only. Don't miss out!</li>
+                    </ul>
+                </div>
+
+                <div class="popup-section">
+                    <h3>⚡ How to Use</h3>
+                    <ol>
+                        <li>Log in and go to the <strong>Dashboard</strong>.</li>
+                        <li>Tap <strong>[Enable Notifications]</strong> at the top.</li>
+                        <li>Get real-time AI signals for breakouts!</li>
+                    </ol>
+                </div>
+
+                <div class="popup-section">
+                    <h3>📲 Install App (No Store Needed)</h3>
+                    <div class="install-guide">
+                        <div class="guide-item">
+                            <span class="icon">🍎 <strong>iPhone (Safari)</strong></span>
+                            <p>Tap Share <span style="font-size:1.2em;">⎋</span> → Select <strong>'Add to Home Screen'</strong></p>
+                        </div>
+                        <div class="guide-item">
+                            <span class="icon">🤖 <strong>Galaxy (Chrome)</strong></span>
+                            <p>Tap Menu <span style="font-size:1.2em;">⋮</span> → Select <strong>'Install App'</strong> or <strong>'Add to Home Screen'</strong></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="popup-section warning-box">
+                    <p>⚠️ <strong>Disclaimer:</strong> Investment involves risk. This AI provides analysis, but the final decision is yours.</p>
+                    <p class="community-msg">💬 Please share feedback in our Community!</p>
+                    <p class="contact-info">📧 Support: dansoweb@gmail.com / cbvkqtm98@gmail.com</p>
+                </div>
+            </div>
+
+            <div class="popup-footer">
+                <label class="dont-show">
+                    <input type="checkbox" id="dontShowToday"> Don't show again today
+                </label>
+                <button class="confirm-btn" onclick="closePopup()">GET STARTED 🚀</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
         document.addEventListener('DOMContentLoaded', (event) => {
+            // --- [기존 비디오/티커 로직] ---
             const videoContainer = document.getElementById('video-container');
             const video = document.getElementById('intro-video');
             const mainContent = document.getElementById('main-content');
@@ -114,12 +175,16 @@
                 }
             }
 
-            video.onended = () => { showMainContent(); };
-            video.onerror = () => { showMainContent(); };
+            if(video) {
+                video.onended = () => { showMainContent(); };
+                video.onerror = () => { showMainContent(); };
+            }
             setTimeout(() => { showMainContent(); }, 4000); 
 
             function loadVerticalTicker() {
                 const list = document.getElementById('vertical-ticker-list');
+                if(!list) return;
+                
                 fetch('/api/market_overview')
                     .then(response => response.json())
                     .then(data => {
@@ -131,10 +196,8 @@
                             fullList.forEach(ticker => {
                                 const item = document.createElement('div');
                                 item.className = 'v-ticker-item';
-                                
                                 const change = ticker.todaysChangePerc || 0;
                                 const changeVal = parseFloat(change).toFixed(2);
-                                
                                 let changeClass = 'change-zero';
                                 if (change > 0) changeClass = 'change-positive';
                                 if (change < 0) changeClass = 'change-negative';
@@ -155,7 +218,28 @@
                         list.innerHTML = '<p class="loading-text">Error loading feed.</p>';
                     });
             }
+
+            // --- [추가된 팝업 로직] ---
+            const hideDate = localStorage.getItem("landing_popup_closed");
+            const today = new Date().toISOString().split('T')[0];
+
+            if (hideDate !== today) {
+                const popup = document.getElementById("landingPopup");
+                if(popup) popup.style.display = "flex";
+            }
         });
+
+        // 팝업 닫기 함수
+        function closePopup() {
+            const popup = document.getElementById("landingPopup");
+            const checkbox = document.getElementById("dontShowToday");
+            
+            if (checkbox && checkbox.checked) {
+                const today = new Date().toISOString().split('T')[0];
+                localStorage.setItem("landing_popup_closed", today);
+            }
+            if(popup) popup.style.display = "none";
+        }
     </script>
 
     <script src="{{ url_for('static', filename='js/landing.js') }}" defer></script>

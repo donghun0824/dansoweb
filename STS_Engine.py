@@ -233,7 +233,7 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             return
 
         # 알림 내용 구성
-        noti_title = f"💎 {ticker} 신호 (점수: {probability_score})"
+        noti_title = f"💎 {ticker} SIGNAL (score {probability_score})"
         if entry and tp and sl:
             noti_body = f"진입: ${entry:.4f} | 익절: ${tp:.4f} | 손절: ${sl:.4f}"
         else:

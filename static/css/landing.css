@@ -271,3 +271,186 @@ body {
     .hero-cta-buttons { justify-content: center; }
     .hero-description { margin-left: auto; margin-right: auto; }
 }
+/* ==========================================================================
+   (v19.1) LAUNCH POPUP STYLES - Added for Global Launch
+   ========================================================================== */
+
+/* 팝업 오버레이 (배경) */
+.popup-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85); /* 짙은 배경 */
+    backdrop-filter: blur(8px);       /* 블러 효과 */
+    /* 중요: 기존 비디오(9999)보다 높아야 함 */
+    z-index: 10000; 
+    display: none; /* JS로 제어됨 */
+    justify-content: center;
+    align-items: center;
+}
+
+/* 팝업 본체 */
+.popup-content {
+    background: var(--deep-space); /* 기존 테마 배경색(#05070a) 사용 */
+    border: 1px solid var(--neon-green); /* 네온 그린 테두리 */
+    box-shadow: 0 0 40px rgba(0, 255, 157, 0.15); /* 은은한 네온 발광 */
+    width: 90%;
+    max-width: 480px;
+    max-height: 85vh; /* 모바일에서 잘리지 않게 */
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    color: white;
+    font-family: 'Inter', sans-serif; /* 메인 폰트 일치 */
+    animation: popupFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes popupFadeIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 팝업 헤더 */
+.popup-header {
+    padding: 18px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 255, 157, 0.03); /* 아주 연한 그린 틴트 */
+}
+
+.popup-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--neon-green); /* 네온 그린 텍스트 */
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: #64748b;
+    font-size: 28px;
+    cursor: pointer;
+    line-height: 1;
+    transition: color 0.2s;
+    padding: 0;
+}
+.close-btn:hover { color: white; }
+
+/* 팝업 본문 */
+.popup-body {
+    padding: 24px;
+    overflow-y: auto;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #cbd5e1; /* 읽기 편한 회색 */
+}
+
+.popup-section { margin-bottom: 24px; }
+.popup-section:last-child { margin-bottom: 0; }
+
+.popup-section h3 {
+    font-size: 1.0rem;
+    color: white;
+    font-weight: 700;
+    margin: 0 0 12px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+/* 제목 옆 네온 바 */
+.popup-section h3::before {
+    content: '';
+    display: block;
+    width: 3px;
+    height: 16px;
+    background-color: var(--neon-green);
+    border-radius: 2px;
+}
+
+/* 강조 박스 (1주일 무료) */
+.highlight-box {
+    background: rgba(0, 255, 157, 0.06);
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px dashed rgba(0, 255, 157, 0.3);
+}
+.bullet-list, ol { padding-left: 20px; margin: 8px 0 0 0; }
+.bullet-list li, ol li { margin-bottom: 4px; color: #cbd5e1; }
+.bullet-list li strong { color: var(--neon-green); }
+
+/* 설치 가이드 박스 */
+.install-guide { display: flex; flex-direction: column; gap: 10px; }
+.guide-item {
+    background: rgba(255, 255, 255, 0.03);
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.guide-item .icon { 
+    display: block; margin-bottom: 4px; 
+    color: var(--neon-green); font-weight: 700; font-size: 0.85rem;
+}
+.guide-item p { margin: 0; color: #94a3b8; font-size: 0.85rem;}
+
+/* 경고/문의 박스 */
+.warning-box {
+    background: rgba(255, 77, 77, 0.08); /* 붉은 틴트 */
+    padding: 14px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    border: 1px solid rgba(255, 77, 77, 0.1);
+}
+.warning-box strong { color: #ff6b6b; }
+.community-msg { margin: 8px 0; color: #e2e8f0; font-weight: 600; }
+.contact-info { margin-top: 8px; color: #64748b; font-size: 0.8rem; font-weight: 500; }
+
+/* 팝업 푸터 */
+.popup-footer {
+    padding: 20px 24px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 0 0 20px 20px;
+}
+
+/* 오늘 하루 보지 않기 */
+.dont-show {
+    font-size: 0.85rem;
+    color: #64748b;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.2s;
+}
+.dont-show:hover { color: #94a3b8; }
+.dont-show input { accent-color: var(--neon-green); cursor: pointer; }
+
+/* 시작하기 버튼 */
+.confirm-btn {
+    background: var(--neon-green); /* 네온 그린 배경 */
+    color: #05070a; /* 짙은 텍스트 */
+    border: none;
+    padding: 12px 28px;
+    border-radius: 99px;
+    font-weight: 800;
+    font-size: 0.95rem;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(0, 255, 157, 0.3);
+    transition: all 0.2s ease;
+}
+.confirm-btn:hover {
+    background: #00cc7d;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 255, 157, 0.4);
+}

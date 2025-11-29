@@ -119,7 +119,8 @@ function renderTable(targets) {
     targets.forEach(item => {
         const price = item.price ? parseFloat(item.price).toFixed(2) : "0.00";
         // item.ai_score가 DB에 저장된 값 (예: 82.3)
-        const scoreVal = item.ai_score ? parseFloat(item.ai_score) : 0;
+        let rawScore = item.ai_score || item.ai_prob || 0; 
+        const scoreVal = parseFloat(rawScore);
         const score = scoreVal.toFixed(1);
         const ticker = item.ticker;
         
