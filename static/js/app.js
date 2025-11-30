@@ -1,13 +1,18 @@
-// app.js (v2 - 모듈형 SDK / 타이밍 + 모달 오류 모두 수정)
+/**
+ * DANSO DASHBOARD APPLICATION (v25.0 - Premium Refactor)
+ * ----------------------------------------------------
+ * - Modular FCM Integration
+ * - Lightweight Charts (Optimized)
+ * - Robust Modal Lifecycle Management
+ * - Premium UX Feedback & Error Handling
+ */
 
-// 1. Firebase 모듈 가져오기 (CDN에서 바로 가져옴)
+// 1. Import Firebase Modules & Chart Library
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
 import { createChart } from 'https://esm.sh/lightweight-charts@4.1.1';
 
-
-
-// 2. ✅ 사용자님의 firebaseConfig
+// 2. Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyDWDmEgyl2z6mh8-OJ4jXubROLqbPbl6wk",
   authDomain: "gen-lang-client-0379169283.firebaseapp.com",
@@ -18,97 +23,101 @@ const firebaseConfig = {
   measurementId: "G-DFFBKLCBWS"
 };
 
-// 3. Firebase 초기화
+// 3. Initialize Firebase Services
 const app = initializeApp(firebaseConfig);
 const messaging = getMessaging(app);
 
-// app.js (약 18번째 줄, 기존 requestNotificationPermission 함수 교체)
+// Global Variables
+window.currentFCMToken = null;
+let lightweightChart = null;
+let candleSeries = null;
+let currentModalTicker = null;
+let modalRefreshInterval = null;
 
-// 4. FCM 함수 정의 (강화된 로직으로 교체)
+// --- [Utility] Branded Logger ---
+const log = (msg, data = '') => console.log(`%c[DANSO] ${msg}`, 'color: #00C853; font-weight: bold;', data);
+const warn = (msg) => console.warn(`%c[DANSO WARN] ${msg}`, 'color: #FF9800; font-weight: bold;');
+const errorLog = (msg, err) => console.error(`%c[DANSO ERROR] ${msg}`, 'color: #FF3B30; font-weight: bold;', err);
+
+
+// --- [Core] FCM Notification Logic ---
+
 function requestNotificationPermission() {
-    console.log("Requesting notification permission...");
+    log("Requesting notification permission...");
 
     if (!('Notification' in window)) {
-        console.warn("[FCM] Notifications not supported in this browser.");
+        warn("Notifications not supported in this browser.");
         return;
     }
     
-    // 1. 이미 허용됨: 바로 getFCMToken 실행
+    // 1. Permission already granted
     if (Notification.permission === 'granted') {
-        console.log("[FCM] Permission already granted. Retrieving token.");
+        log("Permission already granted. Retrieving token.");
         getFCMToken();
         return;
     }
 
-    // 2. 권한 요청 팝업 띄우기
+    // 2. Request Permission
     if (Notification.permission === 'default') {
         Notification.requestPermission().then((permission) => {
             if (permission === "granted") {
-                console.log("Notification permission granted.");
-                getFCMToken(); // 권한 획득 시 토큰 가져오기 실행
+                log("Permission granted by user.");
+                getFCMToken();
             } else {
-                console.log("Notification permission denied.");
+                warn("Permission denied by user.");
             }
         });
     } else {
-        // 3. 차단됨 (denied) 상태.
-        console.warn("[FCM] Permission permanently denied. User must change settings.");
+        // 3. Blocked
+        warn("Permission permanently blocked. User must change browser settings.");
+        alert("⚠️ Please enable notifications in your browser settings to receive signals.");
     }
 }
 
-// (수정 1) 서비스워커가 'active' 될 때까지 기다리도록 수정
 function getFCMToken() {
-    // 5. ✅ 사용자님의 VAPID 공개 키
     const VAPID_PUBLIC_KEY = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
 
-    // ✅ 서비스워커가 'active' 될 때까지 기다립니다.
     navigator.serviceWorker.ready.then((activeRegistration) => {
-        
-        console.log("Service Worker is active, retrieving token...");
-
-        // 서비스워커가 준비되면 getToken을 호출합니다.
+        log("Service Worker active. Fetching token...");
         return getToken(messaging, { 
             vapidKey: VAPID_PUBLIC_KEY,
-            serviceWorkerRegistration: activeRegistration // 'active' 워커를 명시
+            serviceWorkerRegistration: activeRegistration 
         });
-
     }).then((currentToken) => {
         if (currentToken) {
-            console.log("FCM Token:", currentToken);
-            // ✅ [추가] 토큰을 전역 변수에 저장해둡니다 (설정 저장할 때 사용)
+            log("FCM Token acquired.");
             window.currentFCMToken = currentToken;
-            // 6. ✅ 이 토큰을 우리 DB에 저장합니다.
             sendTokenToServer(currentToken);
+            
+            // Visual Feedback
+            const btn = document.getElementById('subscribe-btn');
+            if(btn) {
+                btn.innerHTML = '<i class="fas fa-check-circle"></i> Active';
+                btn.style.borderColor = "var(--accent-green)";
+                btn.style.color = "var(--text-primary)";
+            }
         } else {
-            console.log("No registration token available. Request permission to generate one.");
+            warn("No registration token available.");
         }
     }).catch((err) => {
-        console.log("An error occurred while retrieving token (sw.js active wait failed?). ", err);
+        errorLog("Token retrieval failed.", err);
     });
 }
 
-
 function sendTokenToServer(token) {
-    // 7. 이 'token'을 Render의 PostgreSQL DB에 저장하는 API를 호출합니다.
-    fetch("/subscribe", { // (API 주소는 예시입니다)
+    fetch("/subscribe", {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: token }),
     })
     .then(response => response.json())
-    .then(data => {
-        console.log("Token sent to server:", data);
-    })
-    .catch((error) => {
-        console.error("Error sending token to server:", error);
-    });
+    .then(data => log("Token registered with server."))
+    .catch(err => errorLog("Failed to register token.", err));
 }
 
-// 8. (선택사항) 앱이 "켜져 있을 때" (포그라운드) 알림 받기
+// Foreground Message Handler
 onMessage(messaging, (payload) => {
-  console.log("Message received in foreground: ", payload);
+  log("Message received in foreground:", payload);
   new Notification(payload.notification.title, { 
       body: payload.notification.body,
       icon: "/static/images/danso_logo.png" 
@@ -116,15 +125,17 @@ onMessage(messaging, (payload) => {
 });
 
 
-// --- (기존 app.js 코드 시작) ---
+// --- [Main] Application Logic ---
+
 document.addEventListener('DOMContentLoaded', function() {
     
-    // 9. (NEW) 👇 알림 버튼 이벤트 리스너 연결
+    // --- [Setup] Notification Button ---
     const subscribeBtn = document.getElementById('subscribe-btn');
     if (subscribeBtn) {
         subscribeBtn.addEventListener('click', requestNotificationPermission);
     }
-// ✅ [Updated: English Version] Notification Score Settings
+
+    // --- [Setup] Settings (Score Threshold) ---
     const saveScoreBtn = document.getElementById('save-score-btn');
     const minScoreInput = document.getElementById('min-score-input');
 
@@ -132,165 +143,162 @@ document.addEventListener('DOMContentLoaded', function() {
         saveScoreBtn.addEventListener('click', async () => {
             const score = minScoreInput.value;
             
-            // 1. Validation
             if (score === '' || score < 0 || score > 100) {
-                alert("Please enter a score between 0 and 100.");
+                alert("⚠️ Please enter a valid score between 0 and 100.");
                 return;
             }
 
-            // 2. Check Token
             const token = window.currentFCMToken;
             if (!token) {
-                alert("Notification permission is missing. Please click 'Enable Notifications' first.");
+                alert("⚠️ Notification permission is missing. Please click 'Enable Notifications' first.");
                 return;
             }
 
-            // 3. Send to Server
-            try {
-                const originalText = saveScoreBtn.textContent;
-                saveScoreBtn.textContent = "Saving...";
-                saveScoreBtn.disabled = true;
+            // UX Feedback: Loading State
+            const originalText = saveScoreBtn.textContent;
+            saveScoreBtn.textContent = "Saving...";
+            saveScoreBtn.disabled = true;
+            saveScoreBtn.style.opacity = "0.7";
 
+            try {
                 const response = await fetch('/api/set_alert_threshold', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ 
-                        token: token, 
-                        threshold: parseInt(score) 
-                    }),
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token, threshold: parseInt(score) }),
                 });
 
                 const result = await response.json();
 
                 if (response.ok) {
-                    // Success Message in English
-                    alert(`✅ Saved! You will now only receive alerts for signals with an AI Score of ${score} or higher.`);
+                    alert(`✅ Saved! Alerts set for AI Score ${score}+.`);
                 } else {
                     alert(`❌ Save failed: ${result.message}`);
                 }
+            } catch (error) {
+                errorLog("Threshold save error", error);
+                alert("Server error occurred. Please try again later.");
+            } finally {
                 saveScoreBtn.textContent = originalText;
                 saveScoreBtn.disabled = false;
-
-            } catch (error) {
-                console.error("Error saving threshold:", error);
-                alert("Server error occurred. Please try again later.");
-                saveScoreBtn.textContent = "Save";
-                saveScoreBtn.disabled = false;
+                saveScoreBtn.style.opacity = "1";
             }
         });
     }
-    // ✅ [여기까지 추가]
-    // --- 1. DOM 요소 가져오기 (v11.0) ---
+
+    // --- [Setup] DOM Elements ---
     const scanStatusEl = document.getElementById('scan-status-text');
     const scanCountEl = document.getElementById('scan-watching-count');
     const tickerListContainer = document.getElementById('ticker-list-container');
     const signalFeedContainer = document.getElementById('signal-feed-container');
-    
-    // (v3.0) 스크롤링 바 요소
     const scrollingBarTrack = document.getElementById('scrolling-bar-track');
     
+    // Modal Elements
     const modal = document.getElementById('ticker-modal');
     const modalTickerName = document.getElementById('modal-ticker-name');
     const modalCloseBtn = document.getElementById('modal-close-btn');
     
+    // Community Elements
     const postForm = document.getElementById('post-form'); 
     const postSubmitBtn = document.getElementById('post-submit-btn');
     const communityFeedContainer = document.getElementById('community-feed-container');
-    
-    let modalRefreshInterval = null;
-    
-    let lightweightChart = null;
-    let candleSeries = null;
-    let currentModalTicker = null; 
 
-    // --- 2. 5초마다 데이터 새로고침 (DB) ---
+
+    // --- [Core] Data Fetching Logic (5s Interval) ---
     async function fetchDashboardData() {
         try {
             const response = await fetch('/api/dashboard');
             if (!response.ok) return;
             const data = await response.json();
             
-            // (v10.1) 상태 카드 업데이트 (영어)
-            scanStatusEl.textContent = `Scanner Scan: ${data.status.last_scan_time}`;
-            scanCountEl.textContent = `Watching: ${data.status.watching_count} tickers`;
-            tickerListContainer.innerHTML = '';
-            if (data.status.watching_tickers.length > 0) {
-                data.status.watching_tickers.forEach(item => {
-                    const span = document.createElement('span');
-                    span.textContent = item.ticker;
-                    if (item.is_new) span.classList.add('new-ticker');
-                    span.addEventListener('click', () => openTickerModal(item.ticker));
-                    tickerListContainer.appendChild(span);
-                });
-            } else {
-                 // (v10.1) 영어
-                tickerListContainer.innerHTML = '<p style="color: #8b95a1;">Loading scanner...</p>';
+            // 1. Update Scanner Status
+            if (scanStatusEl && scanCountEl) {
+                scanStatusEl.textContent = `Last Scan: ${data.status.last_scan_time || 'Waiting...'}`;
+                scanCountEl.textContent = `Active Watchlist: ${data.status.watching_count || 0}`;
+            }
+
+            // 2. Render Watchlist (Ticker Chips)
+            if (tickerListContainer) {
+                tickerListContainer.innerHTML = '';
+                if (data.status.watching_tickers && data.status.watching_tickers.length > 0) {
+                    data.status.watching_tickers.forEach(item => {
+                        const span = document.createElement('span');
+                        span.textContent = item.ticker;
+                        if (item.is_new) span.classList.add('new-ticker');
+                        span.onclick = () => openTickerModal(item.ticker);
+                        tickerListContainer.appendChild(span);
+                    });
+                } else {
+                    tickerListContainer.innerHTML = '<p class="text-muted">Scanner initializing...</p>';
+                }
             }
             
-            // ✅ (v11.0) "v3.1" CSS에 맞춘 신호 피드 HTML (텍스트가 <span> 안에 있음)
-            signalFeedContainer.innerHTML = '';
-            let hasSignals = false;
-            
-            // [엔진 1: 폭발] 신호 (signals)
-            data.signals.forEach(signal => {
-                hasSignals = true;
-                signalFeedContainer.innerHTML += `
-                    <div class="signal-card signal" onclick="openTickerModal('${signal.ticker}')">
-                        <div class="signal-icon-wrapper">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M11.484 2.17a.75.75 0 0 1 1.032 0L12 3.013l.484-.843a.75.75 0 0 1 1.032 0l4.312 7.5a.75.75 0 0 1-.515 1.077l-4.78 1.002a.75.75 0 0 0-.57 1.137l.635 1.517a.75.75 0 0 1-1.12.935l-3.334-4.001a.75.75 0 0 1-.002-.953l2.845-3.097a.75.75 0 0 0 .041-.85l-1.476-2.951Z" clip-rule="evenodd" /><path d="M12.481 12.355a.75.75 0 0 0-.57 1.137l.635 1.517a.75.75 0 0 1-1.12.935l-3.334-4.001a.75.75 0 0 1-.002-.953l2.845-3.097a.75.75 0 0 0 .041-.85l-1.476-2.951a.75.75 0 0 1-.515-1.077L.816 12.013a.75.75 0 0 0 .515 1.077l4.78-1.002a.75.75 0 0 1 .57-1.137l-.635-1.517a.75.75 0 0 0 1.12-.935l3.334 4.001a.75.75 0 0 0 .002.953l-2.845 3.097a.75.75 0 0 0-.041.85l1.476 2.951a.75.75 0 0 1 .515 1.077l5.093-8.825Z" /> </svg>
-                        </div>
-                        <div class="info">
-                            <div class="info-header">
-                                <div class="ticker">${signal.ticker}</div>
-                                <span class="option-label">EXPLOSION</span>
-                            </div>
-                            <div class="signal-details">
-                                <div class="price">@ $${signal.price}</div>
-                            </div>
-                        </div>
-                        <div class="time">${signal.time}</div>
-                    </div>`;
-            });
-            
-            // [엔진 2: 셋업] 신호 (recommendations)
-            data.recommendations.forEach(rec => {
-                hasSignals = true;
-                // (v10.0) AI 점수 (probability_score)를 DB에서 가져옴
-                const aiScore = rec.probability_score !== null ? rec.probability_score : 50; // (기본값 50)
+            // 3. Render Signal Feed (Cards)
+            if (signalFeedContainer) {
+                signalFeedContainer.innerHTML = '';
+                let hasSignals = false;
                 
-                signalFeedContainer.innerHTML += `
-                    <div class="signal-card recommendation" onclick="openTickerModal('${rec.ticker}')">
-                        <div class="signal-icon-wrapper">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12Zm11.85-3.904a.75.75 0 0 0-1.08-.02L9 12.378l-1.95-1.95a.75.75 0 1 0-1.06 1.06l2.5 2.5a.75.75 0 0 0 1.06 0l4.5-4.5a.75.75 0 0 0 .02-1.08Z" clip-rule="evenodd" /></svg>
-                        </div>
-                        <div class="info">
-                             <div class="info-header">
-                                <div class="ticker">${rec.ticker}</div>
-                                <span class="option-label">SETUP</span>
-                            </div>
-                            <div class="signal-details">
-                                <div class="price">@ $${rec.price}</div>
-                                <div class="ai-score">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                      <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L21.75 5.25l-.813 2.846a4.5 4.5 0 0 0-3.09 3.09L15 12l2.846.813a4.5 4.5 0 0 0 3.09 3.09L21.75 18.75l.813-2.846a4.5 4.5 0 0 0-3.09-3.09L18.25 12Z" />
-                                    </svg>
-                                    <span>${aiScore}%</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="time">${rec.time}</div>
-                    </div>`;
-            });
-            
-            if (!hasSignals) {
-                signalFeedContainer.innerHTML = '<div class="empty-state">No active signals yet...</div>';
+                // Type A: Signals (Explosions)
+                if (data.signals) {
+                    data.signals.forEach(signal => {
+                        hasSignals = true;
+                        signalFeedContainer.innerHTML += createSignalCardHTML(signal, 'SIGNAL');
+                    });
+                }
+                
+                // Type B: Recommendations (Setups)
+                if (data.recommendations) {
+                    data.recommendations.forEach(rec => {
+                        hasSignals = true;
+                        signalFeedContainer.innerHTML += createSignalCardHTML(rec, 'SETUP');
+                    });
+                }
+                
+                if (!hasSignals) {
+                    signalFeedContainer.innerHTML = '<div class="empty-state">Waiting for market activity...</div>';
+                }
             }
-        } catch (error) { }
+        } catch (error) { 
+            // Silent catch to prevent console spam on network blips
+        }
+    }
+
+    // Helper: Create HTML for Signal Cards
+    function createSignalCardHTML(data, type) {
+        const isSignal = type === 'SIGNAL';
+        const cardClass = isSignal ? 'signal-card signal' : 'signal-card recommendation';
+        const label = isSignal ? 'EXPLOSION' : 'SETUP';
+        const aiScore = data.probability_score !== undefined ? data.probability_score : 50;
+        
+        // Icons (SVG)
+        const iconSignal = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path fill-rule="evenodd" d="M14.615 1.595a.75.75 0 01.359.852L12.982 9.75h7.268a.75.75 0 01.548 1.262l-10.5 11.25a.75.75 0 01-1.272-.71l1.992-7.302H3.75a.75.75 0 01-.548-1.262l10.5-11.25a.75.75 0 01.913-.143z" clip-rule="evenodd" /></svg>`;
+        const iconSetup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" /><path fill-rule="evenodd" d="M1.323 11.447C2.811 6.976 7.028 3.75 12.001 3.75c4.97 0 9.185 3.223 10.675 7.69.12.362.12.752 0 1.113-1.487 4.471-5.705 7.697-10.677 7.697-4.97 0-9.186-3.223-10.675-7.69a1.762 1.762 0 010-1.113zM17.25 12a5.25 5.25 0 11-10.5 0 5.25 5.25 0 0110.5 0z" clip-rule="evenodd" /></svg>`;
+
+        return `
+            <div class="${cardClass}" onclick="openTickerModal('${data.ticker}')">
+                <div class="signal-icon-wrapper">
+                    ${isSignal ? iconSignal : iconSetup}
+                </div>
+                <div class="info">
+                    <div class="info-header">
+                        <div class="ticker">${data.ticker}</div>
+                        <span class="option-label">${label}</span>
+                    </div>
+                    <div class="signal-details">
+                        <div class="price">@ $${parseFloat(data.price).toFixed(2)}</div>
+                        ${ !isSignal ? `
+                        <div class="ai-score">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 9.75h8.25L9.75 21l2.25-7.302H3.75z" />
+                            </svg>
+                            <span>${aiScore}%</span>
+                        </div>` : '' }
+                    </div>
+                </div>
+                <div class="time">${data.time.split(' ')[1]}</div>
+            </div>`;
     }
     
-    // --- (v3.7) 1회성 API 호출 (스크롤 바) ---
+    // --- [Market] Ticker Scroll Bar (One-time fetch) ---
     async function fetchMarketOverviewData() {
         try {
             const response = await fetch('/api/market_overview');
@@ -300,7 +308,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             let contentHtml = ''; 
 
-            // 헬퍼 함수: 티커 아이템 HTML 생성
             const createItemHtml = (name, value, change) => {
                 let changeClass = 'change-zero';
                 let sign = '';
@@ -311,37 +318,31 @@ document.addEventListener('DOMContentLoaded', function() {
                     changeClass = 'change-negative';
                 }
                 
-                let valueStr = (typeof value === 'number') ? value.toFixed(2) : (value || 'N/A');
+                let valueStr = (typeof value === 'number') ? value.toFixed(2) : (value || '-');
                 let changeStr = (typeof change === 'number') ? `${sign}${change.toFixed(2)}%` : '0.00%';
 
                 return `
                     <div class="scroll-item">
                         <span class="name">${name}</span>
-                        <span class="value">${valueStr}</span>
+                        <span class="value">$${valueStr}</span>
                         <span class="${changeClass}">${changeStr}</span>
                     </div>
                 `;
             };
 
-            // (v3.4) Top Gainers 추가
-            data.gainers.forEach(t => {
+            [...data.gainers, ...data.losers].forEach(t => {
                 contentHtml += createItemHtml(t.ticker, t.day.c, t.todaysChangePerc);
             });
 
-            // (v3.4) Top Losers 추가
-            data.losers.forEach(t => {
-                contentHtml += createItemHtml(t.ticker, t.day.c, t.todaysChangePerc);
-            });
-
-            // (v3.0) 무한 루프를 위해 내용을 2번 복제해서 삽입
+            // Duplicate content for infinite scroll illusion
             scrollingBarTrack.innerHTML = contentHtml + contentHtml;
 
         } catch (error) { 
-            if(scrollingBarTrack) scrollingBarTrack.innerHTML = '<div class="scroll-item">Market Data Load Failed...</div>'; 
+            if(scrollingBarTrack) scrollingBarTrack.innerHTML = '<div class="scroll-item">Market data initializing...</div>'; 
         }
     }
     
-    // --- (v3.11) 5초마다 데이터 새로고침 (DB) ---
+    // --- [Community] Posts Fetching ---
     async function fetchCommunityPosts() {
         try {
             const response = await fetch('/api/posts');
@@ -349,96 +350,120 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             if (data.status !== 'OK') return;
             
-            communityFeedContainer.innerHTML = '';
-            if (data.posts.length > 0) {
-                data.posts.forEach(post => {
-                    communityFeedContainer.innerHTML += `
-                        <div class="post-card">
-                            <div class="post-card-header">
-                                <span class="author">${post.author}</span>
-                                <span class="time">${post.time}</span>
+            if (communityFeedContainer) {
+                communityFeedContainer.innerHTML = '';
+                if (data.posts.length > 0) {
+                    data.posts.forEach(post => {
+                        communityFeedContainer.innerHTML += `
+                            <div class="post-card">
+                                <div class="post-card-header">
+                                    <span class="author">${post.author}</span>
+                                    <span class="time">${post.time}</span>
+                                </div>
+                                <p class="post-card-content">${post.content}</p>
                             </div>
-                            <p class="post-card-content">${post.content}</p>
-                        </div>
-                    `;
-                });
-            } else {
-                communityFeedContainer.innerHTML = '<div class="empty-state">No posts yet. Be the first!</div>';
+                        `;
+                    });
+                } else {
+                    communityFeedContainer.innerHTML = '<div class="empty-state">Start the discussion...</div>';
+                }
             }
         } catch (error) { }
     }
     
-    // --- (v3.0) 모달 제어 함수 ---
+    // --- [Modal] Logic ---
     
-    // ✅ [수정 4] 'window.'를 앞에 추가하고, 꼬인 코드를 정리합니다.
     window.openTickerModal = async function(ticker) {
+        log(`Opening modal for ${ticker}`);
         currentModalTicker = ticker;
-        modal.style.display = 'block';
-        modalTickerName.textContent = ticker;
+        
+        if(modal) {
+            modal.style.display = 'block';
+            // Slight delay for animation if CSS supported
+            requestAnimationFrame(() => modal.classList.add('active'));
+        }
+        
+        if(modalTickerName) modalTickerName.textContent = ticker;
+        
+        // Reset tabs to default state
         showModalTab('info', null, true); 
         
-        document.getElementById('tab-info').innerHTML = '<p>Loading company info...</p>';
-        document.getElementById('tab-quote').innerHTML = '<p>Loading real-time quote...</p>';
-        document.getElementById('tab-financials').innerHTML = '<p>Loading financials summary...</p>';
-        document.getElementById('chart-container').innerHTML = '<p style="padding-left:24px;">Loading 1-min chart...</p>';
+        // Loading states (Skeleton UI concept)
+        const loadingHTML = '<p class="text-muted" style="padding: 20px;">Loading...</p>';
+        document.getElementById('tab-info').innerHTML = loadingHTML;
+        document.getElementById('tab-quote').innerHTML = loadingHTML;
+        document.getElementById('tab-financials').innerHTML = loadingHTML;
+        document.getElementById('chart-container').innerHTML = '<p class="text-muted" style="padding: 24px;">Initializing chart...</p>';
         
-        // (API 1: 호가)
-        try {
-            const quoteResponse = await fetch(`/api/quote/${ticker}`);
-            const quoteData = await quoteResponse.json();
-            renderQuoteTab(quoteData);
-        } catch (e) {
-            document.getElementById('tab-quote').innerHTML = `<p style="color: red;">Quote load failed: ${e.message}</p>`; 
-        }
+        // Parallel Data Fetching
+        loadQuoteData(ticker);
+        loadCompanyData(ticker);
+        loadChartData(ticker);
+        
+        startModalAutoRefresh(ticker);
+    }
 
-        // (API 2: 상세 정보 + 재무)
+    // Modal Data Functions
+    async function loadQuoteData(ticker) {
         try {
-            const detailsResponse = await fetch(`/api/details/${ticker}`);
-            const detailsData = await detailsResponse.json();
+            const res = await fetch(`/api/quote/${ticker}`);
+            const data = await res.json();
+            if (data.status !== 'error') {
+                document.getElementById('tab-quote').innerHTML = `
+                    <div class="quote-title">Live Quote</div>
+                    <div class="quote-line"><span>Bid</span><span>$${data.bid_price} (x${data.bid_size})</span></div>
+                    <div class="quote-line"><span>Ask</span><span>$${data.ask_price} (x${data.ask_size})</span></div>`;
+            }
+        } catch(e) { /* Ignore silently */ }
+    }
+
+    async function loadCompanyData(ticker) {
+        try {
+            const res = await fetch(`/api/details/${ticker}`);
+            const data = await res.json();
             
-            if (detailsData.status === 'OK') {
-                const d = detailsData.results;
+            if (data.status === 'OK') {
+                const d = data.results;
+                const f = d.financials;
+                
                 document.getElementById('tab-info').innerHTML = `
                     <div class="company-details">
-                        <img src="${d.logo_url}" alt="${d.name} logo" onerror="this.src='https://placehold.co/60x60/f0f0f0/999?text=N/A'"> 
+                        <img src="${d.logo_url}" alt="logo" onerror="this.style.display='none'"> 
                         <div class="info">
                             <h3>${d.name}</h3>
-                            <div class="industry">${d.industry || 'N/A'}</div>
+                            <div class="industry">${d.industry || 'Unknown Sector'}</div>
                         </div>
                     </div>
                     <div class="company-description">${d.description}</div>`;
                 
-                const f = detailsData.results.financials;
-                const formatNum = (n) => (typeof n === 'number') ? n.toLocaleString() : 'N/A';
-                const formatRatio = (n) => (typeof n === 'number') ? n.toFixed(2) : 'N/A';
+                const fmt = (n) => (typeof n === 'number') ? n.toLocaleString() : '-';
                 document.getElementById('tab-financials').innerHTML = `
-                    <div class="quote-line"><span>Market Cap</span><span>$${formatNum(f.market_cap)}</span></div>
-                    <div class="quote-line"><span>P/E Ratio</span><span>${formatRatio(f.pe_ratio)}</span></div>
-                    <div class="quote-line"><span>P/S Ratio</span><span>${formatRatio(f.ps_ratio)}</span></div>
-                    <div class="quote-line"><span>Dividend Yield</span><span>${formatRatio(f.dividend_yield)} %</span></div>`;
-            } else {
-                document.getElementById('tab-info').innerHTML = `<p style="color: red;">Could not load company info.</p>`;
-                document.getElementById('tab-financials').innerHTML = `<p style."color: red;">Could not load financials.</p>`;
+                    <div class="quote-title">Financials</div>
+                    <div class="quote-line"><span>Market Cap</span><span>$${fmt(f.market_cap)}</span></div>
+                    <div class="quote-line"><span>P/E Ratio</span><span>${fmt(f.pe_ratio)}</span></div>
+                    <div class="quote-line"><span>P/S Ratio</span><span>${fmt(f.ps_ratio)}</span></div>`;
             }
-        } catch (e) {
-            document.getElementById('tab-info').innerHTML = `<p style="color: red;">Info load failed: ${e.message}</p>`; 
+        } catch(e) {
+            document.getElementById('tab-info').innerHTML = '<p class="text-muted">Details unavailable.</p>';
         }
+    }
 
-        // (API 3: 차트)
+    async function loadChartData(ticker) {
         try {
-            const chartResponse = await fetch(`/api/chart_data/${ticker}`);
-            const chartData = await chartResponse.json();
-            drawChart(chartData); 
-        } catch (e) {
-            document.getElementById('chart-container').innerHTML = `<p style="color: red;">Chart load failed: ${e.message}</p>`; 
+            const res = await fetch(`/api/chart_data/${ticker}`);
+            const data = await res.json();
+            renderChart(data);
+        } catch(e) {
+            document.getElementById('chart-container').innerHTML = '<p class="text-muted">Chart unavailable.</p>';
         }
-        
-        startModalAutoRefresh(ticker);
     }
     
-    // --- (v3.0) 모달 닫기 (차트 리소스 해제) ---
+    // --- [Modal] Close Logic ---
     function closeModal() {
-        modal.style.display = 'none';
+        if(modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('active');
+        }
         stopModalAutoRefresh();
         
         if (lightweightChart) {
@@ -450,209 +475,184 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('chart-container').innerHTML = ''; 
     }
 
-    modalCloseBtn.onclick = closeModal;
+    if(modalCloseBtn) modalCloseBtn.onclick = closeModal;
     window.onclick = function(event) {
-        if (event.target == modal) {
-            closeModal();
-        }
+        if (event.target == modal) closeModal();
     }
 
-    // --- (v3.0) 모달 탭 전환 ---
+    // --- [Modal] Tab Switching ---
     window.showModalTab = function(tabName, clickedButton, isDefault = false) {
-        document.querySelectorAll('.tab-content').forEach(tab => {
-            tab.style.display = 'none';
-        });
-        document.querySelectorAll('.tab-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        document.getElementById(`tab-${tabName}`).style.display = 'block';
+        document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+        document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+        
+        const targetTab = document.getElementById(`tab-${tabName}`);
+        if(targetTab) targetTab.classList.add('active');
+        
         if(isDefault) {
-            document.querySelector('.tab-button[onclick*="\'info\'"]').classList.add('active');
+            const defaultBtn = document.querySelector('.tab-button[onclick*="\'info\'"]');
+            if(defaultBtn) defaultBtn.classList.add('active');
         } else if (clickedButton) {
             clickedButton.classList.add('active');
         }
     }
     
-    // --- (v11.0) 차트 그리기 (CSS 변수 적용) ---
-    function drawChart(chartData) {
-        const chartContainer = document.getElementById('chart-container');
-        chartContainer.innerHTML = ''; 
+    // --- [Chart] Rendering (Visuals matched to CSS) ---
+    function renderChart(chartData) {
+        const container = document.getElementById('chart-container');
+        if(!container) return;
+        container.innerHTML = ''; 
 
         if (lightweightChart) {
             lightweightChart.remove();
             lightweightChart = null;
         }
-        candleSeries = null; 
 
-        if (chartData.status !== 'OK' || chartData.results.length === 0) {
-            chartContainer.innerHTML = '<p style="padding-left:24px; color: red;">Could not load chart data.</p>';
+        if (chartData.status !== 'OK' || !chartData.results || chartData.results.length === 0) {
+            container.innerHTML = '<p class="text-muted" style="padding:24px;">No chart data available.</p>';
             return;
         }
 
-        // ❌ [삭제] 기존 코드: window 객체에서 가져오는 부분 삭제
-        // const { createChart } = window.LightweightCharts; 
+        // Apply theme colors from CSS variables if possible, else hardcode premium theme
+        const chartBg = 'transparent'; 
+        const textColor = '#1D1D1F';
+        const gridColor = 'rgba(0, 0, 0, 0.05)';
+        const upColor = '#34C759'; // Apple Green
+        const downColor = '#FF3B30'; // Apple Red
 
-        // (v11.0) CSS 변수에서 차트 색상 가져오기
-        const style = getComputedStyle(document.body);
-        const chartBackgroundColor = style.getPropertyValue('--bg-card').trim() || '#ffffff';
-        const chartTextColor = style.getPropertyValue('--text-primary').trim() || '#191f28';
-        const chartGridColor = style.getPropertyValue('--border-secondary').trim() || '#f0f0f0';
-        const chartUpColor = style.getPropertyValue('--accent-positive').trim() || '#4a7c59';
-        const chartDownColor = style.getPropertyValue('--accent-negative').trim() || '#5a8bde';
-
-        // ✅ [수정] import한 createChart 함수를 바로 사용
-        lightweightChart = createChart(chartContainer, {
-            width: chartContainer.clientWidth, 
+        lightweightChart = createChart(container, {
+            width: container.clientWidth, 
             height: 350,
             layout: { 
-                backgroundColor: chartBackgroundColor, 
-                textColor: chartTextColor
+                backgroundColor: chartBg, 
+                textColor: textColor,
+                fontFamily: "'Inter', sans-serif"
             },
             grid: { 
-                vertLines: { color: chartGridColor },
-                horzLines: { color: chartGridColor }
+                vertLines: { color: gridColor },
+                horzLines: { color: gridColor }
             },
-            timeScale: { timeVisible: true, secondsVisible: false },
-            attribution: { enabled: false } // (무료 버전 로고 숨김 옵션은 버전에 따라 다를 수 있음)
+            timeScale: { 
+                timeVisible: true, 
+                secondsVisible: false,
+                borderColor: gridColor
+            },
+            rightPriceScale: {
+                borderColor: gridColor
+            }
         });
 
-        // 이제 addCandlestickSeries가 정상적으로 작동할 것입니다.
         candleSeries = lightweightChart.addCandlestickSeries({
-            upColor: chartUpColor,
-            downColor: chartDownColor,
+            upColor: upColor,
+            downColor: downColor,
             borderVisible: false,
-            wickUpColor: chartUpColor,
-            wickDownColor: chartDownColor
+            wickUpColor: upColor,
+            wickDownColor: downColor
         });
 
         candleSeries.setData(chartData.results);
         lightweightChart.timeScale().fitContent();
     }
 
-    
-    // --- (v3.0) 호가 탭 렌더링 ---
-    function renderQuoteTab(quoteData) {
-        if (quoteData.status !== 'error') {
-            document.getElementById('tab-quote').innerHTML = `
-                <div class="quote-line"><span>Bid Price</span><span>$${quoteData.bid_price}</span></div>
-                <div class="quote-line"><span>Bid Size</span><span>${quoteData.bid_size}</span></div>
-                <div class="quote-line"><span>Ask Price</span><span>$${quoteData.ask_price}</span></div>
-                <div class="quote-line"><span>Ask Size</span><span>${quoteData.ask_size}</span></div>`;
-        } else {
-            document.getElementById('tab-quote').innerHTML = `<p style="color: red;">Could not load quote data.</p>`;
-        }
-    }
-
-    // --- (v3.0) 모달 5초 새로고침 ---
+    // --- [Modal] Auto Refresh (5s) ---
     function startModalAutoRefresh(ticker) {
         stopModalAutoRefresh(); 
         
         modalRefreshInterval = setInterval(async () => {
-            if (!modal.style.display || modal.style.display === 'none' || currentModalTicker !== ticker) {
+            if (!modal || modal.style.display === 'none' || currentModalTicker !== ticker) {
                 stopModalAutoRefresh();
                 return;
             }
+            // Silent refresh: Quote & Chart only
+            loadQuoteData(ticker);
             
             try {
-                // (호가 업데이트)
-                try {
-                    const quoteResponse = await fetch(`/api/quote/${ticker}`);
-                    const quoteData = await quoteResponse.json();
-                    if (modal.style.display === 'block') {
-                        renderQuoteTab(quoteData);
-                    }
-                } catch (e) {}
-                
-                // (차트 업데이트)
-                try {
-                    const chartResponse = await fetch(`/api/chart_data/${ticker}`);
-                    const chartData = await chartResponse.json();
-                    
-                    if (chartData.status === 'OK' && candleSeries && lightweightChart) {
-                        candleSeries.setData(chartData.results);
-                        lightweightChart.timeScale().fitContent();
-                    }
-                } catch (e) {}
-            } catch (e) { }
+                const res = await fetch(`/api/chart_data/${ticker}`);
+                const data = await res.json();
+                if (data.status === 'OK' && candleSeries) {
+                    candleSeries.setData(data.results);
+                }
+            } catch (e) {}
         }, 5000);
     }
     
     function stopModalAutoRefresh() {
         if (modalRefreshInterval) {
             clearInterval(modalRefreshInterval);
+            modalRefreshInterval = null;
         }
-        modalRefreshInterval = null;
     }
     
-    // --- (v3.11) 커뮤니티 폼 제출 ---
-    postSubmitBtn.addEventListener('click', async function() {
-        const author = postForm.elements['author'].value;
-        const content = postForm.elements['content'].value;
-        
-        if (!content || !author) {
-            console.warn('Name and content are required.');
-            return;
-        }
-        
-        try {
-            const response = await fetch('/api/posts', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ author: author, content: content }),
-            });
+    // --- [Community] Post Submission ---
+    if(postSubmitBtn) {
+        postSubmitBtn.addEventListener('click', async function() {
+            const author = postForm.elements['author'].value;
+            const content = postForm.elements['content'].value;
             
-            const result = await response.json();
-            
-            if (result.status === 'OK') {
-                postForm.elements['content'].value = '';
-                fetchCommunityPosts();
-            } else {
-                console.error(`Error: ${result.message}`);
+            if (!content || !author) {
+                alert('Please enter your name and a message.');
+                return;
             }
-        } catch (error) {
-            console.error(`Post failed: ${error.message}`);
-        }
-    });
+            
+            try {
+                // UI Feedback
+                postSubmitBtn.disabled = true;
+                postSubmitBtn.textContent = 'Posting...';
+                
+                const response = await fetch('/api/posts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ author: author, content: content }),
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'OK') {
+                    postForm.elements['content'].value = '';
+                    fetchCommunityPosts(); // Refresh feed immediately
+                } else {
+                    alert(`Error: ${result.message}`);
+                }
+            } catch (error) {
+                alert("Failed to post message.");
+            } finally {
+                postSubmitBtn.disabled = false;
+                postSubmitBtn.textContent = 'Post Message';
+            }
+        });
+    }
 
-    // --- 11. 프로그램 시작 (v3.7 기준) ---
+    // --- [Init] Start Application Loops ---
+    // Initial fetch
+    fetchMarketOverviewData(); 
+    fetchDashboardData();
+    fetchCommunityPosts();
+
+    // Periodic intervals (5s)
     setInterval(() => {
         fetchDashboardData();   
         fetchCommunityPosts();  
     }, 5000);
 
-    fetchMarketOverviewData(); // (API 1번 호출)
-
-    fetchDashboardData();
-    fetchCommunityPosts();
-
-    // --- PWA 서비스 워커 등록 ---
+    // --- [Init] PWA Service Worker ---
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js') // sw.js 파일 경로
-          .then(registration => {
-            console.log('✅ ServiceWorker registration successful:', registration.scope);
-            
-            // (requestNotificationPermission() 호출 코드는 수동 버튼 리스너로 대체되었습니다.)
-
-          })
-          .catch(err => {
-            console.log('❌ ServiceWorker registration failed:', err);
-          });
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => log('ServiceWorker registered.', reg.scope))
+          .catch(err => errorLog('ServiceWorker failed.', err));
       });
     }
 
-}); // <--- DOMContentLoaded 함수가 끝나는 지점입니다.
-// --- [추가] Dashboard Background Animation (Vortex) ---
+}); // End DOMContentLoaded
+
+
+// --- [Visual] Dashboard Background Animation (Metallic Vortex) ---
 function initDashboardBg() {
     const canvas = document.getElementById('heroCanvas');
-    if (!canvas) return; // 캔버스가 없으면 중단
+    if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     let width, height;
     
-    // 리사이징 처리
     function resize() {
         width = window.innerWidth;
         height = window.innerHeight;
@@ -662,48 +662,40 @@ function initDashboardBg() {
     window.addEventListener('resize', resize);
     resize();
 
-    // 파티클 클래스 (랜딩 페이지의 Vortex 축소판)
-    class Star {
-        constructor() {
-            this.reset();
-        }
+    // Particles: Subtle Metallic Dust
+    class Dust {
+        constructor() { this.reset(); }
         reset() {
-            this.angle = Math.random() * Math.PI * 2;
-            this.radius = Math.random() * Math.max(width, height) * 0.7;
-            this.speed = (1 / (this.radius + 50)) * 20; // 중심일수록 빠름
+            this.x = Math.random() * width;
+            this.y = Math.random() * height;
+            this.vx = (Math.random() - 0.5) * 0.5;
+            this.vy = (Math.random() - 0.5) * 0.5;
             this.size = Math.random() * 1.5;
-            this.opacity = Math.random() * 0.5 + 0.1;
+            this.opacity = Math.random() * 0.3 + 0.1;
         }
         update() {
-            this.angle += this.speed * 0.002; // 천천히 회전
-            this.radius -= 0.1; // 아주 천천히 중심으로 빨려듬
-            
-            if (this.radius < 10) this.reset(); // 블랙홀 흡수 후 재생성
-
-            this.x = width/2 + Math.cos(this.angle) * this.radius;
-            this.y = height/2 + Math.sin(this.angle) * this.radius;
+            this.x += this.vx;
+            this.y += this.vy;
+            if(this.x < 0 || this.x > width || this.y < 0 || this.y > height) this.reset();
             this.draw();
         }
         draw() {
-            ctx.fillStyle = `rgba(139, 255, 176, ${this.opacity})`; // Neon Green Tint
+            ctx.fillStyle = `rgba(100, 100, 110, ${this.opacity})`; // Metallic Grey
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
             ctx.fill();
         }
     }
 
-    // 파티클 생성
-    const stars = [];
-    for(let i=0; i<600; i++) stars.push(new Star());
+    const particles = [];
+    for(let i=0; i<300; i++) particles.push(new Dust());
 
     function animate() {
-        ctx.fillStyle = 'rgba(10, 15, 31, 0.2)'; // 잔상 효과 (Deep Navy)
-        ctx.fillRect(0, 0, width, height);
-        stars.forEach(star => star.update());
+        ctx.clearRect(0, 0, width, height);
+        particles.forEach(p => p.update());
         requestAnimationFrame(animate);
     }
     animate();
 }
 
-// DOM 로드 시 실행
 document.addEventListener('DOMContentLoaded', initDashboardBg);

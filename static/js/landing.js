@@ -199,7 +199,7 @@ function drawChart() {
 // --- 메인 루프 ---
 // Optimization: Reduce particle count for mobile
 const isMobile = width < 768;
-const particleCount = isMobile ? 300 : 700; // 파티클 수를 줄여 여백의 미 강조
+const particleCount = isMobile ? 150 : 400; // 파티클 수를 줄여 여백의 미 강조
 let particles = [];
 
 function initParticles() {

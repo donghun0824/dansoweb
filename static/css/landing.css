@@ -47,15 +47,25 @@
     --glass-highlight: var(--metal-highlight);
 }
 
-/* 2. Body & Background Setup */
 body {
-    margin: 0;
-    padding: 0;
-    overflow-x: hidden;
+    margin: 0; padding: 0; overflow-x: hidden;
     background-color: var(--metal-dark-bg);
-    /* Layered Lighting: Base color + Spotlight */
-    background-image: var(--spotlight-gradient);
-    background-attachment: fixed;
+    
+    /* 상단 조명 */
+    background-image: radial-gradient(
+        circle at 50% -10%, 
+        rgba(255, 255, 255, 1.0) 0%, 
+        rgba(255, 255, 255, 0.5) 20%, 
+        transparent 70%
+    );
+    
+    /* 🔥 [삭제] 이 속성이 모바일 렉 유발 1순위입니다. 무조건 지우세요! */
+    /* background-attachment: fixed; */ 
+    
+    /* 대신 이걸 추가해서 배경이 반복되지 않게만 설정 */
+    background-repeat: no-repeat;
+    background-size: 100% 100vh; /* 배경을 화면 크기에 맞춤 */
+    
     color: var(--text-primary);
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
