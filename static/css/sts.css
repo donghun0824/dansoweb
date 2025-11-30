@@ -1,11 +1,13 @@
-/* --- STS ENGINE CONSOLE STYLE (Premium Space Black Metallic Theme) --- */
+/* --- STS ENGINE CONSOLE STYLE (Premium Apple Metallic Theme) --- */
 
 /* 1. Global Layout overrides for STS */
 .main-container.full-width {
     max-width: 1400px;
     padding: 20px;
-    /* Clean metallic background ambiance */
-    background: radial-gradient(circle at 50% -20%, #1a1a1d 0%, #050505 100%);
+    /* Brushed Aluminum MacBook Feel */
+    background: 
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.8) 0%, transparent 60%),
+        linear-gradient(145deg, #E3E4E6 0%, #D1D3D7 100%);
 }
 
 /* Header Specific */
@@ -15,48 +17,47 @@
     align-items: center;
     margin-bottom: 24px;
     padding-bottom: 16px;
-    /* Metallic separator line */
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    /* Clean metallic divider */
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .brand-logo {
     font-family: var(--font-primary);
     font-size: 24px;
-    font-weight: 700; /* Adjusted for clean readability */
-    font-style: normal; /* Removed italic for modern look */
-    color: #e2e2e2; /* Matte White */
-    text-shadow: none; /* Removed neon glow */
+    font-weight: 700; 
+    font-style: normal; 
+    /* Matte Black Text (No Glow) */
+    color: #111111;
+    text-shadow: none;
     letter-spacing: -0.5px;
 }
 .brand-logo span { 
-    color: var(--neon-green); 
-    text-shadow: 0 0 10px rgba(0, 255, 157, 0.15); /* Very subtle accent glow */
+    /* Subtle Apple Green Accent */
+    color: #06C167; 
+    text-shadow: none;
 }
 
 .system-status {
     display: flex; gap: 24px;
     font-size: 13px;
-    color: #9ca3af; /* Matte Gray */
+    color: #666666; /* Matte Deep Gray */
     font-weight: 500;
 }
 .status-item { display: flex; align-items: center; gap: 8px; }
 .dot {
-    width: 6px; height: 6px; /* Smaller, sharper dot */
-    background: var(--neon-green);
+    width: 6px; height: 6px;
+    background: #06C167;
     border-radius: 50%; 
-    box-shadow: 0 0 4px var(--neon-green); /* Minimal glow */
+    box-shadow: none; /* Clean flat dot */
 }
-.blink { animation: blinker 3s infinite; } /* Slower, elegant pulse */
-@keyframes blinker { 
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; } 
-}
+.blink { animation: blinker 2s infinite; }
+@keyframes blinker { 50% { opacity: 0.4; } }
 
 /* 2. Grid System */
 .sts-grid {
     display: grid;
     grid-template-columns: 1.5fr 1fr;
-    gap: 24px; /* Increased gap for cleaner layout */
+    gap: 24px; 
 }
 .full-span { grid-column: 1 / -1; }
 
@@ -65,160 +66,163 @@
     .sts-grid { grid-template-columns: 1fr; }
 }
 
-/* 3. Premium Glass-Metal Card & Typography Utils */
+/* 3. Premium Glass Card & Typography Utils */
 .glass-card {
-    /* Deep Space Black Metallic Surface */
-    background: rgba(20, 20, 22, 0.6);
-    backdrop-filter: blur(40px);
-    -webkit-backdrop-filter: blur(40px);
+    /* Frosted White Glass */
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
     
-    /* Metallic Rim Border */
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-top: 1px solid rgba(255, 255, 255, 0.12); /* Subtle top light catch */
+    /* Subtle Metal Rim */
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.9); 
     
-    border-radius: 16px; /* Tighter radius for premium feel */
+    border-radius: 18px;
     padding: 24px;
     
-    /* Soft Ambient Shadow (Elevation) */
-    box-shadow: 
-        0 10px 40px -10px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    /* Soft Ambient Shadow (Apple Elevation) */
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
 .card-header {
     display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 20px; padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 .card-header h3 {
     margin: 0; font-size: 15px; 
-    color: #f5f5f5; /* Clean White */
+    color: #111111; /* Black Text */
     font-weight: 600;
     display: flex; align-items: center; gap: 10px;
-    letter-spacing: 0.2px;
+    letter-spacing: -0.2px;
 }
 .card-header h3 i { 
-    color: var(--neon-green); 
+    color: #06C167; 
     font-size: 14px;
-    opacity: 0.9;
 }
 
 .mono-text { 
     font-family: 'JetBrains Mono', monospace; 
+    color: #333;
     letter-spacing: -0.3px;
 }
-.text-green { color: var(--neon-green); }
-.text-dim { color: #6b7280; } /* Muted Gray */
-.text-warn { color: #fbbf24; } /* Warm Amber */
-.text-highlight { color: #ffffff; font-weight: 600; }
+.text-green { color: #06C167; font-weight: 600; }
+.text-dim { color: #888888; }
+.text-warn { color: #FF9500; } /* Apple Amber */
+.text-highlight { color: #111111; font-weight: 700; }
 .mb-20 { margin-bottom: 20px; }
 .mt-15 { margin-top: 15px; }
 
-/* 4. Table Styles - Clean Minimalist */
+/* 4. Table Styles - Minimalist Clean */
 .sts-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sts-table th {
     text-align: left; 
-    color: #9ca3af; 
+    color: #666666; 
     font-weight: 500;
     padding: 12px 16px; 
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
     font-size: 11px; 
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.5px;
 }
 .sts-table td {
     padding: 16px; 
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-    color: #e5e7eb; 
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    color: #111111; 
     vertical-align: middle;
     font-weight: 400;
 }
 
-/* Ticker Badge - Metallic Chip Style */
+/* Ticker Badge - Metallic Pill */
 .ticker-badge {
-    background: rgba(255, 255, 255, 0.05);
-    color: #fff;
+    background: #FFFFFF;
+    color: #111111;
     padding: 6px 10px; border-radius: 6px;
     font-family: var(--font-mono); 
     font-weight: 600; font-size: 13px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 /* Status Badges */
 .status-badge {
     padding: 4px 10px; border-radius: 99px;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
     text-transform: uppercase;
 }
 .status-badge.aiming {
-    background: rgba(0, 255, 157, 0.1); 
-    color: var(--neon-green);
-    border: 1px solid rgba(0, 255, 157, 0.3);
-    /* Removed heavy pulse, kept subtle ring */
-    box-shadow: 0 0 0 1px rgba(0, 255, 157, 0.1);
+    background: rgba(6, 193, 103, 0.1); 
+    color: #06C167;
+    border: 1px solid rgba(6, 193, 103, 0.3);
+    animation: none; /* Removing harsh pulse */
 }
 .status-badge.watching {
-    background: rgba(255, 255, 255, 0.03); 
-    color: #6b7280;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.03); 
+    color: #888;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+/* Keep animation name but disable aggressive styling */
+@keyframes pulse-border {
+    0% { box-shadow: 0 0 0 0 rgba(6, 193, 103, 0.2); }
+    70% { box-shadow: 0 0 0 4px rgba(6, 193, 103, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(6, 193, 103, 0); }
 }
 
 /* 5. Microstructure & Risk Components */
 .micro-row {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 16px; font-size: 13px; color: #d1d5db;
+    margin-bottom: 16px; font-size: 13px; color: #555;
 }
 .micro-item {
     display: flex; justify-content: space-between; align-items: center;
     padding-top: 16px; margin-top: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
-    font-size: 13px; color: #9ca3af;
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+    font-size: 13px; color: #666;
 }
 .progress-wrapper { text-align: right; width: 60%; }
-.val-text { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; }
+.val-text { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; color: #111; }
 
-/* Progress Bar - Sleek Minimal */
+/* Progress Bar - Matte Clean */
 .progress-bg {
-    height: 3px; 
-    background: rgba(255, 255, 255, 0.08);
+    height: 4px; 
+    background: rgba(0, 0, 0, 0.06);
     border-radius: 2px; overflow: hidden;
 }
 .progress-fill { height: 100%; transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
 .progress-fill.green { 
-    background: var(--neon-green); 
-    box-shadow: 0 0 8px rgba(0, 255, 157, 0.2); /* Reduced glow */
+    background: #06C167; 
+    box-shadow: none; 
 }
-.progress-fill.warn { background: #fbbf24; }
+.progress-fill.warn { background: #FF9500; }
 
 .risk-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
 }
 .risk-item {
-    background: rgba(255, 255, 255, 0.02); /* Very subtle fill */
+    background: rgba(0, 0, 0, 0.02); 
     padding: 16px; border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.04);
     display: flex; flex-direction: column; gap: 6px;
 }
-.risk-item .label { font-size: 11px; color: #6b7280; font-weight: 500; letter-spacing: 0.5px; }
-.risk-item .value { font-size: 18px; font-weight: 600; color: #f3f4f6; letter-spacing: -0.5px; }
+.risk-item .label { font-size: 11px; color: #888; font-weight: 500; letter-spacing: 0.5px; }
+.risk-item .value { font-size: 18px; font-weight: 700; color: #111; letter-spacing: -0.5px; }
 .risk-item.highlight { 
-    border: 1px solid rgba(0, 255, 157, 0.3); 
-    background: rgba(0, 255, 157, 0.02); 
-    box-shadow: inset 0 0 20px rgba(0, 255, 157, 0.02);
+    border: 1px solid rgba(6, 193, 103, 0.3); 
+    background: rgba(6, 193, 103, 0.05); 
 }
 
 /* 6. Performance & Heatmap */
 .stat-flex { display: flex; gap: 16px; margin-bottom: 24px; }
 .stat-box {
     flex: 1; text-align: center;
-    background: rgba(255, 255, 255, 0.02); 
+    background: rgba(255, 255, 255, 0.6); 
     padding: 20px; border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
 }
 .stat-box .val { 
     font-size: 28px; font-weight: 700; margin-top: 8px; 
-    color: #fff; letter-spacing: -1px;
+    color: #111; letter-spacing: -1px;
 }
 
 .chart-mini { margin-top: 10px; }
@@ -228,45 +232,47 @@
 }
 .bar { 
     flex: 1; 
-    background: rgba(255, 255, 255, 0.08); 
+    background: rgba(0, 0, 0, 0.08); 
     border-radius: 2px;
 }
 .bar.active { 
-    background: var(--neon-green); 
-    opacity: 0.8; /* Matte finish */
-    box-shadow: 0 0 8px rgba(0, 255, 157, 0.15); 
+    background: #06C167; 
+    opacity: 0.9; 
+    box-shadow: none; 
 }
 
 .heatmap-grid { display: flex; gap: 12px; }
 .heat-block {
     flex: 1; padding: 16px 0; text-align: center;
     border-radius: 8px; font-weight: 600; font-size: 12px; 
-    color: #1a1a1a;
+    color: #333;
     transition: transform 0.2s;
 }
 .heat-block.hot { 
-    background: var(--neon-green); 
-    box-shadow: 0 4px 12px rgba(0, 255, 157, 0.2); 
+    background: rgba(6, 193, 103, 0.2); 
+    color: #04723A;
+    box-shadow: none; 
+    border: 1px solid rgba(6, 193, 103, 0.3);
 }
 .heat-block.warm { 
-    background: rgba(0, 255, 157, 0.3); 
-    color: #fff; 
-    border: 1px solid rgba(0, 255, 157, 0.2);
+    background: rgba(0, 0, 0, 0.05); 
+    color: #333; 
+    border: 1px solid rgba(0, 0, 0, 0.1);
 }
 .heat-block.cool { 
-    background: rgba(255, 255, 255, 0.05); 
-    color: #9ca3af; 
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.02); 
+    color: #999; 
+    border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 /* Mini Bar in Table */
 .mini-bar {
-    width: 80px; height: 3px; 
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 2px; overflow: hidden;
+    width: 80px; height: 4px; 
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 2px;
 }
 .mini-bar div {
-    height: 100%; background: var(--neon-green);
-    /* No heavy shadow, just clean fill */
+    height: 100%; background: #06C167;
+    box-shadow: none;
     opacity: 0.9;
 }

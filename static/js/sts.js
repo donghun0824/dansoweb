@@ -2,7 +2,7 @@
 // (V5.3) STS Dashboard Engine: Deep Space Visuals & Real-time Data Binding
 
 /* ==========================================================================
-   PART 1. VISUAL ENGINE (배경 효과 - 건드리지 않음)
+   PART 1. VISUAL ENGINE (배경 효과 )
    ========================================================================== */
 const canvas = document.getElementById('heroCanvas');
 const ctx = canvas.getContext('2d');
