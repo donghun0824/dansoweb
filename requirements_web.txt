@@ -54,3 +54,5 @@ yfinance==0.2.66
 psycopg2-binary
 Flask-Login
 Authlib
+flask-socketio
+redis

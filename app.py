@@ -1,35 +1,126 @@
+import os
+import json
+import secrets
+import requests
+from datetime import datetime, timedelta
+import logging
+from concurrent.futures import ThreadPoolExecutor
+
+# Frameworks
 from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from authlib.integrations.flask_client import OAuth
-import secrets 
-import json
-import os
-import requests
-from datetime import datetime, timedelta
+from flask_socketio import SocketIO, emit
+# Database & Cache
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import redis
+
+# --- 1. CONFIGURATION & SETUP ---
 
 app = Flask(__name__)
-
-# --- 1. 설정 및 환경 변수 ---
 app.secret_key = os.environ.get('SECRET_KEY', 'dev_key_for_session')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 API_KEY = os.environ.get('POLYGON_API_KEY')
 DATABASE_URL = os.environ.get('DATABASE_URL')
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
-# --- 2. DB 연결 함수 ---
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("DansoBackend")
+
+# WebSocket Setup (Async Mode)
+# Using 'gevent' or 'eventlet' is recommended for production
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading') 
+
+# Redis Client Setup (Safe Fallback)
+try:
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=1)
+    redis_client.ping()
+    logger.info("✅ [Cache] Redis connected.")
+except Exception as e:
+    logger.warning(f"⚠️ [Cache] Redis connection failed: {e}. Running without cache.")
+    redis_client = None
+
+# Thread Pool for DB Concurrency
+executor = ThreadPoolExecutor(max_workers=4)
+
+# --- 2. DATABASE HELPER FUNCTIONS ---
+
 def get_db_connection():
-    """PostgreSQL DB 연결을 생성합니다."""
+    """Creates a fresh PostgreSQL connection."""
     if not DATABASE_URL:
-        raise ValueError("DATABASE_URL 환경 변수가 설정되지 않았습니다.")
+        raise ValueError("DATABASE_URL environment variable is missing.")
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
-# --- 3. Flask-Login 설정 ---
+def init_db():
+    """Initialize database tables on startup."""
+    conn = None
+    try:
+        if not DATABASE_URL: return
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Create Tables
+        cursor.execute("""CREATE TABLE IF NOT EXISTS status (key TEXT PRIMARY KEY, value TEXT NOT NULL, last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS signals (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, price REAL NOT NULL, time TIMESTAMP NOT NULL)""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS recommendations (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL UNIQUE, price REAL NOT NULL, time TIMESTAMP NOT NULL, probability_score INTEGER)""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, author TEXT NOT NULL, content TEXT NOT NULL, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS fcm_tokens (id SERIAL PRIMARY KEY, token TEXT NOT NULL UNIQUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                oauth_provider TEXT,
+                is_premium BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # STS Targets Table (Expected from Pipeline)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sts_live_targets (
+                ticker TEXT PRIMARY KEY,
+                price REAL,
+                ai_score REAL,
+                obi REAL,
+                vpin REAL,
+                tick_speed INTEGER,
+                vwap_dist REAL,
+                status TEXT,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+        
+        # Schema Migrations (Safe)
+        migrations = [
+            "ALTER TABLE recommendations ADD COLUMN probability_score INTEGER",
+            "ALTER TABLE fcm_tokens ADD COLUMN min_score INTEGER DEFAULT 0"
+        ]
+        for query in migrations:
+            try:
+                cursor.execute(query)
+                conn.commit()
+            except psycopg2.Error as e:
+                conn.rollback()
+                if e.pgcode != '42701': # Ignore 'duplicate column' errors
+                    logger.error(f"Migration Error: {e}")
+
+        cursor.close()
+        conn.close()
+        logger.info("✅ [DB] Init success.")
+    except Exception as e:
+        if conn: conn.close()
+        logger.error(f"❌ [DB] Init failed: {e}")
+
+# --- 3. AUTHENTICATION & LOGIN CONFIG ---
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login_page'
 
-# --- 4. Google OAuth 설정 ---
 oauth = OAuth(app)
 oauth.register(
     name='google',
@@ -39,7 +130,6 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
-# --- 5. User 모델 (세션 관리용) ---
 class User(UserMixin):
     def __init__(self, id, email, is_premium=False):
         self.id = str(id)
@@ -57,51 +147,56 @@ def load_user(user_id):
         if user_data:
             return User(id=user_data[0], email=user_data[1], is_premium=user_data[2])
     except Exception as e:
-        print(f"Login session error: {e}")
+        logger.error(f"Login session error: {e}")
     finally:
         if conn: conn.close()
     return None
 
+# --- 4. WEBSOCKET HANDLERS ---
 
-# --- 6. 페이지 라우트 ---
+@socketio.on('connect', namespace='/ws/dashboard')
+def handle_connect():
+    logger.info("[WS] Client connected to dashboard stream")
+    # Optionally push immediate data upon connection
+    # emit('dashboard_update', {'msg': 'Welcome'}, namespace='/ws/dashboard')
 
-# 겉지 (Landing Page)
-@app.route('/')
-def landing_page():
-    return render_template('landing.html') 
+def broadcast_dashboard_update(payload):
+    """Helper to broadcast data to all connected dashboard clients."""
+    try:
+        socketio.emit('dashboard_update', payload, namespace='/ws/dashboard')
+    except Exception as e:
+        logger.error(f"WebSocket Broadcast Error: {e}")
 
-# 로그인 페이지
-@app.route('/login')
-def login_page():
-    if current_user.is_authenticated:
-        return redirect(url_for('dashboard_page'))
-    return render_template('login.html')
+# --- 5. CORE API: UNIFIED DASHBOARD (Optimized) ---
 
-# 속지 (Dashboard) - 로그인 필수
-@app.route('/dashboard') 
-@login_required
-def dashboard_page():
-    return render_template('dashboard.html', user=current_user)
-
-# 1. [페이지] 사용자가 접속하는 화면 (HTML 렌더링)
-@app.route('/sts')
-@login_required  # 로그인한 사람만 볼 수 있게 하려면 추가
-def sts_page():
-    # templates/sts.html 파일을 찾아서 보여줌
-    return render_template('sts.html')
-
-@app.route('/api/sts/status')
-def get_sts_status():
+def fetch_unified_data_from_db():
+    """
+    Performs synchronous DB queries to fetch all dashboard data.
+    Designed to be run in a thread executor.
+    """
     conn = None
     try:
-        conn = get_db_connection() 
-        # 딕셔너리 형태로 데이터를 받기 위해 RealDictCursor 사용
-        cursor = conn.cursor(cursor_factory=RealDictCursor) 
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        # [핵심 수정] 
-        # 1. FIRED(격발) > AIMING(조준) > 점수 높은 순 정렬
-        # 2. 상위 3개만 조회 (LIMIT 3) -> 화면이 깔끔해짐
-        query = """
+        # 1. SCANNER: Status
+        cursor.execute("SELECT value FROM status WHERE key = 'status_data' ORDER BY last_updated DESC LIMIT 1")
+        status_row = cursor.fetchone()
+        scanner_status = json.loads(status_row['value']) if status_row else {
+            'last_scan_time': 'Initializing...', 'watching_count': 0, 'watching_tickers': []
+        }
+
+        # 2. SCANNER: Signals (Explosions)
+        cursor.execute("SELECT ticker, price, TO_CHAR(time, 'HH24:MI:SS') as time FROM signals ORDER BY time DESC LIMIT 50")
+        signals = cursor.fetchall()
+
+        # 3. SCANNER: Recommendations (Setups)
+        cursor.execute("SELECT ticker, price, TO_CHAR(time, 'HH24:MI:SS') as time, probability_score FROM recommendations ORDER BY time DESC LIMIT 50")
+        recommendations = cursor.fetchall()
+
+        # 4. STS: Top 3 Active Targets
+        # Sorting Logic: FIRED > AIMING > High Score
+        cursor.execute("""
             SELECT ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status 
             FROM sts_live_targets 
             ORDER BY 
@@ -112,89 +207,131 @@ def get_sts_status():
                 END ASC,
                 ai_score DESC
             LIMIT 3
-        """
-        cursor.execute(query)
-        rows = cursor.fetchall()
+        """)
+        raw_targets = cursor.fetchall()
         
-        targets = []
-        for r in rows:
-            # DB에 점수가 없으면(None) 0으로 처리
+        # Normalize STS data for frontend
+        sts_targets = []
+        for r in raw_targets:
             raw_score = r.get('ai_score') or 0
-            
-            targets.append({
+            sts_targets.append({
                 'ticker': r['ticker'],
                 'price': r['price'],
-                'ai_prob': raw_score / 100.0, # 100점 만점 -> 0.xx 확률로 변환
+                'ai_prob': raw_score / 100.0,
+                'ai_score_raw': raw_score,
                 'obi': r['obi'],
                 'vpin': r['vpin'],
                 'tick_speed': r['tick_speed'],
                 'vwap_dist': r['vwap_dist'],
                 'status': r['status']
             })
-            
-        # 2. 최근 신호 로그 (필요 시 활성화, 없으면 빈 리스트)
-        try:
-            cursor.execute("""
-                SELECT time, ticker, price, score 
-                FROM signals 
-                ORDER BY time DESC LIMIT 5
-            """)
-            log_rows = cursor.fetchall()
-        except:
-            log_rows = []
 
-        logs = []
-        for l in log_rows:
-            logs.append({
-                'timestamp': l['time'].strftime('%H:%M:%S'),
-                'ticker': l['ticker'],
-                'price': l['price'],
-                'score': l['score']
-            })
-            
         cursor.close()
-        
-        return jsonify({
-            'targets': targets,
-            'logs': logs
-        })
-        
-    except psycopg2.errors.UndefinedTable:
-        # 봇이 아직 한 번도 실행되지 않아 테이블이 없는 경우
-        if conn: conn.rollback()
-        return jsonify({'targets': [], 'logs': []})
-        
+
+        # Reuse recent signals as STS logs if specific log table doesn't exist
+        sts_logs = signals[:5] 
+
+        return {
+            "scanner": {
+                "status": scanner_status,
+                "signals": signals,
+                "recommendations": recommendations
+            },
+            "sts": {
+                "targets": sts_targets,
+                "recent_logs": sts_logs
+            },
+            "meta": {
+                "server_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "db_status": "connected"
+            }
+        }
+
     except Exception as e:
-        print(f"❌ API Error: {e}")
-        return jsonify({'targets': [], 'logs': [], 'error': str(e)})
-        
+        logger.error(f"DB Query Error in fetch_unified_data: {e}")
+        return None # Signal failure
     finally:
-        if conn: 
-            conn.close()
+        if conn: conn.close()
 
-# --- 7. 인증(Auth) 라우트 ---
 
-# 구글 로그인 시작
+@app.route('/api/dashboard/unified')
+@login_required
+def get_unified_dashboard():
+    """
+    Unified endpoint for Dashboard.
+    Strategy:
+    1. Check Redis Cache (TTL 2s)
+    2. If Miss: Query DB (via ThreadPool) -> Update Cache -> Broadcast WS
+    3. If Redis down: Query DB directly
+    """
+    CACHE_KEY = "unified_dashboard_v1"
+    TTL = 2
+    
+    # A. Try Cache First
+    if redis_client:
+        try:
+            cached_data = redis_client.get(CACHE_KEY)
+            if cached_data:
+                response = json.loads(cached_data)
+                response['meta']['cache'] = 'redis'
+                return jsonify(response)
+        except Exception as e:
+            logger.warning(f"Redis Read Error: {e}")
+
+    # B. Cache Miss or Redis Down -> Query Database
+    future = executor.submit(fetch_unified_data_from_db)
+    db_data = future.result()
+
+    if not db_data:
+        return jsonify({"error": "Failed to fetch data from DB"}), 500
+
+    # C. Update Cache & Broadcast
+    db_data['meta']['cache'] = 'db'
+    
+    if redis_client:
+        try:
+            redis_client.setex(CACHE_KEY, TTL, json.dumps(db_data))
+            broadcast_dashboard_update(db_data)
+        except Exception as e:
+            logger.warning(f"Redis Write Error: {e}")
+
+    return jsonify(db_data)
+
+# --- 6. PAGE ROUTES ---
+
+@app.route('/')
+def landing_page():
+    return render_template('landing.html') 
+
+@app.route('/login')
+def login_page():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard_page'))
+    return render_template('login.html')
+
+@app.route('/dashboard') 
+@login_required
+def dashboard_page():
+    return render_template('dashboard.html', user=current_user)
+
+@app.route('/sts')
+@login_required
+def sts_page():
+    return render_template('sts.html')
+
+# --- 7. AUTH ROUTES ---
+
 @app.route('/auth/google')
 def google_login():
     redirect_uri = url_for('google_callback', _external=True)
-    
     nonce = secrets.token_urlsafe(16)
     session['google_auth_nonce'] = nonce
-    
-    return oauth.google.authorize_redirect(
-        redirect_uri,
-        access_type='offline',
-        prompt='consent',
-        nonce=nonce 
-    )
+    return oauth.google.authorize_redirect(redirect_uri, access_type='offline', prompt='consent', nonce=nonce)
 
-# 구글 로그인 콜백
 @app.route('/auth/google/callback')
 def google_callback():
     try:
         token = oauth.google.authorize_access_token()
-        
         nonce = session.pop('google_auth_nonce', None) 
         user_info = oauth.google.parse_id_token(token, nonce=nonce)
         email = user_info['email']
@@ -206,37 +343,28 @@ def google_callback():
         user_data = cursor.fetchone()
         
         if not user_data:
-            # 신규 가입
-            cursor.execute(
-                "INSERT INTO users (email, oauth_provider, is_premium) VALUES (%s, 'google', FALSE) RETURNING id", 
-                (email,)
-            )
+            cursor.execute("INSERT INTO users (email, oauth_provider, is_premium) VALUES (%s, 'google', FALSE) RETURNING id", (email,))
             new_user_id = cursor.fetchone()[0]
             conn.commit()
             user = User(id=new_user_id, email=email, is_premium=False)
         else:
-            # 기존 유저
             user = User(id=user_data[0], email=user_data[1], is_premium=user_data[2])
         
         cursor.close()
         conn.close()
-        
         login_user(user)
         return redirect(url_for('dashboard_page'))
-        
     except Exception as e:
-        print(f"OAuth Error: {e}")
-        return "Google Login Failed. Please try again. (Check server logs for details)", 400
+        logger.error(f"OAuth Error: {e}")
+        return "Google Login Failed. Please try again.", 400
 
-# 로그아웃
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('landing_page'))
 
-
-# --- 8. 정적 파일 서빙 ---
+# --- 8. STATIC FILES ---
 
 @app.route('/sw.js')
 def serve_sw():
@@ -252,197 +380,197 @@ def serve_manifest():
 
 @app.route('/favicon.ico')
 def serve_favicon():
-    return send_from_directory(os.path.join(app.root_path, 'static', 'images'),
-            'danso_logo.png', mimetype='image/png')
+    return send_from_directory(os.path.join(app.root_path, 'static', 'images'), 'danso_logo.png', mimetype='image/png')
 
-# --- 9. 데이터 API ---
+# --- 9. EXISTING API ENDPOINTS (Preserved) ---
 
 @app.route('/api/dashboard')
 @login_required
 def get_dashboard_data():
+    # Legacy endpoint preserved for backward compatibility
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-
         cursor.execute("SELECT value FROM status WHERE key = 'status_data' ORDER BY last_updated DESC LIMIT 1")
         status_row = cursor.fetchone()
         status = json.loads(status_row['value']) if status_row else {'last_scan_time': 'N/A', 'watching_count': 0, 'watching_tickers': []}
-
         cursor.execute("SELECT ticker, price, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time FROM signals ORDER BY time DESC LIMIT 50")
         signals = cursor.fetchall()
-
         cursor.execute("SELECT ticker, price, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time, probability_score FROM recommendations ORDER BY time DESC LIMIT 50")
         recommendations = cursor.fetchall()
-
         cursor.close()
         conn.close()
-
         return jsonify({'status': status, 'signals': signals, 'recommendations': recommendations})
     except Exception as e:
         if conn: conn.close()
-        print(f"Error in /api/dashboard: {e}")
-        return jsonify({'status': {'last_scan_time': 'Scanner waiting...', 'watching_count': 0, 'watching_tickers': []}, 'signals': [], 'recommendations': []})
+        return jsonify({'status': {}, 'signals': [], 'recommendations': []})
 
-@app.route('/api/posts')
+@app.route('/api/sts/status')
+def get_sts_status():
+    # Legacy endpoint preserved
+    conn = None
+    try:
+        conn = get_db_connection() 
+        cursor = conn.cursor(cursor_factory=RealDictCursor) 
+        cursor.execute("""
+            SELECT ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status 
+            FROM sts_live_targets 
+            ORDER BY 
+                CASE WHEN status = 'FIRED' THEN 1 WHEN status = 'AIMING' THEN 2 ELSE 3 END ASC,
+                ai_score DESC
+            LIMIT 3
+        """)
+        rows = cursor.fetchall()
+        
+        targets = []
+        for r in rows:
+            raw_score = r.get('ai_score') or 0
+            targets.append({
+                'ticker': r['ticker'],
+                'price': r['price'],
+                'ai_prob': raw_score / 100.0,
+                'obi': r['obi'],
+                'vpin': r['vpin'],
+                'tick_speed': r['tick_speed'],
+                'vwap_dist': r['vwap_dist'],
+                'status': r['status']
+            })
+        cursor.close()
+        conn.close()
+        return jsonify({'targets': targets, 'logs': []})
+    except Exception as e:
+        if conn: conn.close()
+        return jsonify({'targets': [], 'logs': [], 'error': str(e)})
+
+@app.route('/api/posts', methods=['GET', 'POST'])
 @login_required
-def get_posts():
+def handle_posts():
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute("SELECT author, content, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time FROM posts ORDER BY time DESC LIMIT 100")
-        posts = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return jsonify({"status": "OK", "posts": posts})
+        
+        if request.method == 'GET':
+            cursor.execute("SELECT author, content, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time FROM posts ORDER BY time DESC LIMIT 100")
+            posts = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return jsonify({"status": "OK", "posts": posts})
+            
+        elif request.method == 'POST':
+            data = request.get_json()
+            author = data.get('author', 'Anonymous')
+            content = data.get('content')
+            if not content: return jsonify({"status": "error", "message": "Content empty"}), 400
+            cursor.execute("INSERT INTO posts (author, content, time) VALUES (%s, %s, %s)", (author, content, datetime.now()))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({"status": "OK", "message": "Post created."})
+            
     except Exception as e:
         if conn: conn.close()
-        print(f"Error in /api/posts (GET): {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/posts', methods=['POST'])
-@login_required
-def create_post():
-    conn = None
-    try:
-        data = request.get_json()
-        author = data.get('author', 'Anonymous')
-        content = data.get('content')
-        if not content: return jsonify({"status": "error", "message": "Content is empty."}), 400
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO posts (author, content, time) VALUES (%s, %s, %s)", (author, content, datetime.now()))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return jsonify({"status": "OK", "message": "Post created."})
-    except Exception as e:
-        if conn: conn.close()
-        print(f"Error in /api/posts (POST): {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/quote/<string:ticker>')
 @login_required
 def get_quote(ticker):
-    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key missing"}), 500
     url = f"https://api.polygon.io/v3/quotes/{ticker.upper()}?limit=1&apiKey={API_KEY}"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=5)
         data = response.json()
         if data.get('status') == 'OK' and data.get('results'):
             return jsonify(data['results'][0])
-        else:
-            return jsonify({"status": "error", "message": "Ticker not found"}), 404
+        return jsonify({"status": "error", "message": "Ticker not found"}), 404
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/details/<string:ticker>')
 @login_required
 def get_ticker_details(ticker):
-    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key missing"}), 500
     url = f"https://api.polygon.io/v3/reference/tickers/{ticker.upper()}?apiKey={API_KEY}"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=5)
         data = response.json()
         if data.get('status') == 'OK' and data.get('results'):
-            results = data['results']
-            logo_url = results.get('branding', {}).get('logo_url', '')
-            if logo_url: logo_url += f"?apiKey={API_KEY}"
-            f = results.get('financials', {})
-            financial_data = {
-                "market_cap": f.get('market_capitalization', {}).get('value', 'N/A'),
-                "pe_ratio": f.get('price_to_earnings_ratio', 'N/A'),
-                "ps_ratio": f.get('price_to_sales_ratio', 'N/A'),
-                "dividend_yield": f.get('dividend_yield', {}).get('value', 'N/A')
-            }
+            r = data['results']
+            f = r.get('financials', {})
+            # Safe extraction logic
             details = {
-                "ticker": results.get('ticker'), "name": results.get('name'),
-                "industry": results.get('sic_description'),
-                "description": results.get('description', 'No description available.'),
-                "logo_url": logo_url, "financials": financial_data
+                "ticker": r.get('ticker'), "name": r.get('name'),
+                "industry": r.get('sic_description'),
+                "description": r.get('description', 'No description available.'),
+                "logo_url": r.get('branding', {}).get('logo_url', '') + f"?apiKey={API_KEY}",
+                "financials": {
+                    "market_cap": f.get('market_capitalization', {}).get('value', 'N/A'),
+                    "pe_ratio": f.get('price_to_earnings_ratio', 'N/A'),
+                    "ps_ratio": f.get('price_to_sales_ratio', 'N/A'),
+                    "dividend_yield": f.get('dividend_yield', {}).get('value', 'N/A')
+                }
             }
             return jsonify({"status": "OK", "results": details})
-        else:
-            return jsonify({"status": "error", "message": "Details not found"}), 404
+        return jsonify({"status": "error", "message": "Details not found"}), 404
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/chart_data/<string:ticker>')
 @login_required
 def get_chart_data(ticker):
-    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key missing"}), 500
     try:
         today = datetime.now().strftime('%Y-%m-%d')
         past_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
         url = f"https://api.polygon.io/v2/aggs/ticker/{ticker.upper()}/range/1/minute/{past_date}/{today}?sort=asc&limit=5000&apiKey={API_KEY}"
-        response = requests.get(url)
+        response = requests.get(url, timeout=5)
         data = response.json()
         if data.get('status') == 'OK' and data.get('results'):
             chart_data = [{"time": bar['t']/1000, "open": bar['o'], "high": bar['h'], "low": bar['l'], "close": bar.get('c', bar['o'])} for bar in data['results']]
             return jsonify({"status": "OK", "results": chart_data})
-        else:
-            return jsonify({"status": "error", "message": "Chart data not found"}), 404
+        return jsonify({"status": "error", "message": "Chart data not found"}), 404
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# 겉지용 시장 개요 (로그인 불필요)
 @app.route('/api/market_overview')
 def get_market_overview():
-    if not API_KEY: return jsonify({"status": "error", "message": "API Key not configured"}), 500
+    if not API_KEY: return jsonify({"status": "error", "message": "API Key missing"}), 500
     try:
+        # Using ThreadPool to fetch both concurrently would be better, but keeping simple here
         url_g = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={API_KEY}"
-        res_g = requests.get(url_g); res_g.raise_for_status()
+        res_g = requests.get(url_g, timeout=5); 
         gainers = res_g.json().get('tickers') or []
         
         url_l = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers?apiKey={API_KEY}"
-        res_l = requests.get(url_l); res_l.raise_for_status()
+        res_l = requests.get(url_l, timeout=5); 
         losers = res_l.json().get('tickers') or []
         
         return jsonify({"status": "OK", "gainers": gainers, "losers": losers})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- (NEW) 알림 점수 기준 설정 API ---
 @app.route('/api/set_alert_threshold', methods=['POST'])
 def set_alert_threshold():
     data = request.get_json()
     token = data.get('token')
     threshold = data.get('threshold')
-
-    if not token or threshold is None:
-        return jsonify({"status": "error", "message": "Missing token or threshold"}), 400
+    if not token or threshold is None: return jsonify({"status": "error", "message": "Missing params"}), 400
 
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        # min_score 업데이트
-        cursor.execute(
-            "UPDATE fcm_tokens SET min_score = %s WHERE token = %s",
-            (int(threshold), token)
-        )
-        
+        cursor.execute("UPDATE fcm_tokens SET min_score = %s WHERE token = %s", (int(threshold), token))
         if cursor.rowcount == 0:
-            cursor.close()
-            conn.close()
+            cursor.close(); conn.close()
             return jsonify({"status": "error", "message": "Token not found"}), 404
-
         conn.commit()
-        cursor.close()
-        conn.close()
-        
+        cursor.close(); conn.close()
         return jsonify({"status": "OK", "message": "Threshold updated"}), 200
-
     except Exception as e:
-        if conn: 
-            conn.rollback()
-            conn.close()
-        print(f"Error setting threshold: {e}")
+        if conn: conn.close()
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 @app.route('/subscribe', methods=['POST'])
 def subscribe():
@@ -453,79 +581,21 @@ def subscribe():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # min_score 기본값은 DB 레벨에서 처리됨 (DEFAULT 0)
         cursor.execute("INSERT INTO fcm_tokens (token) VALUES (%s) ON CONFLICT (token) DO NOTHING", (token,))
         conn.commit()
-        cursor.close()
-        conn.close()
+        cursor.close(); conn.close()
         return jsonify({"status": "success"}), 201
     except Exception as e:
         if conn: conn.close()
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# --- 10. DB 초기화 (서버 시작 시 실행) ---
-def init_db():
-    conn = None
-    try:
-        if not DATABASE_URL: return
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""CREATE TABLE IF NOT EXISTS status (key TEXT PRIMARY KEY, value TEXT NOT NULL, last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-        cursor.execute("""CREATE TABLE IF NOT EXISTS signals (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, price REAL NOT NULL, time TIMESTAMP NOT NULL)""")
-        cursor.execute("""CREATE TABLE IF NOT EXISTS recommendations (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL UNIQUE, price REAL NOT NULL, time TIMESTAMP NOT NULL, probability_score INTEGER)""")
-        cursor.execute("""CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, author TEXT NOT NULL, content TEXT NOT NULL, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-        cursor.execute("""CREATE TABLE IF NOT EXISTS fcm_tokens (id SERIAL PRIMARY KEY, token TEXT NOT NULL UNIQUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-        
-        # Users 테이블
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                email TEXT NOT NULL UNIQUE,
-                oauth_provider TEXT,
-                is_premium BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        
-        # 기존 테이블 컬럼 추가 (마이그레이션 대응)
-        try:
-            cursor.execute("ALTER TABLE recommendations ADD COLUMN probability_score INTEGER")
-            conn.commit()
-        except psycopg2.Error as e:
-            conn.rollback()
-            if e.pgcode == '42701': pass # duplicate_column 에러 무시
-            else: print(f"❌ [DB] ALTER TABLE recommendations error: {e}")
-
-        # (NEW) fcm_tokens 테이블에 min_score 컬럼 추가
-        try:
-            cursor.execute("ALTER TABLE fcm_tokens ADD COLUMN min_score INTEGER DEFAULT 0")
-            conn.commit()
-        except psycopg2.Error as e:
-            conn.rollback()
-            if e.pgcode == '42701': pass # duplicate_column 에러 무시
-            else: print(f"❌ [DB] ALTER TABLE fcm_tokens error: {e}")
-
-        cursor.close()
-        conn.close()
-        print("✅ [DB] Init success.")
-    except Exception as e:
-        if conn: 
-            conn.rollback()
-            conn.close()
-        print(f"❌ [DB] Init failed: {e}")
-
-# ▼▼▼▼▼ [여기] 아래 코드를 붙여넣으세요 ▼▼▼▼
 @app.route('/admin/secret/count')
 def check_user_count():
-    """관리자용: 실시간 가입자 및 기기 수 확인 페이지"""
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 1. 회원가입한 사람 수 (users 테이블)
         try:
             cursor.execute("SELECT COUNT(*) FROM users")
             user_count = cursor.fetchone()[0]
@@ -533,7 +603,6 @@ def check_user_count():
             user_count = 0 
             conn.rollback()
 
-        # 2. 알림 켜놓은 기기 수 (fcm_tokens)
         try:
             cursor.execute("SELECT COUNT(*) FROM fcm_tokens")
             device_count = cursor.fetchone()[0]
@@ -544,16 +613,15 @@ def check_user_count():
         cursor.close()
         conn.close()
         
-        # 실제 활성 사용자 수 (둘 중 큰 값 기준)
         active_users = max(user_count, device_count)
         remaining = 1000 - active_users
         
-        # 대시보드 스타일의 HTML 반환
         return f"""
         <!DOCTYPE html>
         <html>
         <head>
             <title>Danso Launch Status</title>
+            <meta http-equiv="refresh" content="10">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {{ background-color: #05070a; color: #e0e0e0; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
@@ -569,19 +637,15 @@ def check_user_count():
         <body>
             <div class="container">
                 <h1>🚀 Launch Status</h1>
-                
                 <div class="stat-box">
                     <span class="label">Total Signed Up</span>
                     <span class="number">{user_count}</span>
                 </div>
-                
                 <div class="stat-box">
                     <span class="label">Active Devices (App)</span>
                     <span class="number" style="color: #00e0ff;">{device_count}</span>
                 </div>
-
                 <hr>
-                
                 <div class="remaining">
                     🔥 Spots Left: {remaining} / 1,000
                 </div>
@@ -589,11 +653,12 @@ def check_user_count():
         </body>
         </html>
         """
-        
     except Exception as e:
         return f"Error: {e}"
 
+# Initialize DB on Startup
 init_db()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Use socketio.run instead of app.run for WebSocket support
+    socketio.run(app, debug=True, port=5000)

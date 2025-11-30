@@ -1,51 +1,51 @@
-/* --- (v25.0) DANSO DASHBOARD: Premium Apple Metallic Theme --- */
+/* --- (v26.0) DANSO UNIFIED DASHBOARD: Premium Apple Metallic Theme --- */
+
+/* 1. Font Import */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
 
 :root {
-    /* 1. Metallic Space Color Palette */
-    /* Brushed aluminum background feel */
-    --deep-space: #F2F2F7; 
+    /* --- Palette: MacBook Silver & Matte Black --- */
     
-    /* Premium Glass/Metallic Surface */
-    --glass-bg: rgba(255, 255, 255, 0.85);
+    /* Background: Brushed Aluminum Feel */
+    --metal-body-bg: #F2F2F7; 
+    --metal-texture: repeating-linear-gradient(
+        90deg,
+        rgba(0, 0, 0, 0.015) 0px,
+        rgba(0, 0, 0, 0.015) 1px,
+        transparent 1px,
+        transparent 4px
+    );
+    
+    /* Surfaces: Glass & Keycap Style */
+    --glass-bg: rgba(255, 255, 255, 0.65);
     --glass-border: rgba(0, 0, 0, 0.06);
-    --glass-highlight: rgba(255, 255, 255, 0.9);
+    --keycap-bg: #1C1C1E; /* Matte Black Keycap */
+    --keycap-border: rgba(255, 255, 255, 0.1);
     
-    /* 2. Metallic Accents (Replacing harsh Neon) */
-    /* Used for buttons and highlights */
-    --metal-silver-gradient: linear-gradient(180deg, #FFFFFF 0%, #D1D1D6 100%);
-    --metal-dark-gradient: linear-gradient(180deg, #2C2C2E 0%, #1C1C1E 100%);
-    
-    /* Functional Colors (Softer, Professional) */
-    --neon-cyan: #007AFF; 
-    --neon-green: #34C759;
-    --neon-green-dark: #248A3D;
-    --neon-red: #FF3B30;
-    --neon-blue: #007AFF;
-
-    /* 3. Text Colors (Matte High Contrast) */
-    --text-primary: #1C1C1E; /* Matte Black */
-    --text-secondary: #636366; /* Deep Gray */
+    /* Text: High Contrast Matte */
+    --text-primary: #1D1D1F; /* Deep Black */
+    --text-secondary: #6E6E73; /* Cool Gray */
     --text-tertiary: #AEAEB2;
+    --text-inverse: #F5F5F7; /* White text on dark keycaps */
 
-    /* 4. Base Variables Mapping */
-    --bg-body: var(--deep-space);
-    --bg-card: var(--glass-bg);
+    /* Accents: Subtle Apple Colors */
+    --accent-green: #34C759; 
+    --accent-red: #FF3B30;
+    --accent-blue: #007AFF;
     
-    --bg-interactive: rgba(0, 0, 0, 0.04);
-    --bg-interactive-hover: rgba(0, 0, 0, 0.08);
-    
-    --border-primary: var(--glass-border);
-    --border-secondary: rgba(0, 0, 0, 0.04);
+    /* Legacy Neon Mappings (remapped to soft premium colors) */
+    --neon-green: var(--accent-green);
+    --neon-green-dark: #248A3D;
+    --neon-red: var(--accent-red);
+    --neon-blue: var(--accent-blue);
+    --neon-cyan: #0071E3;
 
-    /* Shadows (Soft Ambient Elevation) */
-    --shadow-primary: 0 4px 20px rgba(0, 0, 0, 0.06);
-    --shadow-glow-green: 0 4px 12px rgba(52, 199, 89, 0.15);
-    
-    /* Radius (Apple Style) */
+    /* UI Components */
     --radius-main: 20px;
     --radius-sub: 12px;
     --radius-full: 99px;
+    --shadow-card: 0 8px 30px rgba(0, 0, 0, 0.08);
+    --shadow-keycap: 0 4px 12px rgba(0, 0, 0, 0.3);
 
     /* Fonts */
     --font-primary: 'Inter', sans-serif;
@@ -58,513 +58,369 @@ body {
     line-height: 1.6;
     margin: 0;
     padding: 0;
-    background-color: var(--bg-body);
-    /* Subtle metallic texture + spotlight */
+    background-color: var(--metal-body-bg);
+    /* Brushed Aluminum Texture + Spotlight */
     background-image: 
-        radial-gradient(circle at 50% 0%, rgba(255,255,255,1.0) 0%, transparent 60%),
-        repeating-linear-gradient(90deg, rgba(0,0,0,0.015) 0px, rgba(0,0,0,0.015) 1px, transparent 1px, transparent 4px);
-    color: var(--text-secondary);
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 1.0) 0%, transparent 70%),
+        var(--metal-texture);
+    background-attachment: fixed;
+    color: var(--text-primary);
     overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
 }
 
 #heroCanvas {
-    position: fixed; 
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: -1; 
-    display: block; 
-    opacity: 0.2; /* Fade out particles to blend with metal bg */
-    mix-blend-mode: multiply;
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: -1; opacity: 0.15; mix-blend-mode: multiply;
+    pointer-events: none;
 }
 
-.content-wrapper {
-    position: relative;
-    z-index: 10;
-    min-height: 100vh;
+.content-wrapper { position: relative; z-index: 10; min-height: 100vh; }
+
+.main-container { max-width: 1000px; margin: 0 auto; padding: 40px 24px; }
+.main-container.full-width { max-width: 1440px; padding: 20px; }
+
+/* --- 2. Layout Grid (Unified Dashboard) --- */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 380px 1fr; /* Fixed Left Sidebar / Flexible Right Main */
+    gap: 24px;
+    align-items: start;
+}
+.left-col { width: 100%; }
+.right-col { width: 100%; }
+
+/* STS Sub Grid (Right Panel Split) */
+.sts-sub-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px;
 }
 
-.main-container {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 40px 24px;
+/* Responsive */
+@media (max-width: 1024px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .sts-sub-grid { grid-template-columns: 1fr; }
 }
 
-h1, h2, h3 {
-    color: var(--text-primary);
-    font-weight: 700;
-    margin-top: 0;
-    letter-spacing: -0.01em;
-}
-
-/* --- 2. Scrolling Bar (Top) --- */
-@keyframes scroll-left {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); } 
-}
-.scrolling-bar-container {
-    width: 100%;
-    /* Frosted Metal Bar */
-    background: rgba(255, 255, 255, 0.75);
-    border-bottom: 1px solid var(--glass-border);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    padding: 10px 0;
-    overflow: hidden;      
-    white-space: nowrap;   
-    position: relative;
-    z-index: 20;
-    box-shadow: 0 1px 0 rgba(0,0,0,0.05);
-}
-.scrolling-bar-track {
-    display: inline-block; 
-    animation: scroll-left 60s linear infinite; 
-}
-.scrolling-bar-container:hover .scrolling-bar-track {
-    animation-play-state: paused; 
-}
-.scroll-item {
-    display: inline-block; 
-    padding: 0 18px;
-    font-size: 13px;
-    font-weight: 500; 
-    font-family: var(--font-primary); 
-    border-right: 1px solid var(--border-secondary);
-}
-.scroll-item .name { color: var(--text-primary); font-weight: 600; margin-right: 8px; }
-.scroll-item .value { color: var(--text-secondary); margin-right: 6px; font-feature-settings: "tnum"; }
-.scroll-item .change-positive { color: var(--neon-green-dark); font-weight: 600; }
-.scroll-item .change-negative { color: var(--neon-red); font-weight: 600; }
-.scroll-item .change-zero { color: var(--text-tertiary); }
-
-/* --- 3. Components: Glass Cards (Metallic Panels) --- */
+/* --- 3. Premium Glass Components --- */
+.glass-card, 
 .status-card, 
 .community-section, 
 .settings-card, 
+.engine-panel,
 .modal-content {
-    background: var(--bg-card);
+    background: var(--glass-bg);
     backdrop-filter: blur(40px);
     -webkit-backdrop-filter: blur(40px);
     border: 1px solid rgba(255, 255, 255, 0.6);
     border-top: 1px solid rgba(255, 255, 255, 0.9);
     border-radius: var(--radius-main);
-    box-shadow: 
-        0 8px 30px rgba(0, 0, 0, 0.06),
-        inset 0 1px 0 rgba(255, 255, 255, 0.5);
-    padding: 32px;
-    margin-bottom: 30px;
+    box-shadow: var(--shadow-card);
+    padding: 24px;
     color: var(--text-primary);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
+.glass-card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(0,0,0,0.1); }
 
-/* --- 4. Logo & Header Area --- */
-.app-logo {
-    margin-bottom: 40px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border-secondary);
-    text-align: center;
+.card-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 20px; padding-bottom: 12px;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
 }
-.app-logo img {
-    max-width: 140px;
-    height: auto;
-    display: inline-block;
-    filter: invert(1) brightness(0.2); /* Ensure logo is dark for light bg */
-    opacity: 0.9;
+.card-header h3 {
+    margin: 0; font-size: 14px; font-weight: 700; 
+    color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px;
+    display: flex; align-items: center; gap: 8px;
 }
+.card-header h3 i { color: var(--text-secondary); font-size: 16px; }
 
-/* --- 5. Notification Button (Pill) --- */
-.notification-button {
+/* Live Indicator Dot */
+.live-indicator {
+    font-size: 11px; font-weight: 600; color: var(--text-secondary);
+    display: flex; align-items: center; gap: 6px; text-transform: uppercase;
+}
+.dot { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; }
+.blink { animation: blinker 2s infinite; }
+@keyframes blinker { 50% { opacity: 0.4; } }
+
+/* --- 4. Header & Navigation --- */
+.sts-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 20px; padding-bottom: 16px;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.brand-logo { 
+    display: flex; align-items: center; gap: 8px;
+    font-size: 18px; font-weight: 800; color: #111; letter-spacing: -0.5px; 
+}
+.brand-logo span { color: var(--accent-green); font-weight: 600; font-size: 14px; margin-top: 2px; letter-spacing: 1px; }
+
+.system-status { display: flex; gap: 24px; font-size: 13px; font-weight: 500; color: var(--text-secondary); }
+.status-item { display: flex; align-items: center; gap: 6px; }
+
+/* User Buttons (Keycap Style) */
+.user-actions { display: flex; align-items: center; }
+
+.notification-button, .nav-button {
     background: #FFFFFF;
     color: var(--text-primary);
-    padding: 10px 24px; 
+    padding: 8px 20px; 
     border: 1px solid rgba(0,0,0,0.1); 
     border-radius: var(--radius-full);
     font-family: var(--font-primary);
-    font-weight: 600;
-    font-size: 14px; 
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 10px; 
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    font-weight: 600; font-size: 13px; 
+    cursor: pointer; transition: all 0.2s ease;
+    display: inline-flex; align-items: center; gap: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    text-decoration: none;
 }
-.notification-button:hover {
-    background: #F5F5F7; 
-    border-color: rgba(0,0,0,0.15);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+.notification-button:hover, .nav-button:hover {
+    background: #F5F5F7; transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.08);
 }
-.notification-button i.fas { color: var(--neon-green-dark); font-size: 16px; }
+.notification-button i { color: var(--accent-green); }
 
-/* --- 6. Settings Card --- */
-.settings-card .card-header h3 {
-    font-size: 18px;
-    margin-bottom: 0;
-    display: flex; align-items: center; gap: 8px;
-    color: var(--text-primary);
+/* --- 5. Top Scrolling Ticker --- */
+.scrolling-bar-container {
+    background: rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-radius: 12px; padding: 10px 0;
+    overflow: hidden; white-space: nowrap;
+    border: 1px solid rgba(255,255,255,0.4);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.03);
 }
-.settings-body .description {
-    color: var(--text-secondary);
-    font-size: 14px;
-    margin-top: 10px; margin-bottom: 20px;
-}
-.control-group {
-    display: flex; align-items: center; gap: 12px;
-}
-#min-score-input {
-    background: #FFFFFF;
-    border: 1px solid var(--border-secondary);
-    color: var(--text-primary);
-    border-radius: 8px;
-    padding: 10px; width: 80px;
-    text-align: center; font-size: 18px;
-    font-family: var(--font-mono);
-    font-weight: 700;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
-}
-#min-score-input:focus {
-    outline: none; 
-    border-color: var(--neon-green);
-    box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.15);
-}
-.unit { font-size: 14px; color: var(--text-tertiary); }
+.scrolling-bar-track { display: inline-block; animation: scroll-left 60s linear infinite; }
+@keyframes scroll-left { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
 
-#save-score-btn {
-    background: var(--metal-dark-gradient); /* Premium Black Button */
-    color: #FFFFFF;
-    border: none;
-    border-radius: 8px; padding: 10px 24px;
-    font-weight: 600; cursor: pointer;
-    transition: all 0.2s;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+.scroll-item { 
+    display: inline-block; padding: 0 16px; 
+    font-size: 13px; font-family: var(--font-mono); 
+    border-right: 1px solid rgba(0,0,0,0.05);
 }
-#save-score-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
-}
+.scroll-item .name { font-weight: 600; color: var(--text-primary); margin-right: 6px; }
+.scroll-item .value { color: var(--text-secondary); margin-right: 6px; }
+.scroll-item .change-positive { color: var(--accent-green); font-weight: 600; }
+.scroll-item .change-negative { color: var(--accent-red); font-weight: 600; }
+.scroll-item .change-zero { color: var(--text-tertiary); }
 
-/* --- 7. Scanner Status & Watch List --- */
-.status-card h2, .status-card .sidebar-h2 {
-    font-size: 18px;
-    border-bottom: 1px solid var(--border-secondary);
-    padding-bottom: 16px; margin-bottom: 20px;
-    color: var(--text-primary);
-}
-.status-header {
-    display: flex; justify-content: space-between;
-    font-size: 14px; color: var(--text-secondary);
-    margin-bottom: 30px;
-}
-#scan-status-text { 
-    color: var(--neon-green-dark); 
-    font-weight: 600; 
-}
-#scan-watching-count { font-family: var(--font-mono); color: var(--text-primary); }
+/* --- 6. Scanner Feed (Left Column) --- */
+.feed-scroll { max-height: 400px; overflow-y: auto; padding-right: 4px; }
 
-.ticker-list { display: flex; flex-wrap: wrap; gap: 10px; }
-.ticker-list span {
-    background: #FFFFFF;
-    color: var(--text-primary);
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 13px; font-family: var(--font-mono);
-    border: 1px solid var(--border-secondary);
-    transition: all 0.2s; cursor: default;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-}
-.ticker-list span:hover {
-    border-color: var(--neon-green-dark);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}
-.ticker-list span.new-ticker {
-    background: rgba(52, 199, 89, 0.1);
-    color: var(--neon-green-dark);
-    border-color: var(--neon-green);
-}
-
-/* --- 8. Signal Feed --- */
-.signal-feed > h2 { font-size: 22px; margin-bottom: 20px; border-bottom: none; color: var(--text-primary); }
-
+/* Signal Cards */
 .signal-card {
     background: #FFFFFF;
-    border-radius: 16px;
     border: 1px solid rgba(0,0,0,0.05);
-    display: flex; align-items: center;
-    padding: 20px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    margin-bottom: 15px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+    border-radius: 12px; padding: 16px; margin-bottom: 12px;
+    cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; gap: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
 .signal-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.06);
     border-color: rgba(0,0,0,0.1);
 }
-
-/* Icons */
 .signal-icon-wrapper {
-    width: 48px; height: 48px; border-radius: 50%;
+    width: 36px; height: 36px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    margin-right: 16px; flex-shrink: 0;
-    background: #F2F2F7;
-    color: var(--text-secondary);
+    background: rgba(52, 199, 89, 0.1); color: var(--accent-green);
 }
-.signal-card.signal .signal-icon-wrapper {
-    background: rgba(52, 199, 89, 0.1); color: var(--neon-green-dark);
+.info .info-header { 
+    display: flex; justify-content: space-between; 
+    font-family: var(--font-mono); font-weight: 700; font-size: 15px; 
+    color: var(--text-primary);
 }
-.signal-card.signal .option-label {
-    background: rgba(52, 199, 89, 0.1); color: var(--neon-green-dark);
-    border: none;
+.option-label { 
+    font-size: 10px; background: #1C1C1E; color: #fff; 
+    padding: 2px 6px; border-radius: 4px; 
+    font-weight: 600; letter-spacing: 0.5px;
 }
-.signal-card.recommendation .signal-icon-wrapper {
-    background: rgba(0, 122, 255, 0.1); color: var(--neon-blue);
+.signal-details { 
+    font-size: 13px; color: var(--text-secondary); 
+    display: flex; justify-content: space-between; margin-top: 4px; 
 }
-.signal-card.recommendation .option-label {
-    background: rgba(0, 122, 255, 0.1); color: var(--neon-blue);
-    border: none;
-}
+.ai-score { color: var(--accent-green); font-weight: 600; display: flex; align-items: center; gap: 4px; }
 
-.signal-card .info { flex-grow: 1; }
-.signal-card .ticker {
-    font-size: 18px; font-weight: 700; color: var(--text-primary);
-    font-family: var(--font-primary); letter-spacing: -0.02em;
+/* Watchlist Tags */
+.ticker-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.ticker-list span {
+    background: #FFFFFF;
+    border: 1px solid rgba(0,0,0,0.08);
+    padding: 6px 12px; border-radius: 8px;
+    font-size: 12px; font-weight: 600; font-family: var(--font-mono);
+    color: var(--text-primary);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    cursor: pointer; transition: 0.2s;
 }
-.signal-card .option-label {
-    font-size: 11px; font-weight: 700;
-    margin-left: 10px; padding: 4px 8px; border-radius: 6px;
-    text-transform: uppercase;
-}
-.signal-card .price {
-    font-size: 14px; color: var(--text-secondary);
-    font-family: var(--font-mono); margin-top: 4px;
-}
-.signal-card .time {
-    font-size: 12px; color: var(--text-tertiary);
-    text-align: right; min-width: 100px;
-    font-family: var(--font-mono);
-}
+.ticker-list span:hover { transform: translateY(-1px); border-color: var(--accent-green); }
+.ticker-list span.new-ticker { border-color: var(--accent-green); color: var(--accent-green); background: rgba(52, 199, 89, 0.05); }
 
-.signal-details {
-    display: flex; justify-content: space-between; align-items: center; margin-top: 6px;
-}
-/* AI Score Green */
-.ai-score {
-    display: flex; align-items: center; gap: 6px;
-    font-family: var(--font-primary); font-size: 14px; font-weight: 600;
-    color: var(--neon-green-dark); 
-}
-.ai-score svg { width: 14px; height: 14px; color: inherit; }
+/* Status Header */
+.status-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 12px; margin-bottom: 12px; }
+#scan-status-text { color: var(--accent-green); font-weight: 600; }
 
-.empty-state {
-    text-align: center; padding: 40px;
-    color: var(--text-tertiary); font-size: 15px;
-    background: rgba(0,0,0,0.02);
-    border: 1px dashed var(--border-secondary); border-radius: var(--radius-main);
+/* Settings & Community */
+.settings-body .description { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+.control-group { display: flex; align-items: center; gap: 12px; }
+#min-score-input {
+    background: #fff; border: 1px solid rgba(0,0,0,0.1);
+    border-radius: 8px; padding: 10px; width: 60px; text-align: center;
+    font-weight: 700; font-size: 16px; font-family: var(--font-mono);
 }
+#save-score-btn, #post-submit-btn {
+    background: var(--keycap-bg); color: #fff;
+    border: none; border-radius: 8px; padding: 10px 20px;
+    font-weight: 600; font-size: 13px; cursor: pointer;
+    box-shadow: var(--shadow-keycap); transition: 0.2s;
+}
+#save-score-btn:hover, #post-submit-btn:hover { transform: translateY(-1px); background: #000; }
 
-/* --- 9. Community Section --- */
-.community-section h2 { font-size: 20px; margin-bottom: 20px; }
-#post-form { margin-top: 20px; }
 #post-form input, #post-form textarea {
-    background: #FFFFFF;
-    border: 1px solid var(--border-secondary);
-    border-radius: var(--radius-sub);
-    color: var(--text-primary); padding: 12px;
-    font-family: var(--font-primary); font-size: 15px;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,0.03);
+    width: 100%; background: #fff; border: 1px solid rgba(0,0,0,0.1);
+    border-radius: 8px; padding: 12px; margin-bottom: 10px;
+    font-family: var(--font-primary); font-size: 14px;
 }
-#post-form input:focus, #post-form textarea:focus {
-    outline: none; 
-    border-color: var(--neon-cyan);
-    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
-}
-#post-submit-btn {
-    background: var(--metal-dark-gradient); 
-    color: #FFFFFF;
-    border: none;
-    border-radius: 8px; padding: 10px 24px;
-    font-weight: 600; cursor: pointer; transition: 0.2s;
-    margin-top: 10px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-}
-#post-submit-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-
-.post-feed { margin-top: 30px; }
 .post-card {
-    background: #FFFFFF;
-    border: 1px solid var(--border-secondary);
-    border-radius: 16px; padding: 20px;
-    margin-bottom: 15px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    background: #fff; border: 1px solid rgba(0,0,0,0.05); border-radius: 12px;
+    padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
-.post-card-header .author { color: var(--text-primary); font-weight: 700; }
-.post-card-header .time { color: var(--text-tertiary); font-size: 12px; }
-.post-card-content { color: var(--text-secondary); font-size: 15px; line-height: 1.5; margin-top: 8px; }
+.post-card-header .author { font-weight: 700; color: var(--text-primary); }
+.post-card-header .time { font-size: 11px; color: var(--text-tertiary); float: right; }
+.post-card-content { font-size: 14px; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
 
-/* --- 10. Modal (Refined Glass Overlay) --- */
+/* --- 7. STS Sniper Console (Right Column) --- */
+
+/* Top Targets Table */
+.table-wrapper { overflow-x: auto; }
+.sts-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sts-table th {
+    text-align: left; font-weight: 600; color: var(--text-tertiary);
+    padding: 12px 16px; border-bottom: 1px solid rgba(0,0,0,0.06);
+    text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px;
+}
+.sts-table td {
+    padding: 14px 16px; border-bottom: 1px solid rgba(0,0,0,0.03);
+    color: var(--text-primary); vertical-align: middle; font-weight: 500;
+}
+
+/* Table Badges */
+.ticker-badge {
+    background: #fff; border: 1px solid rgba(0,0,0,0.1);
+    padding: 4px 8px; border-radius: 6px;
+    font-family: var(--font-mono); font-weight: 700; font-size: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.status-badge {
+    padding: 4px 8px; border-radius: 99px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.status-badge.aiming {
+    background: rgba(52, 199, 89, 0.1); color: var(--accent-green);
+    border: 1px solid rgba(52, 199, 89, 0.2);
+}
+.status-badge.watching {
+    background: rgba(0,0,0,0.03); color: var(--text-tertiary);
+    border: 1px solid rgba(0,0,0,0.06);
+}
+
+/* Micro Panel (Keycap Style Dark Panels) */
+.micro-row { display: flex; justify-content: space-between; margin-bottom: 14px; font-size: 13px; color: var(--text-secondary); }
+.micro-item { 
+    display: flex; justify-content: space-between; 
+    border-top: 1px solid rgba(0,0,0,0.06); 
+    padding-top: 14px; margin-top: 8px; font-size: 13px; color: var(--text-secondary); 
+}
+
+/* Mini Progress Bars */
+.mini-bar { width: 60px; height: 4px; background: rgba(0,0,0,0.06); border-radius: 2px; overflow: hidden; }
+.mini-bar div { height: 100%; background: var(--accent-green); opacity: 0.9; }
+
+.progress-wrapper { width: 60%; text-align: right; }
+.val-text { font-size: 13px; font-weight: 700; display: block; margin-bottom: 6px; color: var(--text-primary); }
+.progress-bg { height: 4px; background: rgba(0,0,0,0.06); border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent-green); transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+.progress-fill.warn { background: var(--accent-red); }
+
+/* Risk Engine Grid */
+.risk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.risk-item {
+    background: rgba(255,255,255,0.5); 
+    padding: 16px; border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.04);
+    display: flex; flex-direction: column; gap: 6px;
+    box-shadow: inset 0 1px 2px rgba(255,255,255,0.8);
+}
+.risk-item .label { font-size: 10px; color: var(--text-tertiary); font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+.risk-item .value { font-size: 16px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; }
+.risk-item.highlight { 
+    background: rgba(52, 199, 89, 0.05); 
+    border-color: rgba(52, 199, 89, 0.2);
+}
+
+/* Heatmap Area (Dark Keycap Style) */
+.heatmap-grid { display: flex; gap: 10px; }
+.heat-block {
+    flex: 1; padding: 16px 0; text-align: center;
+    border-radius: 8px; font-weight: 600; font-size: 12px;
+    transition: transform 0.2s;
+}
+.heat-block.hot { 
+    background: var(--keycap-bg); color: #fff; /* Inverted for contrast */
+    box-shadow: var(--shadow-keycap);
+}
+.heat-block.warm { background: rgba(0,0,0,0.08); color: var(--text-primary); }
+.heat-block.cool { background: rgba(0,0,0,0.03); color: var(--text-tertiary); }
+
+/* Session Stats */
+.stat-flex { display: flex; gap: 16px; margin-bottom: 24px; }
+.stat-box { 
+    flex: 1; text-align: center; 
+    background: #fff; padding: 20px; border-radius: 12px; 
+    border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 2px 8px rgba(0,0,0,0.03); 
+}
+.stat-box .val { font-size: 24px; font-weight: 800; color: var(--text-primary); margin-top: 6px; letter-spacing: -1px; }
+
+/* --- 8. Chart Modal (Unified) --- */
 .modal-overlay {
-    display: none; 
-    position: fixed; 
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background-color: rgba(0, 0, 0, 0.4); /* Dimmed backdrop */
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
+    display: none; position: fixed; z-index: 2000;
+    left: 0; top: 0; width: 100%; height: 100%; overflow: auto;
+    background-color: rgba(0, 0, 0, 0.3); /* Dimmed */
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
-
 .modal-content {
-    background: #FFFFFF;
-    margin: 5% auto; 
-    border: none;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
-    border-radius: var(--radius-main);
-    width: 90%; max-width: 700px;
-    padding: 0;
-    overflow: hidden;
+    background: #fff; width: 90%; max-width: 720px; margin: 5% auto;
+    border-radius: 20px; overflow: hidden;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.2);
+    animation: modalUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
+@keyframes modalUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
 .modal-header {
-    background: #F9F9F9;
-    border-bottom: 1px solid var(--border-secondary);
-    padding: 24px;
+    padding: 20px 24px; background: #F9F9F9; border-bottom: 1px solid rgba(0,0,0,0.06);
     display: flex; justify-content: space-between; align-items: center;
 }
-.modal-header h2 { margin: 0; font-size: 20px; color: var(--text-primary); }
-
-.close-button { 
-    color: var(--text-tertiary); 
-    font-size: 28px; font-weight: 400;
-    cursor: pointer; transition: 0.2s; 
-    line-height: 1;
-}
+.modal-header h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.close-button { font-size: 28px; color: var(--text-tertiary); cursor: pointer; line-height: 1; }
 .close-button:hover { color: var(--text-primary); }
 
-.modal-tabs { 
-    display: flex; 
-    background: #FFFFFF; 
-    border-bottom: 1px solid var(--border-secondary); 
-    padding: 0 24px;
-}
+.modal-tabs { display: flex; padding: 0 24px; background: #fff; border-bottom: 1px solid rgba(0,0,0,0.06); }
 .tab-button {
-    background: transparent; border: none;
-    color: var(--text-secondary); 
-    padding: 16px 20px;
-    font-size: 14px; font-weight: 600;
-    cursor: pointer; transition: 0.3s;
-    border-bottom: 2px solid transparent;
+    background: transparent; border: none; color: var(--text-secondary);
+    padding: 16px 20px; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: 0.2s; border-bottom: 2px solid transparent;
 }
-.tab-button:hover { color: var(--text-primary); }
-/* Active Tab: Deep Black Line */
-.tab-button.active {
-    color: var(--text-primary); 
-    border-bottom-color: var(--text-primary);
-}
+.tab-button.active { color: var(--text-primary); border-bottom-color: #111; }
 
-.modal-body { padding: 32px; color: var(--text-primary); }
-
-/* --- Modal Internal Content --- */
+.modal-body { padding: 24px; min-height: 300px; }
 .tab-content { display: none; }
-.tab-content.active { 
-    display: block; 
-    animation: fadeIn 0.3s ease; 
-}
-@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.tab-content.active { display: block; animation: fadeIn 0.2s; }
 
-.company-details { 
-    display: flex; gap: 20px; margin-bottom: 24px; align-items: center; 
-}
-.company-details img { 
-    width: 64px; height: 64px; border-radius: 12px; 
-    border: 1px solid var(--border-secondary); 
-    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-    background: #fff;
-}
-.company-details .info { flex: 1; }
-.company-details h3 { 
-    margin: 0; font-size: 24px; color: var(--text-primary); 
-    margin-bottom: 4px;
-}
-.company-details .industry { 
-    font-size: 13px; color: var(--text-secondary); 
-    font-weight: 500;
-}
-.company-description {
-    font-size: 15px; color: var(--text-secondary); 
-    line-height: 1.6;
-    border-top: 1px solid var(--border-secondary); 
-    padding-top: 20px; margin-top: 20px;
-}
+/* Utility Colors */
+.text-green { color: var(--accent-green); font-weight: 600; }
+.text-dim { color: var(--text-tertiary); font-size: 11px; font-weight: 500; }
+.text-warn { color: var(--accent-red); }
+.text-highlight { color: var(--text-primary); font-weight: 700; }
+.mt-20 { margin-top: 20px; }
+.mb-20 { margin-bottom: 20px; }
 
-/* Quote List Style */
-.quote-title {
-    font-size: 16px; color: var(--text-primary); font-weight: 700;
-    margin-top: 10px; margin-bottom: 15px;
-    border-bottom: 1px solid var(--border-secondary);
-    padding-bottom: 10px;
-}
-.quote-line { 
-    display: flex; justify-content: space-between; 
-    padding: 12px 0; 
-    border-bottom: 1px solid var(--border-secondary); 
-}
-.quote-line:last-child { border-bottom: none; }
-.quote-line span:first-child { color: var(--text-secondary); font-size: 14px; }
-.quote-line span:last-child { 
-    font-weight: 600; 
-    font-family: var(--font-mono); 
-    color: var(--text-primary); 
-}
-
-#chart-container { background: transparent; }
-
-/* Responsive */
-@media (max-width: 768px) {
-    .main-container { padding: 20px 16px; }
-    .status-card, .settings-card, .community-section { padding: 24px 20px; }
-    .modal-content { width: 95%; margin: 10% auto; }
-}
-
-/* --- Sniper Console Button (Inherits Notification Style) --- */
-.sniper-link-btn {
-    background: #FFFFFF;
-    color: var(--text-primary);
-    padding: 10px 24px; 
-    border: 1px solid rgba(0,0,0,0.1); 
-    border-radius: var(--radius-full);
-    font-family: var(--font-primary);
-    font-weight: 600;
-    font-size: 14px; 
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px; 
-    transition: all 0.3s ease;
-    text-decoration: none; 
-    
-    float: right;
-    clear: right;
-    margin: 10px 0 20px 0;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-}
-
-.sniper-link-btn:hover {
-    background: #F5F5F7; 
-    border-color: rgba(0,0,0,0.15);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-}
-
-.sniper-link-btn i {
-    color: var(--neon-green-dark);
-    font-size: 16px;
-}
+/* Chart Container */
+#chart-container { width: 100%; height: 350px; position: relative; }
