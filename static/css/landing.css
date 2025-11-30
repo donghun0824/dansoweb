@@ -5,39 +5,49 @@
 /* Merriweather 또는 SF Serif 대체용 (예: Source Serif Pro, Lora 등). 여기서는 Merriweather 유지 */
 @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&display=swap');
 
+/* [수정] :root 섹션 전체 덮어쓰기 */
 :root {
-    /* 프리미엄 메탈릭 컬러 팔레트 */
-    --metal-silver-gradient: linear-gradient(145deg, #C9CED6 0%, #A7AEB8 50%, #E6E8EC 100%);
-    --metal-dark-bg: #0B0C0D; /* 매트 블랙 배경 */
-    --metal-border: rgba(255, 255, 255, 0.1); /* 미세한 메탈 테두리 */
-    --metal-highlight: rgba(255, 255, 255, 0.05); /* 부드러운 하이라이트 */
-    --accent-green: #00E18A; /* 긍정 표시용 미니멀 그린 */
-    --text-primary: #E6E8EC;
-    --text-secondary: #A7AEB8;
+    /* 배경: 차가운 맥북 실버 (Light Metal) */
+    --metal-dark-bg: #F2F4F6; 
+    
+    /* 텍스트: 매트 블랙 (가독성 & 고급감) */
+    --text-primary: #111111;
+    --text-secondary: #555555;
 
-    /* 기존 네온/사이버펑크 스타일 변수 제거/대체 */
-    --neon-green: var(--accent-green); /* 호환성 유지 */
-    --neon-cyan: var(--text-primary);  /* 기본 텍스트 색상으로 대체 */
-    --glass-bg: rgba(20, 22, 25, 0.7); /* 더 어둡고 부드러운 블러 */
+    /* 메탈 그라데이션 (버튼/헤더용): 더 밝고 깨끗하게 */
+    --metal-silver-gradient: linear-gradient(135deg, #FFFFFF 0%, #D1D5DB 100%);
+    
+    /* 테두리: 밝은 배경에 맞는 어두운 실버 */
+    --metal-border: rgba(0, 0, 0, 0.1);
+    --metal-highlight: rgba(255, 255, 255, 0.8);
+    
+    /* 악센트: 진한 블랙 (기존 그린 대신 블랙 포인트 추천) */
+    --accent-green: #000000; 
+
+    /* 호환 변수 */
+    --neon-green: var(--accent-green);
+    --neon-cyan: var(--text-primary);
+    --glass-bg: rgba(255, 255, 255, 0.6); /* 밝은 유리 */
     --glass-border: var(--metal-border);
     --glass-highlight: var(--metal-highlight);
     --deep-space: var(--metal-dark-bg);
 }
 
-/* 2. 기본 바디 & 배경 설정 (매트 블랙 + 노이즈 텍스처) */
+/* [수정] body 섹션 덮어쓰기 */
 body {
-    margin: 0;
-    padding: 0;
-    overflow-x: hidden;
+    margin: 0; padding: 0; overflow-x: hidden;
     background-color: var(--metal-dark-bg);
-    /* 아주 미세한 노이즈 텍스처 (이미지 파일 필요, 여기서는 색상으로 대체) */
-    /* background-image: url('path/to/subtle-noise.png'); */
+    /* 상단 조명 강화: 위쪽에서 강한 흰색 빛이 내려옴 */
+    background-image: radial-gradient(
+        circle at 50% -10%, 
+        rgba(255, 255, 255, 1.0) 0%, /* 중심부 완전 화이트 (눈부심) */
+        rgba(255, 255, 255, 0.5) 20%, 
+        transparent 70%
+    );
+    background-attachment: fixed;
     color: var(--text-primary);
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
-    /* 상단 중앙 스포트라이트 조명 효과 */
-    background-image: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 60%);
-    background-attachment: fixed; /* 스크롤 시 배경 고정 */
 }
 
 /* 3. 인트로 비디오 (기존 기능 유지) */
@@ -525,6 +535,35 @@ body {
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
     /* 호버 시 밝기 약간 증가 (선택 사항) */
     filter: brightness(1.05);
+}
+/* [수정] .layered-curl-header 섹션 덮어쓰기 */
+.layered-curl-header {
+    position: absolute; 
+    top: -150px; 
+    left: 50%; 
+    transform: translateX(-50%);
+    width: 120%; 
+    height: 500px;
+    
+    /* 더 밝고 쨍한 메탈 질감 */
+    background-image: 
+        radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.9) 0%, transparent 50%), /* 상단 하이라이트 추가 */
+        radial-gradient(ellipse at 50% 100%, rgba(255,255,255,0.6) 0%, transparent 60%),
+        repeating-linear-gradient(90deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 4px), /* 브러시 결 */
+        linear-gradient(180deg, #FFFFFF 0%, #B0B8C1 100%); /* 베이스 메탈 */
+    
+    border-radius: 50% / 100%;
+    
+    /* 엣지 라이트 & 깊은 그림자 */
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+    box-shadow: 
+        0 20px 60px -10px rgba(0, 0, 0, 0.3), /* 아래쪽 그림자 강화 */
+        inset 0 -10px 30px rgba(255, 255, 255, 0.8); /* 내부 반사광 강화 */
+    
+    z-index: 5; 
+    opacity: 1.0; /* 투명도 제거해서 질감 강조 */
+    filter: contrast(1.1) brightness(1.05);
+    pointer-events: none;
 }
 
 /* 모바일 대응 (기존 유지) */
