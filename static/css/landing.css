@@ -1,28 +1,43 @@
-/* --- (v19.0) LANDING PAGE STYLES: Final Merge (Reference Design + Existing Logic) --- */
+/* --- (v21.0) LANDING PAGE STYLES: Premium Apple Metallic Aesthetic --- */
 
-/* 1. 폰트 임포트 (Pro Design용) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=JetBrains+Mono:wght@500&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&display=swap'); /* 기존 Merriweather 유지 */
+/* 1. 폰트 임포트 (Apple 스타일용 Inter 및 Serif) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Merriweather 또는 SF Serif 대체용 (예: Source Serif Pro, Lora 등). 여기서는 Merriweather 유지 */
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@700;900&display=swap');
 
 :root {
-    /* 새로운 네온 컬러 팔레트 */
-    --neon-green: #00ff9d;
-    --neon-cyan: #00e0ff;
-    --glass-bg: rgba(13, 18, 30, 0.65);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-highlight: rgba(255, 255, 255, 0.15);
-    --deep-space: #05070a;
+    /* 프리미엄 메탈릭 컬러 팔레트 */
+    --metal-silver-gradient: linear-gradient(145deg, #C9CED6 0%, #A7AEB8 50%, #E6E8EC 100%);
+    --metal-dark-bg: #0B0C0D; /* 매트 블랙 배경 */
+    --metal-border: rgba(255, 255, 255, 0.1); /* 미세한 메탈 테두리 */
+    --metal-highlight: rgba(255, 255, 255, 0.05); /* 부드러운 하이라이트 */
+    --accent-green: #00E18A; /* 긍정 표시용 미니멀 그린 */
+    --text-primary: #E6E8EC;
+    --text-secondary: #A7AEB8;
+
+    /* 기존 네온/사이버펑크 스타일 변수 제거/대체 */
+    --neon-green: var(--accent-green); /* 호환성 유지 */
+    --neon-cyan: var(--text-primary);  /* 기본 텍스트 색상으로 대체 */
+    --glass-bg: rgba(20, 22, 25, 0.7); /* 더 어둡고 부드러운 블러 */
+    --glass-border: var(--metal-border);
+    --glass-highlight: var(--metal-highlight);
+    --deep-space: var(--metal-dark-bg);
 }
 
-/* 2. 기본 바디 & 배경 설정 */
+/* 2. 기본 바디 & 배경 설정 (매트 블랙 + 노이즈 텍스처) */
 body {
     margin: 0;
     padding: 0;
     overflow-x: hidden;
-    background-color: var(--deep-space);
-    color: white;
-    font-family: 'Inter', sans-serif; /* 메인 폰트 변경 */
+    background-color: var(--metal-dark-bg);
+    /* 아주 미세한 노이즈 텍스처 (이미지 파일 필요, 여기서는 색상으로 대체) */
+    /* background-image: url('path/to/subtle-noise.png'); */
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
+    /* 상단 중앙 스포트라이트 조명 효과 */
+    background-image: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 60%);
+    background-attachment: fixed; /* 스크롤 시 배경 고정 */
 }
 
 /* 3. 인트로 비디오 (기존 기능 유지) */
@@ -30,7 +45,7 @@ body {
     position: fixed; top: 0; left: 0;
     width: 100%; height: 100vh;
     z-index: 9999;
-    background-color: var(--deep-space);
+    background-color: var(--metal-dark-bg);
     transition: opacity 1.5s ease-out;
     opacity: 1;
 }
@@ -39,31 +54,28 @@ body {
 /* 📱 모바일(768px 이하) 전용 설정: 짤림 방지 */
 @media (max-width: 768px) {
     #intro-video {
-        /* 영상을 자르지 않고 비율 그대로 다 보여줌 */
-        object-fit: contain; 
-        
-        /* 비율 차이로 생기는 위아래 여백을 검은색으로 처리 */
-        background-color: #000000; 
+        object-fit: contain;
+        background-color: #000000;
     }
 }
-/* 4. 캔버스 & 레이어 시스템 */
+
+/* 4. 캔버스 & 레이어 시스템 (배경 캔버스 제거 또는 투명화) */
 #heroCanvas {
-    position: fixed; top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    z-index: 0; /* 배경 */
-    background-color: var(--deep-space);
+    /* 사이버펑크 캔버스 배경 효과 제거 */
+    display: none; 
+    /* position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; background-color: var(--deep-space); */
 }
 
 .content-wrapper {
     position: relative;
-    z-index: 10; /* 캔버스 위 */
+    z-index: 10;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    background: transparent; /* 투명 배경 */
+    background: transparent;
 }
 
-/* 메인 콘텐츠 등장 효과 (기존 유지) */
+/* 메인 콘텐츠 등장 효과 */
 #main-content {
     opacity: 0;
     transition: opacity 1.5s ease-in;
@@ -72,198 +84,282 @@ body {
 
 /* 5. 공통 컨테이너 */
 .landing-container {
-     max-width: 1280px; /* 넓게 확장 */
+     max-width: 1280px;
      margin: 0 auto;
      padding: 0 40px;
 }
 
-/* 6. 헤더 스타일 */
+/* 6. 헤더 스타일 (메탈릭 텍스트 & 버튼) */
 .landing-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 24px 40px;
-    /* 테두리 제거 (더 깔끔하게) */
 }
-.header-logo img { max-width: 120px; height: auto; }
+.header-logo img { max-width: 120px; height: auto; } /* 로고 이미지 자체를 메탈릭하게 변경 필요 */
 
 .header-nav { display: flex; gap: 12px; }
 
 .nav-button {
+    font-family: 'Inter', sans-serif;
     font-size: 14px; font-weight: 600; text-decoration: none;
-    padding: 10px 24px; border-radius: 99px; /* 알약 모양 */
+    padding: 10px 24px; border-radius: 99px;
     transition: all 0.3s ease;
+    /* 메탈릭 텍스트 그라데이션 */
+    background: var(--metal-silver-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    /* 기본 상태 테두리/배경 제거 */
+    border: 1px solid transparent; 
 }
+
 .nav-button.primary {
-    background: linear-gradient(135deg, #2563eb, #1d4ed8);
-    color: white;
-    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+    /* Primary 버튼: 메탈릭 배경 및 텍스트 */
+    background: var(--metal-silver-gradient);
+    -webkit-text-fill-color: var(--metal-dark-bg); /* 텍스트는 어둡게 */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08); /* 미세한 그림자 */
 }
-.nav-button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6); }
+.nav-button.primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12); /* 호버 시 그림자 강조 */
+}
 
-.nav-button.secondary { color: #94a3b8; } /* 투명 배경 */
-.nav-button.secondary:hover { color: white; }
+.nav-button.secondary {
+    /* 배경은 투명하게, 테두리는 은은한 메탈로 */
+    background: transparent;
+    border: 1px solid var(--metal-border);
+    color: var(--text-secondary); /* 글자색은 차분한 실버 */
+}
 
+.nav-button.secondary:hover {
+    /* 호버 시 배경이 살짝 밝아짐 */
+    border-color: rgba(255, 255, 255, 0.3);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary); /* 글자색 밝게 */
+}
 
-/* 7. 히어로 섹션 (레이아웃) */
+/* 7. 히어로 섹션 (레이아웃 & 메탈릭 타이포그래피) */
 .hero-section {
     display: grid;
-    grid-template-columns: 1fr 420px; /* 카드 너비 고정 */
+    grid-template-columns: 1fr 420px;
     gap: 60px;
     align-items: center;
     padding: 80px 40px 120px 40px;
-    height: calc(100vh - 100px); /* 화면 꽉 차게 */
+    height: calc(100vh - 100px);
 }
 
 .hero-content { text-align: left; z-index: 20; }
 
 .hero-subtitle-text {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px; color: var(--neon-green);
+    font-family: 'Inter', sans-serif; /* 모노스페이스 제거, Inter 사용 */
+    font-size: 13px; font-weight: 600;
+    color: var(--accent-green); /* 미세한 그린 악센트 */
     letter-spacing: 1px; text-transform: uppercase;
     margin-bottom: 16px; display: block;
-    text-shadow: 0 0 10px rgba(0, 255, 157, 0.4);
+    /* 네온 그림자 제거 */
+    text-shadow: none; 
 }
 
 .hero-title {
-    font-family: 'Inter', sans-serif; /* 현대적인 폰트로 변경 */
-    font-size: 4.5rem; /* 압도적인 크기 */
-    line-height: 1.1; font-weight: 800; letter-spacing: -0.03em;
-    background: linear-gradient(180deg, #ffffff 0%, #b0b8c1 100%); /* 텍스트 그라데이션 */
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    background-clip: text;         /* ✅ 이 줄을 추가하세요 (표준) */
+    font-family: 'Merriweather', serif; /* Serif 폰트 (Apple 스타일) */
+    font-size: 4.5rem;
+    line-height: 1.1; font-weight: 900; letter-spacing: -0.02em;
+    /* 메탈릭 실버 그라데이션 텍스트 */
+    background: var(--metal-silver-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
     margin-bottom: 24px;
+    /* 미세한 깊이감 그림자 */
+    text-shadow: 0 1.2px 1.2px rgba(0, 0, 0, 0.08);
 }
 
 .hero-description {
+    font-family: 'Inter', sans-serif;
     font-size: 1.125rem; line-height: 1.6;
-    color: #94a3b8; max-width: 480px; margin-bottom: 40px;
+    color: var(--text-secondary); /* 부드러운 회색 텍스트 */
+    max-width: 480px; margin-bottom: 40px;
 }
 
 .hero-cta-buttons { display: flex; gap: 16px; }
 
 .cta-button {
     padding: 14px 32px; border-radius: 12px;
+    font-family: 'Inter', sans-serif;
     font-weight: 600; font-size: 15px; text-decoration: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); display: inline-block;
+    /* 공통: 미세한 메탈릭 테두리 및 그림자 */
+    border: 1px solid var(--metal-border);
+    box-shadow: 0 1.2px 4px rgba(0, 0, 0, 0.08);
 }
 .cta-button.primary {
-    background: linear-gradient(90deg, #007aff, #0055ff); color: white;
-    box-shadow: 0 0 20px rgba(0, 122, 255, 0.4);
+    /* Primary: 브러시드 메탈 배경 */
+    background: var(--metal-silver-gradient);
+    color: var(--metal-dark-bg); /* 텍스트는 어둡게 */
+    border: none; /* 배경이 있으므로 테두리 제거 */
 }
 .cta-button.primary:hover {
-    box-shadow: 0 0 30px rgba(0, 122, 255, 0.6); transform: translateY(-2px);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 .cta-button.secondary {
-    background: rgba(255, 255, 255, 0.03); color: white;
-    border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(4px);
+    /* Secondary: 다크 메탈 배경 (블러 효과) */
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary);
+    backdrop-filter: blur(12px); /* 부드러운 블러 */
+    -webkit-backdrop-filter: blur(12px);
 }
 .cta-button.secondary:hover {
-    background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.2);
 }
 
 
-/* 8. 글래스모피즘 세로 스크롤 박스 (Hero Feed) - 기존 기능 유지 + 새 디자인 */
+/* 8. 메탈릭 글래스 세로 스크롤 박스 (Hero Feed) */
 @keyframes scroll-up { 0% { transform: translateY(0); } 100% { transform: translateY(-50%); } }
 
 .hero-feed-vertical {
     position: relative;
-    height: 480px; /* 높이 약간 증가 */
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-top: 1px solid var(--glass-highlight);
+    height: 480px;
+    /* 더 어둡고 부드러운 메탈릭 글래스 배경 */
+    background: rgba(20, 22, 25, 0.7);
+    border: 1px solid var(--metal-border);
+    border-top: 1px solid rgba(255, 255, 255, 0.15); /* 상단 하이라이트 */
     border-radius: 24px;
     
-    /* 글래스 효과 */
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    /* 부드러운 블러 및 미세한 그림자 */
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.05);
     
     overflow: hidden;
     display: flex; flex-direction: column;
-    z-index: 30; /* 차트 위로 올리기 */
+    z-index: 30;
 }
 
 .widget-title {
-    font-size: 16px; font-weight: 600; color: white;
-    padding: 24px; margin: 0;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-    background: rgba(255,255,255,0.02); flex-shrink: 0;
+    font-family: 'Inter', sans-serif;
+    font-size: 15px; font-weight: 600; 
+    /* 메탈릭 텍스트 */
+    background: var(--metal-silver-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    padding: 20px 24px; margin: 0;
+    border-bottom: 1px solid var(--metal-border);
+    background-color: rgba(255,255,255,0.02); flex-shrink: 0;
 }
 
 .vertical-scroll-container { flex-grow: 1; overflow: hidden; position: relative; }
 
-#vertical-ticker-list { position: absolute; width: 100%; animation: scroll-up 45s linear infinite; }
+#vertical-ticker-list { position: absolute; width: 100%; animation: scroll-up 60s linear infinite; } /* 스크롤 속도 느리게 조정 */
 #vertical-ticker-list:hover { animation-play-state: paused; }
 
-.loading-text { padding: 20px; color: #94a3b8; }
+.loading-text { padding: 20px; color: var(--text-secondary); font-family: 'Inter', sans-serif; }
 
-/* 티커 아이템 */
+/* 티커 아이템 (메탈릭 스타일 적용) */
 .v-ticker-item {
-    display: grid; grid-template-columns: 1fr 1fr 1fr; /* 3열 그리드로 변경 */
-    padding: 16px 24px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    display: grid; grid-template-columns: 1.2fr 1fr 1fr; /* 비율 조정 */
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--metal-border);
     align-items: center;
     transition: background 0.2s;
 }
-.v-ticker-item:hover { background: rgba(255,255,255,0.05); }
+.v-ticker-item:hover { background: rgba(255,255,255,0.03); }
 
-.v-ticker-item .name { font-weight: 700; font-size: 14px; color: #e2e8f0; }
-.v-ticker-item .price { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #94a3b8; text-align: right; }
-/* 기존 js 로직(change-positive 등)과 호환 */
-.v-ticker-item .change-positive { 
-    font-family: 'JetBrains Mono', monospace; 
-    font-size: 13px; font-weight: 700; 
-    color: var(--neon-green); text-align: right;
-    text-shadow: 0 0 8px rgba(0, 255, 157, 0.3);
+.v-ticker-item .name { 
+    font-family: 'Inter', sans-serif;
+    font-weight: 600; font-size: 14px; 
+    color: var(--text-primary);
 }
-.v-ticker-item .change-negative { color: #ff4d4d; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 13px;} 
-.v-ticker-item .change-zero { color: #94a3b8; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 13px;}
+.v-ticker-item .price { 
+    font-family: 'Inter', sans-serif; /* 모노스페이스 제거, Inter 사용 */
+    font-size: 13px; color: var(--text-secondary); text-align: right; 
+    font-feature-settings: "tnum" on, "lnum" on; /* 표 형식 숫자 */
+}
+/* 등락폭 스타일 (네온 제거, 미니멀 컬러 적용) */
+.v-ticker-item .change-positive { 
+    font-family: 'Inter', sans-serif; 
+    font-size: 13px; font-weight: 600; 
+    color: var(--accent-green); text-align: right;
+    text-shadow: none; /* 네온 제거 */
+    font-feature-settings: "tnum" on, "lnum" on;
+}
+.v-ticker-item .change-negative { 
+    color: #FF3B30; /* Apple 스타일 레드 (필요시) */
+    text-align: right; font-family: 'Inter', sans-serif; font-size: 13px;
+    font-weight: 600; font-feature-settings: "tnum" on, "lnum" on;
+} 
+.v-ticker-item .change-zero { 
+    color: var(--text-secondary); 
+    text-align: right; font-family: 'Inter', sans-serif; font-size: 13px;
+    font-feature-settings: "tnum" on, "lnum" on;
+}
 
 
-/* 9. 하단 콘텐츠 (흰색 배경 분리) - 기존 기능 유지 */
+/* 9. 하단 콘텐츠 (다크 메탈릭 배경 및 카드) */
 .lower-content-wrapper {
-    background-color: #ffffff; /* 흰색 배경 */
-    color: #191f28; /* 검정 텍스트 */
+    background-color: var(--metal-dark-bg); /* 다크 배경 유지 */
+    color: var(--text-primary);
     padding-top: 1px; 
     position: relative; z-index: 20;
-    /* 히어로 섹션과 분리 */
+    /* 상단 스포트라이트 효과 연장 (선택 사항) */
+    /* background-image: radial-gradient(circle at 50% -20%, rgba(255, 255, 255, 0.05) 0%, transparent 50%); */
 }
 
 .features-section {
     margin-top: 0; margin-bottom: 100px; padding-top: 80px;
-    border-top: none; /* 테두리 제거 */
+    border-top: none;
 }
 .section-title {
-    font-size: 2.5rem; font-weight: 700; color: #191f28;
+    font-family: 'Merriweather', serif;
+    font-size: 2.5rem; font-weight: 900; 
+    /* 메탈릭 텍스트 */
+    background: var(--metal-silver-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
     text-align: left; margin-bottom: 3rem;
 }
 .features-grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;
 }
+/* 메탈릭 피처 카드 */
 .feature-card {
-    background-color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.03); /* 아주 어두운 반투명 배경 */
     padding: 32px; border-radius: 24px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-    border: 1px solid #e5e8eb;
-    transition: all 0.2s ease;
+    /* 미세한 메탈릭 테두리 및 그림자 */
+    border: 1px solid var(--metal-border);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08), inset 0 1px 1px rgba(255, 255, 255, 0.03);
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px); /* 약한 블러 */
 }
-.feature-card:hover { transform: translateY(-5px); box-shadow: 0 12px 30px rgba(0,0,0,0.1); }
+.feature-card:hover { 
+    transform: translateY(-3px); 
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12); 
+}
 
 .feature-card h3 {
-    font-family: 'Inter', sans-serif; font-size: 1.4rem; font-weight: 700;
-    color: #191f28; margin-top: 8px; margin-bottom: 1rem;
+    font-family: 'Inter', sans-serif; font-size: 1.25rem; font-weight: 700;
+    color: var(--text-primary); margin-top: 8px; margin-bottom: 1rem;
 }
-.feature-card p { font-size: 1rem; color: #4e5968; line-height: 1.6; margin-bottom: 0; }
+.feature-card p { 
+    font-family: 'Inter', sans-serif;
+    font-size: 1rem; color: var(--text-secondary); line-height: 1.6; margin-bottom: 0; 
+}
 
-/* 푸터 */
+/* 푸터 (메탈릭 스타일) */
 .landing-footer {
     margin-top: 100px; margin-bottom: 40px; padding-top: 24px;
-    text-align: center; color: #8b95a1; font-size: 14px;
-    border-top: 1px solid #e5e8eb;
+    text-align: center; color: var(--text-secondary); font-size: 14px;
+    font-family: 'Inter', sans-serif;
+    border-top: 1px solid var(--metal-border);
 }
 
-/* 모바일 대응 */
+/* 모바일 대응 (기존 유지) */
 @media (max-width: 1024px) {
     .hero-section { grid-template-columns: 1fr; padding-top: 40px; text-align: center; height: auto; }
     .hero-feed-vertical { margin-top: 40px; max-width: 100%; margin-left: auto; margin-right: auto; }
@@ -271,137 +367,169 @@ body {
     .hero-cta-buttons { justify-content: center; }
     .hero-description { margin-left: auto; margin-right: auto; }
 }
+
 /* ==========================================================================
-   (v20.0) PREMIUM LAUNCH POPUP STYLES - Clean, No Emojis, Tech-Luxury
+   (v21.0) PREMIUM LAUNCH POPUP STYLES - Matte Aluminum & Black Luxury
    ========================================================================== */
 
-/* 오버레이: 더 깊고 어두운 블러 */
+/* 오버레이: 다크 블러 */
 .popup-overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0, 2, 5, 0.9); /* 거의 완전한 블랙 */
-    backdrop-filter: blur(12px); z-index: 10000;
+    background: rgba(5, 6, 7, 0.85); /* 매트 블랙 배경 */
+    backdrop-filter: blur(20px); z-index: 10000;
     display: none; justify-content: center; align-items: center;
+    transition: opacity 0.3s ease;
 }
 
-/* 팝업 본체: 미니멀리즘 박스 */
+/* 팝업 본체: 메탈릭 럭셔리 박스 */
 .popup-content {
-    background: #05070a; /* Deep Space Black */
-    border: 1px solid rgba(0, 255, 157, 0.15); /* 아주 은은한 네온 테두리 */
-    box-shadow: 0 0 50px rgba(0, 255, 157, 0.08); /* 극도로 절제된 발광 */
+    background: rgba(20, 22, 25, 0.8); /* 다크 메탈릭 배경 */
+    border: 1px solid var(--metal-border); /* 미세한 메탈 테두리 */
+    /* 부드러운 블러 및 깊이감 있는 그림자 */
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.08);
+    
     width: 90%; max-width: 460px; max-height: 85vh;
-    border-radius: 16px; display: flex; flex-direction: column;
-    color: #e2e8f0; font-family: 'Inter', sans-serif;
+    border-radius: 20px; display: flex; flex-direction: column;
+    color: var(--text-primary); font-family: 'Inter', sans-serif;
     animation: popupFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
-@keyframes popupFadeIn { from { opacity: 0; transform: scale(0.97) translateY(5px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes popupFadeIn { from { opacity: 0; transform: scale(0.98) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
-/* 헤더: 배경색 없이 깔끔하게 */
+/* 헤더: 메탈릭 텍스트 */
 .popup-header {
     padding: 24px 24px 16px 24px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--metal-border);
     display: flex; justify-content: space-between; align-items: center;
     background: transparent;
 }
 .popup-header h2 {
-    margin: 0; font-size: 1.15rem; color: #fff; font-weight: 600; letter-spacing: -0.01em;
+    margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em;
+    /* 메탈릭 텍스트 */
+    background: var(--metal-silver-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 .close-btn {
-    background: none; border: none; color: #475569; font-size: 24px;
+    background: none; border: none; color: var(--text-secondary); font-size: 24px;
     cursor: pointer; padding: 0; transition: color 0.2s; line-height: 1;
 }
-.close-btn:hover { color: #fff; }
+.close-btn:hover { color: var(--text-primary); }
 
 /* 본문 영역 */
-.popup-body { padding: 24px; overflow-y: auto; font-size: 0.9rem; line-height: 1.5; color: #94a3b8; }
+.popup-body { padding: 24px; overflow-y: auto; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary); }
 .popup-section { margin-bottom: 28px; }
 .popup-section:last-child { margin-bottom: 0; }
 
-/* 네온 악센트 소제목 (이모지 대체) */
+/* 메탈릭 악센트 소제목 (네온 대체) */
 .neon-accent {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem; color: var(--neon-green);
-    text-transform: uppercase; letter-spacing: 1px; font-weight: 700;
+    font-family: 'Inter', sans-serif; /* 모노스페이스 제거 */
+    font-size: 0.9rem; font-weight: 600;
+    color: var(--text-primary); /* 메탈릭 실버 */
+    text-transform: uppercase; letter-spacing: 1px;
     margin: 0 0 12px 0; display: flex; align-items: center;
+    text-shadow: none;
 }
-/* 소제목 앞의 작은 네온 바 */
+/* 소제목 앞의 작은 메탈 바 */
 .neon-accent::before {
-    content: ''; display: inline-block; width: 10px; height: 2px;
-    background: var(--neon-green); margin-right: 8px; opacity: 0.8;
+    content: ''; display: inline-block; width: 12px; height: 2px;
+    background: var(--metal-silver-gradient); /* 실버 그라데이션 */
+    margin-right: 10px; opacity: 1;
+    border-radius: 1px;
 }
 
-/* 강조 박스 (Free Trial) */
+/* 강조 박스 (Free Trial - 메탈릭 스타일) */
 .highlight-box {
-    background: rgba(0, 255, 157, 0.02); /* 색상을 거의 뺌 */
-    border: 1px solid rgba(0, 255, 157, 0.1);
-    padding: 20px; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--metal-border);
+    padding: 20px; border-radius: 16px;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.03);
 }
-.main-desc { font-size: 1rem; color: #fff; margin-bottom: 12px; }
-.main-desc strong { color: var(--neon-green); font-weight: 600; }
+.main-desc { font-size: 1rem; color: var(--text-primary); margin-bottom: 12px; }
+.main-desc strong { 
+    color: var(--accent-green); /* 그린 악센트 */
+    font-weight: 600; 
+}
 
-/* 깔끔한 리스트 스타일 */
+/* 깔끔한 리스트 스타일 (메탈릭 점) */
 .clean-list { list-style: none; padding: 0; margin: 0; }
-.clean-list li { display: flex; align-items: start; margin-bottom: 6px; color: #aaa; }
-/* 리스트 앞의 작은 네온 점 */
+.clean-list li { display: flex; align-items: start; margin-bottom: 8px; color: var(--text-secondary); }
+/* 리스트 앞의 작은 메탈 점 */
 .accent-dot {
-    display: inline-block; min-width: 5px; height: 5px;
-    background: var(--neon-green); border-radius: 50%;
-    margin-top: 8px; margin-right: 10px; opacity: 0.7;
+    display: inline-block; min-width: 6px; height: 6px;
+    background: var(--metal-silver-gradient); /* 실버 그라데이션 */
+    border-radius: 50%;
+    margin-top: 7px; margin-right: 12px; opacity: 1;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
-/* 숫자 리스트 */
-.clean-ol { padding-left: 20px; margin: 0; color: #aaa; }
-.clean-ol li { margin-bottom: 6px; padding-left: 5px; }
-.clean-ol strong { color: #fff; font-weight: 600; }
+/* 숫자 리스트 (메탈릭 숫자) */
+.clean-ol { padding-left: 20px; margin: 0; color: var(--text-secondary); }
+.clean-ol li { margin-bottom: 8px; padding-left: 5px; }
+.clean-ol strong { color: var(--text-primary); font-weight: 600; }
 
-/* 설치 가이드 UI 카드 */
-.install-guide { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* 설치 가이드 UI 카드 (메탈릭 스타일) */
+.install-guide { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .guide-item {
-    background: rgba(255, 255, 255, 0.02);
-    padding: 16px; border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    text-align: center; transition: border-color 0.2s;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 16px; border-radius: 14px;
+    border: 1px solid var(--metal-border);
+    text-align: center; transition: all 0.2s ease;
 }
-.guide-item:hover { border-color: rgba(0, 255, 157, 0.2); }
+.guide-item:hover { 
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.15);
+}
 .os-label {
-    display: block; font-weight: 600; color: #fff; margin-bottom: 6px; font-size: 0.9rem;
+    display: block; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; font-size: 0.9rem;
 }
-.guide-item p { margin: 0; color: #888; font-size: 0.8rem; }
+.guide-item p { margin: 0; color: var(--text-secondary); font-size: 0.8rem; }
 
-/* 하단 정보 (면책 등) - 아주 작게 처리 */
+/* 하단 정보 (면책 등) */
 .footer-info {
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid var(--metal-border);
     padding-top: 16px; margin-top: 16px;
 }
-.disclaimer, .contact { font-size: 0.75rem; color: #555; margin: 4px 0; }
+.disclaimer, .contact { font-size: 0.75rem; color: var(--text-secondary); margin: 4px 0; }
 
-/* 푸터 버튼 영역 */
+/* 푸터 버튼 영역 (메탈릭 스타일) */
 .popup-footer {
-    padding: 20px 24px; border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 20px 24px; border-top: 1px solid var(--metal-border);
     display: flex; justify-content: space-between; align-items: center;
-    background: rgba(0, 0, 0, 0.3); border-radius: 0 0 16px 16px;
+    background: rgba(20, 22, 25, 0.5); /* 약간 더 어두운 배경 */
+    border-radius: 0 0 20px 20px;
 }
 .dont-show {
-    font-size: 0.85rem; color: #64748b; cursor: pointer;
+    font-size: 0.85rem; color: var(--text-secondary); cursor: pointer;
     display: flex; align-items: center; gap: 8px; transition: color 0.2s;
 }
-.dont-show:hover { color: #94a3b8; }
-.dont-show input { accent-color: var(--neon-green); }
+.dont-show:hover { color: var(--text-primary); }
+.dont-show input { accent-color: var(--accent-green); } /* 체크박스 색상 */
 
-/* 메인 버튼 (깔끔한 텍스트형) */
+/* 메인 버튼 (브러시드 메탈 스타일) */
 .confirm-btn {
-    background: var(--neon-green); color: #05070a; border: none;
-    padding: 12px 30px; border-radius: 6px; /* 둥근 정도를 줄임 */
+    /* 브러시드 메탈 배경 및 텍스트 */
+    background: var(--metal-silver-gradient);
+    color: var(--metal-dark-bg); /* 텍스트는 어둡게 */
+    border: none;
+    padding: 12px 30px; border-radius: 10px;
     font-family: 'Inter', sans-serif; font-weight: 700; font-size: 0.9rem;
     letter-spacing: 0.5px; cursor: pointer; transition: all 0.2s ease;
+    /* 미세한 그림자 */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 .confirm-btn:hover {
-    background: #00cc7d; transform: translateY(-1px);
-    box-shadow: 0 4px 15px rgba(0, 255, 157, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    /* 호버 시 밝기 약간 증가 (선택 사항) */
+    filter: brightness(1.05);
 }
 
-/* 모바일 대응 */
+/* 모바일 대응 (기존 유지) */
 @media (max-width: 480px) {
-    .install-guide { grid-template-columns: 1fr; } /* 모바일선 세로로 배치 */
+    .install-guide { grid-template-columns: 1fr; }
     .popup-footer { flex-direction: column; gap: 16px; }
     .confirm-btn, .dont-show { width: 100%; justify-content: center; }
 }
