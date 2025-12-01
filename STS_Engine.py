@@ -822,12 +822,11 @@ class SniperBot:
 class STSPipeline:
     def __init__(self):
         self.selector = TargetSelector()
-        self.snipers = {}       # 현재 활성 Top 3 봇
-        self.candidates = []    # Top 10 후보군 리스트
+        self.snipers = {}       
+        self.candidates = []    
         self.last_quotes = {}
         
-        # [수정 1] ★핵심★: 마지막 Agg(A) 데이터를 저장할 공간 초기화
-        # (이게 없으면 T 이벤트가 들어올 때 VWAP 계산을 못함)
+        # [수정 1] 핵심: 마지막 Agg(A) 데이터를 저장할 공간 초기화
         self.last_agg = {}      
         
         self.logger = DataLogger()
@@ -835,6 +834,20 @@ class STSPipeline:
         # 수신과 처리를 분리할 큐 생성
         self.msg_queue = asyncio.Queue(maxsize=100000)
         
+        # 🔥 [추가된 부분] 여기가 없어서 에러가 났던 겁니다! 🔥
+        self.redis_client = None
+        try:
+            redis_url = os.environ.get('REDIS_URL')
+            if redis_url:
+                # decode_responses=True 필수 (문자열로 받기 위해)
+                self.redis_client = redis.from_url(redis_url, decode_responses=True)
+                print("✅ [STS] Redis Connected inside Engine.", flush=True)
+            else:
+                print("⚠️ [STS] REDIS_URL not found in env.", flush=True)
+        except Exception as e:
+            print(f"❌ [STS] Redis Connection Error: {e}", flush=True)
+        
+        # 모델 로딩
         self.shared_model = None
         if os.path.exists(MODEL_FILE):
             print(f"🤖 [System] Loading AI Model: {MODEL_FILE}", flush=True)
