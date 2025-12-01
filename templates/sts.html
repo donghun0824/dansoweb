@@ -1,162 +1,315 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DANSO SNIPER CONSOLE</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <title>DANSO TERMINAL PRO</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/sts.css') }}">
+    
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+
+    <style>
+        :root {
+            /* DANSO x MacBook Silver Palette */
+            --aluminum-light: #F2F2F7;
+            --aluminum-mid: #E5E5EA;
+            --aluminum-dark: #D1D1D6;
+            
+            --glass-panel: rgba(255, 255, 255, 0.65); /* 투명도 조정 */
+            --glass-border: rgba(255, 255, 255, 0.5);
+            
+            --text-primary: #1D1D1F;
+            --text-secondary: #6E6E73;
+            --text-tertiary: #8E8E93;
+            
+            /* Sophisticated Accents */
+            --mint-leaf: #30D158;
+            --coral-red: #FF453A;
+            --royal-blue: #007AFF;
+            
+            /* Typography */
+            --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'SF Mono', 'Roboto Mono', monospace;
+            
+            /* Shadows */
+            --shadow-ambient: 0 10px 40px rgba(0, 0, 0, 0.08);
+            --shadow-elevated: 0 20px 60px rgba(0, 0, 0, 0.12);
+            --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.06);
+            --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
+        
+        body {
+            background: linear-gradient(135deg, var(--aluminum-light) 0%, var(--aluminum-mid) 100%);
+            color: var(--text-primary);
+            font-family: var(--font-display);
+            height: 100vh;
+            overflow: hidden;
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Metal Texture Effect */
+        body::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255, 255, 255, 0.03) 2px, rgba(255, 255, 255, 0.03) 4px);
+            pointer-events: none; z-index: 0; opacity: 0.4;
+        }
+
+        /* --- Navigation --- */
+        nav {
+            position: relative; z-index: 100; height: 60px;
+            background: var(--glass-panel);
+            backdrop-filter: blur(40px) saturate(180%);
+            -webkit-backdrop-filter: blur(40px) saturate(180%);
+            border-bottom: 1px solid var(--glass-border);
+            display: flex; align-items: center; padding: 0 24px;
+            justify-content: space-between; box-shadow: var(--shadow-ambient);
+        }
+        
+        .logo-area { display: flex; align-items: center; gap: 12px; font-weight: 800; color: var(--text-primary); font-size: 18px; letter-spacing: -0.5px; }
+        .logo-area img { height: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1)); }
+        
+        .nav-right { display: flex; align-items: center; gap: 16px; }
+        
+        .ai-filter-group {
+            display: flex; align-items: center; gap: 8px;
+            background: rgba(255, 255, 255, 0.5); padding: 6px 12px;
+            border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: var(--shadow-inset);
+        }
+        
+        /* User Profile Pill */
+        .user-pill {
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(255, 255, 255, 0.8); padding: 6px 6px 6px 16px;
+            border-radius: 30px; box-shadow: var(--shadow-button);
+            border: 1px solid rgba(255,255,255,0.5);
+        }
+        .user-pill img { width: 28px; height: 28px; border-radius: 50%; }
+        .user-pill span { font-weight: 600; font-size: 13px; color: var(--text-primary); }
+        .btn-logout { color: var(--coral-red); margin-left: 5px; text-decoration: none; padding: 4px; }
+
+        /* --- Layout --- */
+        .layout-container {
+            position: relative; z-index: 1; display: grid;
+            grid-template-columns: 280px 1fr 340px;
+            grid-template-rows: 50px 1fr;
+            height: calc(100vh - 60px);
+            gap: 16px; padding: 16px;
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--glass-panel);
+            backdrop-filter: blur(40px) saturate(180%);
+            -webkit-backdrop-filter: blur(40px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-ambient);
+            display: flex; flex-direction: column; overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        .panel-header {
+            height: 44px; padding: 0 16px;
+            background: rgba(255,255,255,0.3);
+            border-bottom: 1px solid rgba(0,0,0,0.04);
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 11px; font-weight: 700; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+
+        /* --- Inputs & Buttons --- */
+        input[type="number"], input[type="text"], textarea {
+            background: rgba(255,255,255,0.6); border: 1px solid rgba(0,0,0,0.05);
+            border-radius: 8px; padding: 4px 8px; font-family: var(--font-mono);
+            font-size: 12px; color: var(--text-primary);
+        }
+        button {
+            background: #fff; border: 1px solid rgba(0,0,0,0.05);
+            padding: 4px 12px; border-radius: 8px; font-weight: 600; font-size: 11px;
+            color: var(--royal-blue); cursor: pointer; box-shadow: var(--shadow-button);
+        }
+        button:hover { transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+
+        /* --- Specific Panels --- */
+        .scanner-panel { grid-column: 1; grid-row: 1 / span 2; }
+        .status-bar { grid-column: 2; grid-row: 1; align-items: center; flex-direction: row; padding: 0 20px; gap: 20px;}
+        .main-view { grid-column: 2; grid-row: 2; }
+        .right-panel { grid-column: 3; grid-row: 1 / span 2; background: transparent; box-shadow: none; border: none; backdrop-filter: none; gap: 16px; }
+        .right-sub-panel { 
+    flex: 1; 
+    display: flex; 
+    flex-direction: column; 
+    
+    /* .panel의 스타일을 직접 가져옴 */
+    background: var(--glass-panel);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    box-shadow: var(--shadow-ambient);
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+        /* Tickers & Tables */
+        .ticker-row { padding: 12px 16px; border-bottom: 1px solid rgba(0,0,0,0.04); display: flex; justify-content: space-between; cursor: pointer; }
+        .ticker-row:hover { background: rgba(0,122,255,0.05); }
+        .t-symbol { font-weight: 700; font-size: 14px; }
+        .t-price { font-family: var(--font-mono); font-weight: 600; }
+        .text-up { color: var(--mint-leaf); } .text-down { color: var(--coral-red); }
+
+        /* Webull Table */
+        .webull-table { width: 100%; border-collapse: collapse; }
+        .webull-table th { text-align: right; padding: 10px 16px; font-size: 10px; color: var(--text-secondary); border-bottom: 1px solid rgba(0,0,0,0.05); font-weight: 700; background: rgba(255,255,255,0.2); }
+        .webull-table th:first-child { text-align: left; }
+        .webull-table td { text-align: right; padding: 12px 16px; font-family: var(--font-mono); font-size: 13px; border-bottom: 1px solid rgba(0,0,0,0.03); color: var(--text-primary); }
+        .webull-table td:first-child { text-align: left; font-weight: 700; font-family: var(--font-display); }
+
+        /* Chat */
+        .chat-input-area { padding: 12px; background: rgba(255,255,255,0.4); border-top: 1px solid rgba(0,0,0,0.04); display: flex; gap: 8px; }
+        .chat-input { flex: 1; padding: 8px 12px; border-radius: 16px; background: #fff; resize: none; font-family: var(--font-display); }
+        .chat-btn { width: auto; background: var(--royal-blue); color: #fff; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; padding: 0; }
+
+        /* Live Indicator */
+        .live-indicator { width: 8px; height: 8px; background: var(--mint-leaf); border-radius: 50%; box-shadow: 0 0 10px var(--mint-leaf); animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* Scrollbar Hide */
+        ::-webkit-scrollbar { display: none; }
+        
+        /* Pro Badge */
+        .pro-badge { background: linear-gradient(135deg, var(--royal-blue), #5AC8FA); color: white; padding: 2px 6px; border-radius: 6px; font-size: 9px; font-weight: 800; margin-left: 8px; box-shadow: 0 2px 5px rgba(0,122,255,0.3); }
+
+    </style>
 </head>
 <body>
-    
-    <canvas id="heroCanvas"></canvas>
 
-    <div class="main-container full-width">
-        <header class="sts-header">
-            <div class="brand-logo">
-                <i class="fa-solid fa-crosshairs fa-spin-pulse" style="--fa-animation-duration: 3s;"></i>
-                DANSO <span>SNIPER</span>
+    <nav>
+        <div class="logo-area">
+            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
+            <span>DANSO</span>
+            <span class="pro-badge">PRO</span>
+        </div>
+        
+        <div class="nav-right">
+            <div class="ai-filter-group">
+                <span>AI Filter:</span>
+                <input type="number" id="min-score-input" value="80" style="width: 45px;">
+                <button id="save-score-btn">SET</button>
+                <button id="subscribe-btn"><i class="fa-regular fa-bell"></i> Alerts</button>
             </div>
-            <div class="system-status">
-                <div class="status-item">
-                    <span class="dot blink"></span> ENGINE LIVE
-                </div>
-                <div class="status-item">
-                    <i class="fa-solid fa-server"></i> <span class="mono-text">12ms</span>
-                </div>
-                <div class="status-item">
-                    <i class="fa-solid fa-database"></i> DB CONNECTED
-                </div>
-                <div class="status-item time-display">
-                    <span id="clock" class="mono-text">--:--:--</span>
-                </div>
-            </div>
-        </header>
 
-        <div class="sts-grid">
+            {% if user %}
+            <div class="user-pill">
+                <img src="{{ user.picture or 'https://placehold.co/30x30' }}" alt="User">
+                <span>{{ user.name }}</span>
+                <a href="/logout" class="btn-logout" title="Logout"><i class="fa-solid fa-power-off"></i></a>
+            </div>
+            {% endif %}
+        </div>
+    </nav>
+
+    <div class="layout-container">
+
+        <aside class="panel scanner-panel">
+            <div class="panel-header">
+                <span>Scanner Feed</span>
+                <i class="fa-solid fa-bolt" style="color: var(--royal-blue);"></i>
+            </div>
+            <div id="ticker-list-container" style="overflow-y: auto; flex: 1;">
+                <div style="padding: 40px 20px; text-align: center; color: var(--text-tertiary);">
+                    Searching Market...
+                </div>
+            </div>
+            <div style="padding: 12px 16px; font-size: 11px; display: flex; justify-content: space-between; border-top: 1px solid rgba(0,0,0,0.04); color: var(--text-secondary); font-weight: 600;">
+                <span id="scan-status-text">Status: Idle</span>
+                <span id="scan-watching-count">Targets: 0</span>
+            </div>
+        </aside>
+
+        <div class="panel status-bar">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="live-indicator"></span>
+                <span style="color: var(--text-primary); font-weight: 800; font-size: 12px; letter-spacing: -0.2px;">MARKET OPEN</span>
+            </div>
+            <div style="width: 1px; height: 20px; background: rgba(0, 0, 0, 0.1);"></div>
+            <div id="scrolling-bar-track" style="flex: 1; display: flex; gap: 20px; overflow: hidden; white-space: nowrap; font-family: var(--font-mono); font-weight: 600; font-size: 12px;">
+                </div>
+        </div>
+
+        <main class="panel main-view">
+            <div class="panel-header">
+                <span>STS Target Monitor</span>
+                <span style="font-size: 9px; font-weight: 800; color: var(--mint-leaf); background: rgba(48, 209, 88, 0.1); padding: 2px 6px; border-radius: 4px;">LIVE</span>
+            </div>
             
-            <div class="glass-card full-span">
-                <div class="card-header">
-                    <h3><i class="fa-solid fa-list-ol"></i> TOP-3 REAL-TIME CANDIDATES</h3>
-                    <span class="badge-ai">AI MODEL: XGBOOST_V5.3</span>
-                </div>
-                <div class="table-responsive">
-                    <table class="sts-table">
-                        <thead>
-                            <tr>
-                                <th>TICKER</th>
-                                <th>PRICE</th>
-                                <th>AI PROB</th>
-                                <th>MICRO STRUCTURE</th>
-                                <th>RISK / VOL</th>
-                                <th>TARGETING</th>
-                                <th>STATE</th>
-                            </tr>
-                        </thead>
-                        <tbody id="target-table-body">
-                            </tbody>
-                    </table>
+            <div style="overflow-y: auto; max-height: 50%;">
+                <table class="webull-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">Symbol</th>
+                            <th>Price</th>
+                            <th>STS Score</th>
+                            <th>OBI %</th>
+                            <th>Toxic</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sts-target-table-body">
+                        <tr>
+                            <td colspan="6" style="text-align: center; padding: 50px; color: var(--text-tertiary);">
+                                Waiting for Signals...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="chart-container" style="flex: 1; border-top: 1px solid rgba(0,0,0,0.04); position: relative; background: rgba(255,255,255,0.3);">
+                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--text-tertiary); font-weight: 600;">
+                    Select a ticker to view chart
                 </div>
             </div>
+        </main>
 
-            <div class="col-left">
-                <div class="glass-card mb-20">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-magnifying-glass-chart"></i> LIVE MICROSTRUCTURE</h3>
-                    </div>
-                    <div id="micro-panel" class="panel-content">
-                        <div class="micro-row">
-                            <span>OBI (Imbalance)</span>
-                            <div class="progress-wrapper">
-                                <span class="val-text mono-text text-green">+0.75</span>
-                                <div class="progress-bg"><div class="progress-fill green" style="width: 75%;"></div></div>
-                            </div>
-                        </div>
-                        <div class="micro-row">
-                            <span>VPIN (Toxic Flow)</span>
-                            <div class="progress-wrapper">
-                                <span class="val-text mono-text text-warn">0.62</span>
-                                <div class="progress-bg"><div class="progress-fill warn" style="width: 62%;"></div></div>
-                            </div>
-                        </div>
-                        <div class="micro-item">
-                            <span>Tape Speed</span>
-                            <span class="mono-text text-highlight">🚀 High (120/s)</span>
-                        </div>
-                    </div>
+        <aside class="right-panel">
+            <div class="right-sub-panel">
+                <div class="panel-header">
+                    <span>Sniper Signals</span>
+                    <i class="fa-solid fa-crosshairs" style="color: var(--coral-red);"></i>
                 </div>
-
-                <div class="glass-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-calculator"></i> RISK ENGINE</h3>
+                <div id="signal-feed-container" style="overflow-y: auto; flex: 1;">
                     </div>
-                    <div class="risk-grid">
-                        <div class="risk-item">
-                            <span class="label">ENTRY</span>
-                            <span class="value mono-text">$345.20</span>
-                        </div>
-                        <div class="risk-item">
-                            <span class="label">TARGET (ATR 1.5x)</span>
-                            <span class="value mono-text text-green">$348.50</span>
-                        </div>
-                        <div class="risk-item">
-                            <span class="label">HARD STOP</span>
-                            <span class="value mono-text text-dim">$340.10</span>
-                        </div>
-                        <div class="risk-item highlight">
-                            <span class="label">WIN PROB</span>
-                            <span class="value mono-text">68.5%</span>
-                        </div>
-                    </div>
-                </div>
             </div>
 
-            <div class="col-right">
-                <div class="glass-card mb-20">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-trophy"></i> SESSION PERF</h3>
-                    </div>
-                    <div class="stat-flex">
-                        <div class="stat-box">
-                            <div class="label">WIN RATE</div>
-                            <div id="session-winrate" class="val mono-text text-green">--%</div>
-                        </div>
-                        <div class="stat-box">
-                            <div class="label">SIGNALS</div>
-                            <div id="session-signals" class="val mono-text">0</div>
-                        </div>
-                    </div>
-                    <div class="chart-mini">
-                        <div class="label">STRATEGY DIST</div>
-                        <div class="bar-chart">
-                            <div class="bar" style="height:30%"></div>
-                            <div class="bar" style="height:50%"></div>
-                            <div class="bar active" style="height:80%"></div>
-                            <div class="bar" style="height:60%"></div>
-                            <div class="bar" style="height:20%"></div>
-                        </div>
-                    </div>
+            <div class="right-sub-panel" style="height: 40%;">
+                <div class="panel-header">
+                    <span>Trader Chat</span>
+                    <i class="fa-solid fa-comments" style="color: var(--royal-blue);"></i>
                 </div>
-
-                <div class="glass-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-fire"></i> HEAT-MAP</h3>
+                <div id="community-feed-container" style="flex: 1; overflow-y: auto; padding: 12px; font-size: 12px;">
                     </div>
-                    <div class="heatmap-grid">
-                        <div class="heat-block hot">TECH</div>
-                        <div class="heat-block warm">BIO</div>
-                        <div class="heat-block cool">EV</div>
-                    </div>
-                    <div class="micro-item mt-15">
-                        <span class="label">SPIKE DETECTED</span>
-                        <span id="spike-list" class="mono-text text-green">SCANNING...</span>
-                    </div>
-                </div>
+                
+                <form id="post-form" class="chat-input-area" onsubmit="return false;">
+                    <input type="text" name="author" value="{{ user.name if user else 'Guest' }}" hidden>
+                    <textarea name="content" class="chat-input" rows="1" placeholder="Type a message..." required></textarea>
+                    <button type="button" id="post-submit-btn" class="chat-btn"><i class="fa-solid fa-arrow-up"></i></button>
+                </form>
             </div>
+        </aside>
 
-    <script src="{{ url_for('static', filename='js/sts.js') }}"></script>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}" type="module" defer></script>
 
 </body>
 </html>
