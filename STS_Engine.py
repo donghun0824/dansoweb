@@ -3,6 +3,7 @@ import websockets
 import json
 import os
 import time
+import redis
 import numpy as np
 import pandas as pd
 import csv
@@ -970,18 +971,24 @@ class STSPipeline:
 
     # [6] Scanner (20초 주기)
     async def task_global_scan(self):
-        print("🔭 [Scanner] Started (Fast Mode: 20s)", flush=True)
+        """
+        [변경됨] 직접 스캔 안 하고, Scanner가 Redis에 올려둔 걸 가져옴
+        """
+        print("🔭 [STS] Redis Sync Mode Started...", flush=True)
         while True:
             try:
-                # 봇 켜자마자 바로 한번 스캔
-                self.candidates = self.selector.get_top_gainers_candidates(limit=10)
-                if self.candidates:
-                    print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
+                if self.redis_client:
+                    # Redis에서 'sts_candidates' 키를 읽음
+                    data = self.redis_client.get('sts_candidates')
+                    if data:
+                        # 스캐너가 찾아준 종목 리스트로 갱신
+                        self.candidates = json.loads(data)
+                        # print(f"📋 [Sync] Received Candidates: {self.candidates}", flush=True)
                 
-                self.selector.garbage_collect()
-                await asyncio.sleep(20) # 20초 대기
+                # 2초마다 갱신 (직접 스캔보다 훨씬 빠르고 가벼움)
+                await asyncio.sleep(2) 
             except Exception as e:
-                print(f"⚠️ Scanner Warning: {e}", flush=True)
+                print(f"⚠️ Redis Sync Warning: {e}", flush=True)
                 await asyncio.sleep(5)
 
     # [7] Manager (5초 주기 & Warmup 적용)

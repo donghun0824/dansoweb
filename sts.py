@@ -193,9 +193,80 @@ class MicrostructureAnalyzer:
     
     def inject_history(self, aggs): pass # (내용 유지)
     def update_tick(self, tick_data, current_quotes): pass # (내용 유지)
-    def get_metrics(self): 
-        # (내용 유지 - 너무 길어서 생략하지만, 님의 코드 그대로 붙여넣으세요)
-        return None
+    def get_metrics(self):
+        # 1. 틱이 너무 적으면(5개 미만) 아예 계산 포기 (정상)
+        if len(self.raw_ticks) < 5: return None
+        
+        df = pd.DataFrame(self.raw_ticks).set_index('t')
+        ohlcv = df['p'].resample('1s').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'})
+        volume = df['s'].resample('1s').sum()
+        tick_count = df['s'].resample('1s').count()
+        
+        df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
+        df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
+        
+        # [중요] 거래 없는 시간은 직전 가격 유지
+        df = df_res.ffill().fillna(0)
+        
+        # 보정 후에도 데이터가 5개 미만이면 리턴
+        if len(df) < 5: return None 
+        
+        try:
+            # [수정됨] 여기서부터 들여쓰기가 한 칸 더 들어가야 합니다!
+            df['vwap'] = ind.compute_intraday_vwap_series(df, 'close', 'volume')
+            df['fibo_pos'] = ind.compute_fibo_pos(df['high'], df['low'], df['close'], lookback=600)
+            _, df['bb_width_norm'], df['squeeze_flag'] = ind.compute_bb_squeeze(df['close'], window=20, mult=2, norm_window=300)
+            df['rv_60'] = ind.compute_rv_60(df['close'])
+            df['vol_ratio_60'] = ind.compute_vol_ratio_60(df['volume'])
+            df['tick_accel'] = df['tick_speed'].diff().fillna(0)
+            
+            # NaN을 0으로 채움 (AI 입력 오류 방지)
+            df = df.fillna(0)
+
+            last = df.iloc[-1]
+            raw_df = pd.DataFrame(list(self.raw_ticks)[-100:]) 
+            
+            if len(raw_df) < 1: return None 
+
+            signs = [ind.classify_trade_sign(r.p, r.bid, r.ask) for r in raw_df.itertuples()]
+            signed_vol = raw_df['s'].values * np.array(signs)
+            vpin = ind.compute_vpin(signed_vol)
+            
+            bids = np.array([q['s'] for q in self.quotes.get('bids', [])[:OBI_LEVELS]])
+            asks = np.array([q['s'] for q in self.quotes.get('asks', [])[:OBI_LEVELS]])
+            obi = ind.compute_order_book_imbalance(bids, asks)
+            
+            obi_mom = obi - self.prev_obi
+            self.prev_obi = obi
+            
+            vwap_dist = (last['close'] - last['vwap']) / last['vwap'] * 100 if last['vwap'] > 0 else 0
+            
+            best_bid = self.raw_ticks[-1]['bid']
+            best_ask = self.raw_ticks[-1]['ask']
+            # 0 나누기 방지
+            if best_bid > 0:
+                spread = (best_ask - best_bid) / best_bid * 100 
+            else:
+                spread = 0
+
+            return {
+                'obi': obi, 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'],
+                'vpin': vpin, 'vwap_dist': vwap_dist,
+                'fibo_pos': last['fibo_pos'], 
+                'fibo_dist_382': abs(last['fibo_pos'] - 0.382),
+                'fibo_dist_618': abs(last['fibo_pos'] - 0.618),
+                'bb_width_norm': last['bb_width_norm'], 'squeeze_flag': last['squeeze_flag'],
+                'rv_60': last['rv_60'], 'vol_ratio_60': last['vol_ratio_60'],
+                'spread': spread, 'last_price': last['close'], 'tick_speed': last['tick_speed'], 
+                'timestamp': raw_df.iloc[-1]['t'], 'vwap': last['vwap']
+            }
+        except Exception as e:
+            # 🔥 [긴급 수정] 주석 해제하고 에러를 출력하게 변경!
+            import traceback
+            print(f"❌ [Metric Calc Error] {self.ticker if hasattr(self, 'ticker') else 'Unknown'}: {e}", flush=True)
+            traceback.print_exc() # 에러가 난 줄번호까지 추적
+            return None
+        
 
 # ==============================================================================
 # 4. 봇 클래스 (SniperBot) - TargetSelector 제거됨!

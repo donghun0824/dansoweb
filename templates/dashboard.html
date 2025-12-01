@@ -27,7 +27,7 @@
         
         <div class="system-status">
             <div class="status-item"><span class="dot blink"></span> LIVE</div>
-            <div class="status-item"><i class="fas fa-database"></i> DB</div>
+            <div class="status-item mobile-hide"><i class="fas fa-database"></i> DB</div>
             <div class="status-item" id="clock">00:00:00</div>
         </div>
 
@@ -84,52 +84,30 @@
                 </div>
             </section>
 
-            <section class="ios-watching-section">
-                
-                <div class="ios-card">
-                    <div class="ios-card-header card-header">
-                        <h3><i class="fas fa-eye"></i> Scanner Watching</h3>
-                        <div>
-                            <span id="scan-watching-count">0</span>
-                            <span id="scan-status-text">Idle</span>
-                        </div>
-                    </div>
-                    <div id="ticker-list-container" class="ticker-list"></div>
-                </div>
-
-                <div class="ios-card">
-                    <div class="ios-card-header card-header">
-                        <h3><i class="fas fa-lock"></i> Sniper Locking</h3>
-                    </div>
-                    <div id="micro-panel">
-                        <div class="empty-state">Waiting for target lock...</div>
-                    </div>
-                </div>
-
-            </section>
-
             <section class="ios-risk-section">
                 
                 <div class="ios-card">
                     <div class="ios-card-header card-header">
-                        <h3><i class="fas fa-shield-alt"></i> Risk Engine</h3>
+                        <h3><i class="fas fa-shield-alt"></i> Active Focus</h3>
                     </div>
-                    <div class="risk-grid">
-                        <div class="risk-item">
-                            <span class="label">ENTRY</span>
-                            <span class="value" id="risk-entry">-</span>
+                    
+                    <div class="risk-hero" style="text-align: center; padding: 20px 0;">
+                        <div class="value highlight" id="risk-prob" style="font-size: 3.5rem; font-weight: 800; color: #0A84FF; line-height: 1;">0%</div>
+                        <div class="label" style="font-size: 0.8rem; color: #8E8E93; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px;">AI Confidence</div>
+                    </div>
+
+                    <div class="risk-grid compact" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; margin-top: 10px;">
+                        <div class="risk-item mini" style="text-align: center;">
+                            <span class="label" style="font-size: 0.7rem; display: block; color: #8E8E93;">ENTRY</span>
+                            <span class="value" id="risk-entry" style="font-size: 0.9rem; font-weight: 600;">-</span>
                         </div>
-                        <div class="risk-item">
-                            <span class="label">TARGET</span>
-                            <div class="value text-green" id="risk-target">-</div>
+                        <div class="risk-item mini" style="text-align: center;">
+                            <span class="label" style="font-size: 0.7rem; display: block; color: #8E8E93;">TARGET</span>
+                            <span class="value text-green" id="risk-target" style="font-size: 0.9rem; font-weight: 600;">-</span>
                         </div>
-                        <div class="risk-item">
-                            <span class="label">STOP</span>
-                            <div class="value text-warn" id="risk-stop">-</div>
-                        </div>
-                        <div class="risk-item highlight">
-                            <span class="label">CONFIDENCE</span>
-                            <div class="value" id="risk-prob">0%</div>
+                        <div class="risk-item mini" style="text-align: center;">
+                            <span class="label" style="font-size: 0.7rem; display: block; color: #8E8E93;">STOP</span>
+                            <span class="value text-warn" id="risk-stop" style="font-size: 0.9rem; font-weight: 600;">-</span>
                         </div>
                     </div>
                 </div>
@@ -160,6 +138,30 @@
 
             </section>
 
+            <section class="ios-watching-section">
+                
+                <div class="ios-card">
+                    <div class="ios-card-header card-header">
+                        <h3><i class="fas fa-eye"></i> Scanner Watching</h3>
+                        <div>
+                            <span id="scan-watching-count">0</span>
+                            <span id="scan-status-text">Idle</span>
+                        </div>
+                    </div>
+                    <div id="ticker-list-container" class="ticker-list"></div>
+                </div>
+
+                <div class="ios-card">
+                    <div class="ios-card-header card-header">
+                        <h3><i class="fas fa-lock"></i> Sniper Lock</h3>
+                    </div>
+                    <div id="micro-panel">
+                        <div class="empty-state">Waiting for target lock...</div>
+                    </div>
+                </div>
+
+            </section>
+
             <section class="ios-utils-section">
                 
                 <div class="ios-card community-section">
@@ -183,7 +185,6 @@
                         <h3><i class="fas fa-sliders-h"></i> Alerts</h3>
                     </div>
                     <div class="settings-body">
-                        <p class="description">Push Alert Threshold</p>
                         <div class="control-group">
                             <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
                             <span class="unit">Score</span>
