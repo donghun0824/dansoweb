@@ -1,182 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
-    <title>Danso - AI Powered Scalping Assistant</title>
-    <meta name="description" content="실시간 급등주 포착부터 정밀 타격 AI 신호까지. 상위 1% 트레이더를 위한 AI 어시스턴트 Danso입니다.">
     <meta name="naver-site-verification" content="eb8016dc00057f4fdb6cb38e81cb7e507a4e1886" />
     <meta name="google-site-verification" content="rrMaS_Uo8i_SC9M4XfatAMijOT2vpn7vkm1x6FKuQbk" />
+    <title>DANSO - AI Powered Scalping Assistant</title>
     
-    <link rel="manifest" href="/manifest.json">
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
-    <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
-    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <script src="https://cdn.tailwindcss.com"></script>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
+    <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
+
+    <style>
+        /* Custom Styles (Tailwind 보조) */
+        * { font-family: 'Inter', sans-serif; }
+        body { background: linear-gradient(135deg, #F5F5F7 0%, #E3E3E3 100%); color: #1D1D1F; }
+        
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(209, 209, 214, 0.3);
+        }
+        
+        .device-frame {
+            background: linear-gradient(135deg, #E8E8ED 0%, #D1D1D6 100%);
+            border: 1px solid #B8B8BD;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+            border-radius: 12px; padding: 12px;
+        }
+        
+        html { scroll-behavior: smooth; }
+        .sticky-header { position: sticky; top: 0; z-index: 50; }
+    </style>
 </head>
-<body>
+<body class="antialiased">
 
-    <nav class="navbar">
-        <div class="container nav-container">
-            <a href="/" class="logo">
-                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
-                <span>DANSO</span>
+    <header class="sticky-header glass">
+        <nav class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="DANSO" class="h-8 w-auto">
+                    <span class="font-bold text-xl tracking-tight">DANSO</span>
+                </div>
+
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#features" class="text-sm font-medium text-gray-600 hover:text-black transition">Features</a>
+                    <a href="#how-it-works" class="text-sm font-medium text-gray-600 hover:text-black transition">How It Works</a>
+                    <a href="#pricing" class="text-sm font-medium text-gray-600 hover:text-black transition">Pricing</a>
+                    <a href="/login" class="text-sm font-medium text-gray-600 hover:text-black transition">Sign In</a>
+                </div>
+
+                <div>
+                    <a href="/auth/google" class="bg-gray-900 hover:bg-black text-white px-6 py-2.5 rounded-full text-sm font-semibold shadow-lg transition transform hover:-translate-y-0.5">
+                        Get Started
+                    </a>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <section class="container mx-auto px-6 py-20 md:py-32 text-center">
+        <h1 class="text-5xl md:text-7xl font-bold text-gray-900 mb-6 leading-tight tracking-tight">
+            The Fastest Way to Become a<br>
+            <span class="text-transparent bg-clip-text bg-gradient-to-r from-gray-900 to-gray-500">Top 1% Scalper</span>
+        </h1>
+        <p class="text-xl text-gray-600 mb-12 max-w-2xl mx-auto font-light leading-relaxed">
+            Automated journaling, AI probability analysis, and sniper signals.<br>
+            Trade smarter, not harder.
+        </p>
+        
+        <div class="flex flex-col sm:flex-row justify-center gap-4 mb-16">
+            <a href="/auth/google" class="bg-gray-900 hover:bg-black text-white px-8 py-4 rounded-full font-semibold shadow-xl transition transform hover:-translate-y-1">
+                Start Free Trial
             </a>
-            <div class="nav-buttons">
-                <a href="/login" class="btn btn-text">로그인</a>
-                <a href="/register" class="btn btn-primary">무료로 시작하기</a>
-            </div>
-        </div>
-    </nav>
-
-    <section class="hero-section">
-        <div class="container hero-content">
-            <h1 class="hero-title">
-                상위 1% 스캘퍼가 되는<br>
-                <span class="highlight">가장 빠르고 확실한 방법</span>
-            </h1>
-            <p class="hero-subtitle">
-                실시간 급등주 포착부터 정밀 타격 AI 신호까지.<br>
-                Danso가 당신의 트레이딩을 24시간 보조합니다.
-            </p>
-            <div class="hero-cta">
-                <a href="/register" class="btn btn-large btn-primary">지금 시작하기 (Free)</a>
-                <a href="#features" class="btn btn-large btn-outline">기능 더보기</a>
-            </div>
-            
-            <div class="hero-image-wrapper">
-                <img src="{{ url_for('static', filename='images/dashboard_preview.png') }}" alt="Danso Dashboard Interface" class="dashboard-preview">
-                <div class="glow-effect"></div>
-            </div>
-        </div>
-    </section>
-
-    <section class="stats-section">
-        <div class="container stats-grid">
-            <div class="stat-item">
-                <span class="stat-number">98%</span>
-                <span class="stat-label">신호 정확도</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-number">0.1s</span>
-                <span class="stat-label">실시간 반응속도</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-number">24/7</span>
-                <span class="stat-label">시장 감시</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-number">Risk-0</span>
-                <span class="stat-label">철저한 리스크 관리</span>
-            </div>
-        </div>
-    </section>
-
-    <section class="feature-section" id="features">
-        <div class="container feature-layout">
-            <div class="feature-text">
-                <div class="tag">REALTIME SCANNER</div>
-                <h2>더 이상 차트 앞에서<br>밤새지 마세요.</h2>
-                <p>
-                    Danso의 AI 스캐너가 전체 시장을 1초 단위로 감시합니다.<br>
-                    급등하는 종목을 포착하는 즉시 알림을 보내드립니다.
-                </p>
-            </div>
-            <div class="feature-image">
-                <img src="{{ url_for('static', filename='images/feature_scanner.png') }}" alt="Scanner Feature">
-            </div>
-        </div>
-    </section>
-
-    <section class="feature-section reverse">
-        <div class="container feature-layout">
-            <div class="feature-text">
-                <div class="tag">STS ENGINE</div>
-                <h2>확률 높은 자리에만<br>정밀하게 타격하세요.</h2>
-                <p>
-                    단순한 감이 아닙니다. 호가창(Orderbook)과 수급(VPIN)을 분석하여<br>
-                    AI가 최적의 진입 타점과 손절가를 계산해 줍니다.
-                </p>
-            </div>
-            <div class="feature-image">
-                <img src="{{ url_for('static', filename='images/feature_sniper.png') }}" alt="Sniper Feature">
-            </div>
-        </div>
-    </section>
-
-    <section class="grid-section">
-        <div class="container">
-            <div class="section-header text-center">
-                <h2>단 하나의 솔루션으로<br>완성되는 트레이딩</h2>
-                <p>초보자부터 전문가까지 필요한 모든 도구를 담았습니다.</p>
-            </div>
-            
-            <div class="feature-grid">
-                <div class="grid-card">
-                    <i class="fas fa-bolt icon"></i>
-                    <h3>초고속 스캐닝</h3>
-                    <p>나스닥 전 종목을 1초 단위로 스캔하여 급등주를 찾습니다.</p>
-                </div>
-                <div class="grid-card">
-                    <i class="fas fa-brain icon"></i>
-                    <h3>AI 승률 예측</h3>
-                    <p>XGBoost 모델이 과거 패턴을 학습해 상승 확률을 계산합니다.</p>
-                </div>
-                <div class="grid-card">
-                    <i class="fas fa-shield-alt icon"></i>
-                    <h3>리스크 관리</h3>
-                    <p>진입 전 손절가와 목표가를 미리 제시하여 뇌동매매를 막습니다.</p>
-                </div>
-                <div class="grid-card">
-                    <i class="fas fa-mobile-alt icon"></i>
-                    <h3>모바일 푸시</h3>
-                    <p>외출 중에도 기회를 놓치지 않도록 실시간 알림을 보냅니다.</p>
-                </div>
-                <div class="grid-card">
-                    <i class="fas fa-chart-line icon"></i>
-                    <h3>실시간 차트</h3>
-                    <p>TradingView 차트와 연동하여 기술적 분석을 지원합니다.</p>
-                </div>
-                <div class="grid-card">
-                    <i class="fas fa-users icon"></i>
-                    <h3>트레이더 커뮤니티</h3>
-                    <p>다른 사용자들과 인사이트를 공유하고 함께 성장하세요.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="cta-section">
-        <div class="container cta-content">
-            <h2>트레이딩 승률을 높이는<br>가장 확실한 선택</h2>
-            <p>지금 바로 Danso와 함께 시작하세요.</p>
-            <a href="/auth/google" class="btn btn-large btn-white">
-                <i class="fab fa-google"></i> 구글로 3초 만에 시작하기
+            <a href="#features" class="bg-white hover:bg-gray-50 text-gray-900 border border-gray-200 px-8 py-4 rounded-full font-semibold shadow-sm transition transform hover:-translate-y-1">
+                Learn More
             </a>
         </div>
+
+        <div class="device-frame max-w-5xl mx-auto transform transition hover:scale-[1.01] duration-500">
+            <img src="{{ url_for('static', filename='images/dashboard_preview.png') }}" alt="Dashboard" class="rounded-lg w-full h-auto shadow-sm">
+        </div>
     </section>
 
-    <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-logo">
-                    <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Logo" style="height: 24px;">
-                    <span>Danso Inc.</span>
+    <section class="py-12 bg-white/50 border-y border-gray-200 backdrop-blur-sm">
+        <div class="container mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+            <div>
+                <div class="text-4xl font-bold text-green-600 mb-1">98%</div>
+                <div class="text-sm text-gray-500 font-medium uppercase tracking-wide">Signal Accuracy</div>
+            </div>
+            <div>
+                <div class="text-4xl font-bold text-gray-900 mb-1">0.1s</div>
+                <div class="text-sm text-gray-500 font-medium uppercase tracking-wide">Avg Latency</div>
+            </div>
+            <div>
+                <div class="text-4xl font-bold text-gray-900 mb-1">24/7</div>
+                <div class="text-sm text-gray-500 font-medium uppercase tracking-wide">Monitoring</div>
+            </div>
+            <div>
+                <div class="text-4xl font-bold text-green-600 mb-1">Risk-0</div>
+                <div class="text-sm text-gray-500 font-medium uppercase tracking-wide">Management</div>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="container mx-auto px-6 py-24 space-y-32">
+        
+        <div class="grid md:grid-cols-2 gap-16 items-center">
+            <div>
+                <div class="inline-block px-3 py-1 bg-gray-200 rounded-full text-xs font-bold text-gray-600 mb-4 tracking-wide">REALTIME SCANNER</div>
+                <h2 class="text-4xl font-bold mb-6 text-gray-900">Catch Every Pump Instantly.</h2>
+                <p class="text-lg text-gray-600 leading-relaxed">
+                    Our engine scans the entire market every second. Filter by volume, price action, and momentum to find hidden gems before the crowd.
+                </p>
+            </div>
+            <div class="device-frame transform rotate-1 hover:rotate-0 transition duration-500">
+                <img src="{{ url_for('static', filename='images/feature_scanner.png') }}" alt="Scanner" class="rounded-lg w-full">
+            </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-16 items-center">
+            <div class="order-2 md:order-1 device-frame transform -rotate-1 hover:rotate-0 transition duration-500">
+                <img src="{{ url_for('static', filename='images/feature_sniper.png') }}" alt="Sniper" class="rounded-lg w-full">
+            </div>
+            <div class="order-1 md:order-2">
+                <div class="inline-block px-3 py-1 bg-gray-200 rounded-full text-xs font-bold text-gray-600 mb-4 tracking-wide">STS ENGINE</div>
+                <h2 class="text-4xl font-bold mb-6 text-gray-900">Precision Strikes with AI.</h2>
+                <p class="text-lg text-gray-600 leading-relaxed">
+                    Don't guess. Let the AI analyze Order Book Imbalance (OBI) and Toxic Flow (VPIN) to calculate the perfect entry and exit points.
+                </p>
+            </div>
+        </div>
+
+    </section>
+
+    <section id="how-it-works" class="bg-white py-24 border-t border-gray-200">
+        <div class="container mx-auto px-6">
+            <div class="text-center mb-20">
+                <h2 class="text-4xl font-bold text-gray-900 mb-4">Everything You Need to Dominate</h2>
+                <p class="text-xl text-gray-500">Professional-grade tools designed for serious scalpers.</p>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="p-8 rounded-2xl bg-gray-50 hover:bg-gray-100 transition border border-gray-100">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-6 text-xl">🛡️</div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Risk Engine</h3>
+                    <p class="text-gray-600">Protect your capital with intelligent position sizing and portfolio risk management.</p>
                 </div>
-                <div class="footer-links">
-                    <a href="#">이용약관</a>
-                    <a href="#">개인정보처리방침</a>
-                    <a href="#">문의하기</a>
+                <div class="p-8 rounded-2xl bg-gray-50 hover:bg-gray-100 transition border border-gray-100">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-6 text-xl">📱</div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Mobile Alerts</h3>
+                    <p class="text-gray-600">Get instant push notifications on your phone. Never miss a high-probability setup.</p>
+                </div>
+                <div class="p-8 rounded-2xl bg-gray-50 hover:bg-gray-100 transition border border-gray-100">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-6 text-xl">⚡</div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Lightning Execution</h3>
+                    <p class="text-gray-600">Sub-100ms order routing ensures you're first in line when opportunities appear.</p>
+                </div>
+                <div class="p-8 rounded-2xl bg-gray-50 hover:bg-gray-100 transition border border-gray-100">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-6 text-xl">📝</div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Auto Journaling</h3>
+                    <p class="text-gray-600">Every trade is automatically logged with entry, exit, P&L, and AI insights.</p>
+                </div>
+                <div class="p-8 rounded-2xl bg-gray-50 hover:bg-gray-100 transition border border-gray-100">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-6 text-xl">📊</div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Performance Analytics</h3>
+                    <p class="text-gray-600">Deep dive into your trading stats with comprehensive reports and visualizations.</p>
+                </div>
+                <div class="p-8 rounded-2xl bg-gray-50 hover:bg-gray-100 transition border border-gray-100">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-6 text-xl">👥</div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-3">Community</h3>
+                    <p class="text-gray-600">Join a network of elite traders. Share strategies and grow together.</p>
                 </div>
             </div>
-            <div class="copyright">
-                © 2025 Danso Inc. All rights reserved. Backed by AI Technology.
+        </div>
+    </section>
+
+    <section id="pricing" class="py-24 bg-gray-50 border-t border-gray-200">
+        <div class="container mx-auto px-6 text-center">
+            <h2 class="text-4xl font-bold text-gray-900 mb-4">Try DANSO Free</h2>
+            <p class="text-xl text-gray-600 mb-12">14-day free trial. No credit card required.</p>
+            
+            <div class="max-w-4xl mx-auto bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-200 p-12">
+                <div class="text-5xl font-bold text-gray-900 mb-6">Free Trial</div>
+                <ul class="text-left max-w-md mx-auto space-y-4 mb-10 text-gray-600">
+                    <li class="flex items-center"><svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Full Access to STS Engine</li>
+                    <li class="flex items-center"><svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Real-time Scanner</li>
+                    <li class="flex items-center"><svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Unlimited Mobile Alerts</li>
+                </ul>
+                <a href="/auth/google" class="bg-gray-900 text-white px-8 py-4 rounded-full font-bold hover:bg-black transition shadow-lg inline-block">Start Your Free Trial</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="py-12 bg-white border-t border-gray-200">
+        <div class="container mx-auto px-6 flex flex-col md:flex-row justify-between items-center">
+            <div class="flex items-center space-x-3 mb-4 md:mb-0">
+                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso" class="h-6 opacity-50">
+                <span class="text-gray-500 font-semibold">Danso Inc.</span>
+            </div>
+            <div class="text-sm text-gray-400">
+                &copy; 2025 Danso. All rights reserved.
             </div>
         </div>
     </footer>
