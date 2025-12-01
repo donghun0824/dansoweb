@@ -3,7 +3,6 @@ import websockets
 import json
 import os
 import time
-import redis
 import numpy as np
 import pandas as pd
 import csv
@@ -822,11 +821,12 @@ class SniperBot:
 class STSPipeline:
     def __init__(self):
         self.selector = TargetSelector()
-        self.snipers = {}       
-        self.candidates = []    
+        self.snipers = {}       # 현재 활성 Top 3 봇
+        self.candidates = []    # Top 10 후보군 리스트
         self.last_quotes = {}
         
-        # [수정 1] 핵심: 마지막 Agg(A) 데이터를 저장할 공간 초기화
+        # [수정 1] ★핵심★: 마지막 Agg(A) 데이터를 저장할 공간 초기화
+        # (이게 없으면 T 이벤트가 들어올 때 VWAP 계산을 못함)
         self.last_agg = {}      
         
         self.logger = DataLogger()
@@ -834,20 +834,6 @@ class STSPipeline:
         # 수신과 처리를 분리할 큐 생성
         self.msg_queue = asyncio.Queue(maxsize=100000)
         
-        # 🔥 [추가된 부분] 여기가 없어서 에러가 났던 겁니다! 🔥
-        self.redis_client = None
-        try:
-            redis_url = os.environ.get('REDIS_URL')
-            if redis_url:
-                # decode_responses=True 필수 (문자열로 받기 위해)
-                self.redis_client = redis.from_url(redis_url, decode_responses=True)
-                print("✅ [STS] Redis Connected inside Engine.", flush=True)
-            else:
-                print("⚠️ [STS] REDIS_URL not found in env.", flush=True)
-        except Exception as e:
-            print(f"❌ [STS] Redis Connection Error: {e}", flush=True)
-        
-        # 모델 로딩
         self.shared_model = None
         if os.path.exists(MODEL_FILE):
             print(f"🤖 [System] Loading AI Model: {MODEL_FILE}", flush=True)
@@ -984,24 +970,18 @@ class STSPipeline:
 
     # [6] Scanner (20초 주기)
     async def task_global_scan(self):
-        """
-        [변경됨] 직접 스캔 안 하고, Scanner가 Redis에 올려둔 걸 가져옴
-        """
-        print("🔭 [STS] Redis Sync Mode Started...", flush=True)
+        print("🔭 [Scanner] Started (Fast Mode: 20s)", flush=True)
         while True:
             try:
-                if self.redis_client:
-                    # Redis에서 'sts_candidates' 키를 읽음
-                    data = self.redis_client.get('sts_candidates')
-                    if data:
-                        # 스캐너가 찾아준 종목 리스트로 갱신
-                        self.candidates = json.loads(data)
-                        # print(f"📋 [Sync] Received Candidates: {self.candidates}", flush=True)
+                # 봇 켜자마자 바로 한번 스캔
+                self.candidates = self.selector.get_top_gainers_candidates(limit=10)
+                if self.candidates:
+                    print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
                 
-                # 2초마다 갱신 (직접 스캔보다 훨씬 빠르고 가벼움)
-                await asyncio.sleep(2) 
+                self.selector.garbage_collect()
+                await asyncio.sleep(20) # 20초 대기
             except Exception as e:
-                print(f"⚠️ Redis Sync Warning: {e}", flush=True)
+                print(f"⚠️ Scanner Warning: {e}", flush=True)
                 await asyncio.sleep(5)
 
     # [7] Manager (5초 주기 & Warmup 적용)

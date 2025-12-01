@@ -1,242 +1,124 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"> 
+<link rel="manifest" href="/manifest.json">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Roboto+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <meta name="naver-site-verification" content="eb8016dc00057f4fdb6cb38e81cb7e507a4e1886" />
+    <meta name="google-site-verification" content="rrMaS_Uo8i_SC9M4XfatAMijOT2vpn7vkm1x6FKuQbk" />
     
-    <link rel="manifest" href="/manifest.json">
-    <title>Danso Terminal - Unified Command</title> 
+    <title>danso</title> 
 
-    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    
-    <style>
-        .dashboard-vertical-flow {
-            display: flex;
-            flex-direction: column;
-            gap: 24px;
-        }
-        .full-width-card {
-            width: 100%;
-        }
-        /* 가로 배치용 유틸리티 */
-        .flex-row-gap {
-            display: flex;
-            gap: 24px;
-        }
-        .flex-1 { flex: 1; }
-        
-        @media (max-width: 768px) {
-            .flex-row-gap { flex-direction: column; }
-        }
-    </style>
 </head>
 <body>
     
     <canvas id="heroCanvas"></canvas>
 
-    <header class="ios-header sts-header">
-        <div class="brand-logo">
-            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Logo">
-            <span>TERMINAL</span>
-        </div>
-        
-        <div class="system-status">
-            <div class="status-item"><span class="dot blink"></span> LIVE</div>
-            <div class="status-item"><i class="fas fa-database"></i> DB</div>
-            <div class="status-item" id="clock">00:00:00</div>
-        </div>
+    <div class="content-wrapper">
 
-        <div class="user-actions">
-            <button id="subscribe-btn" class="notification-button"><i class="fas fa-bell"></i></button>
-            <a href="/logout" class="nav-button secondary">Log out</a>
-        </div>
-    </header>
-
-    <main class="content-wrapper">
-
-        <div class="ios-ticker-tape">
-            <div class="scrolling-bar-container glass-card">
-                <div class="scrolling-bar-track" id="scrolling-bar-track">
-                    </div>
+        <div class="scrolling-bar-container">
+            <div class="scrolling-bar-track" id="scrolling-bar-track">
             </div>
         </div>
 
-        <div class="main-container dashboard-vertical-flow">
+        <div class="main-container">
 
-            <section class="ios-scanner-section ios-card signal-feed full-width-card">
-                <div class="ios-card-header card-header">
-                    <h3><i class="fas fa-satellite-dish"></i> Realtime Scanner</h3>
-                    <div class="live-indicator"><span class="dot blink"></span> ACTIVE</div>
-                </div>
-                <div id="signal-feed-container" class="feed-scroll ios-scanner-feed">
-                    <div class="empty-state">Initializing Signal Stream...</div>
-                </div>
-            </section>
+            <div style="float: right; display: flex; gap: 12px; margin-bottom: 20px; align-items: center;">
+                
+                <button id="subscribe-btn" class="notification-button">
+                    Enable Notifications
+                </button>
+                
+                <a href="/sts" class="notification-button" style="text-decoration: none; display: flex; justify-content: center;">
+                    STS Sniper Console
+                </a>
+                
+            </div>
+            
+            <div class="app-logo" style="float: left;">
+                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="danso Logo">
+            </div>
 
-            <div class="flex-row-gap">
-                <div class="glass-card status-card flex-1">
-                    <div class="status-header">
-                        <span id="scan-status-text">Scanner Scan: N/A</span>
-                        <span id="scan-watching-count">Watching: 0 tickers</span>
-                    </div>
-                    <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--text-secondary);">Live Watchlist</h3>
-                    <div id="ticker-list-container" class="ticker-list">
-                         <p style="color: var(--text-tertiary);">Loading scanner...</p> 
+            <div class="card settings-card" style="margin-top: 15px; clear: both;">
+                <div class="card-header">
+                    <h3>🔔 Notification Sensitivity</h3>
+                </div>
+                <div class="settings-body">
+                    <p class="description">Only receive alerts with an AI Score <strong>above</strong> this threshold. (0 = Receive All)</p>
+                    <div class="control-group">
+                        <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
+                        <span class="unit">or higher</span>
+                        <button id="save-score-btn" class="btn-primary">Save</button>
                     </div>
                 </div>
             </div>
-
-            <section class="ios-sniper-section ios-card full-width-card">
-                <div class="ios-card-header card-header">
-                    <h3><i class="fas fa-crosshairs"></i> Sniper Targets</h3>
-                    <span class="text-dim">MODEL: XGBOOST_V5.3</span>
+            
+            <div class="status-card">
+                <h2>Scanner Status</h2>
+                <div class="status-header">
+                     <div id="scan-status-text">Scanner Scan: N/A</div> 
+                    <div id="scan-watching-count">Watching: 0 tickers</div> 
                 </div>
-                <div class="table-wrapper">
-                    <table class="sts-table">
-                        <thead>
-                            <tr>
-                                <th>TICKER</th>
-                                <th>PRICE</th>
-                                <th>SCORE</th>
-                                <th>OBI</th>
-                                <th>RISK</th>
-                                <th>STATUS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="target-table-body">
-                            <tr><td colspan="6" class="text-center">Loading Sniper Engine...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="sts-sub-grid">
                 
-                <div class="glass-card" id="micro-panel">
-                    <div class="empty-state">Waiting for target lock...</div>
+                <h2 class="sidebar-h2">Currently Watching</h2>
+                <div class="ticker-list" id="ticker-list-container">
+                     <p style="color: #8b95a1;">Loading scanner...</p> 
                 </div>
+            </div>
 
-                <div class="glass-card">
-                    <div class="card-header">
-                        <h3><i class="fas fa-shield-alt"></i> Risk Engine</h3>
-                    </div>
-                    <div class="risk-grid">
-                        <div class="risk-item">
-                            <span class="label">ENTRY</span>
-                            <span class="value" id="risk-entry">-</span>
-                        </div>
-                        <div class="risk-item">
-                            <span class="label">TARGET</span>
-                            <div class="value text-green" id="risk-target">-</div>
-                        </div>
-                        <div class="risk-item">
-                            <span class="label">STOP</span>
-                            <div class="value text-warn" id="risk-stop">-</div>
-                        </div>
-                        <div class="risk-item highlight">
-                            <span class="label">CONFIDENCE</span>
-                            <div class="value" id="risk-prob">0%</div>
-                        </div>
-                    </div>
+            <h2>Signal Feed</h2>
+            <div class="signal-feed" id="signal-feed-container">
+                <div class="empty-state">Loading Signals...</div> 
+            </div>
+            
+            <div class="community-section">
+                <h2>Community</h2>
+                <form id="post-form" onsubmit="return false;">
+                    <input type="text" name="author" placeholder="Name" required> 
+                    <textarea name="content" placeholder="What's on your mind today? (All feedback welcome)" rows="2" required></textarea> 
+                    <button type="button" id="post-submit-btn">Post</button> 
+                </form>
+                <div class="post-feed" id="community-feed-container">
+                     <div class="empty-state">Loading Posts...</div> 
                 </div>
-
-            </section>
-
-            <section class="flex-row-gap">
+            </div>
                 
-                <div class="glass-card flex-1">
-                    <div class="card-header">
-                        <h3><i class="fas fa-chart-pie"></i> Performance</h3>
-                    </div>
-                    <div class="stat-flex">
-                        <div class="stat-box">
-                            <span class="label">WIN RATE</span>
-                            <div class="val text-green" id="session-winrate">RUNNING</div>
-                        </div>
-                        <div class="stat-box">
-                            <span class="label">SIGNALS</span>
-                            <div class="val" id="session-signals">0</div>
-                        </div>
-                    </div>
-                    <div class="heatmap-container mt-20">
-                        <div class="heatmap-grid">
-                            <div class="heat-block hot">TECH</div>
-                            <div class="heat-block warm">BIO</div>
-                            <div class="heat-block cool">EV</div>
-                            <div class="heat-block cool">CRYPTO</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex-1" style="display: flex; flex-direction: column; gap: 24px;">
-                    
-                    <div class="glass-card community-section">
-                        <div class="card-header">
-                            <h3><i class="fas fa-comments"></i> Chat</h3>
-                        </div>
-                        <div class="post-feed" id="community-feed-container">
-                             <div class="empty-state">Loading Posts...</div> 
-                        </div>
-                        <form id="post-form" onsubmit="return false;">
-                            <input type="text" name="author" placeholder="Name" required> 
-                            <div class="input-row" style="margin-top: 10px;">
-                                <textarea name="content" placeholder="Share insight..." rows="1" required></textarea> 
-                                <button type="button" id="post-submit-btn">Post</button> 
-                            </div>
-                        </form>
-                    </div>
-
-                    <div class="glass-card settings-card">
-                        <div class="card-header">
-                            <h3><i class="fas fa-sliders-h"></i> Alerts</h3>
-                        </div>
-                        <div class="settings-body">
-                            <div class="control-group">
-                                <input type="number" id="min-score-input" placeholder="0" min="0" max="99" value="0">
-                                <span class="unit">Score</span>
-                                <button id="save-score-btn" class="btn-primary">Update</button>
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
-            </section>
-
-        </div> 
-    </main>
-
-    <div id="ticker-modal" class="modal-overlay">
-        <div class="modal-content ios-card">
-            <div class="modal-header ios-card-header">
+        </div> </div> <div id="ticker-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
                 <h2 id="modal-ticker-name">Loading...</h2>
                 <span class="close-button" id="modal-close-btn">&times;</span>
             </div>
             <div class="modal-tabs">
-                 <button class="tab-button active" onclick="showModalTab('info', this)">Info</button> 
-                <button class="tab-button" onclick="showModalTab('quote', this)">Quote</button> 
+                 <button class="tab-button active" onclick="showModalTab('info', this)">Company Info</button> 
+                <button class="tab-button" onclick="showModalTab('quote', this)">Real-time Quote</button> 
                 <button class="tab-button" onclick="showModalTab('financials', this)">Financials</button> 
-                <button class="tab-button" onclick="showModalTab('chart', this)">Chart</button> 
+                <button class="tab-button" onclick="showModalTab('chart', this)">1-Min Chart</button> 
             </div>
             <div class="modal-body">
-                 <div id="tab-info" class="tab-content active"><p>Loading info...</p></div> 
-                <div id="tab-quote" class="tab-content"><p>Loading quote...</p></div> 
-                <div id="tab-financials" class="tab-content"><p>Loading financials...</p></div> 
-                <div id="tab-chart" class="tab-content">
-                    <div id="chart-container"></div>
-                </div>
+                 <div id="tab-info" class="tab-content active"><p>Loading company info...</p></div> 
+                <div id="tab-quote" class="tab-content"><p>Loading real-time quote...</p></div> 
+                <div id="tab-financials" class="tab-content"><p>Loading financials summary...</p></div> 
+                <div id="tab-chart" class="tab-content"><div id="chart-container"></div></div>
             </div>
         </div>
     </div>
 
     <script src="{{ url_for('static', filename='js/landing-animation.js') }}"></script>
+    
     <script src="{{ url_for('static', filename='js/app.js') }}" type="module" defer></script>
-    <script src="{{ url_for('static', filename='js/sts.js') }}" defer></script>
-
 </body>
 </html>

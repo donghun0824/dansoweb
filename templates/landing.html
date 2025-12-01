@@ -17,10 +17,9 @@
     
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+    
 </head>
 <body>
-
-    <div class="layered-curl-header"></div>
 
     <canvas id="heroCanvas"></canvas>
 
@@ -62,7 +61,7 @@
                     <h3 class="widget-title">Live Top Gainers</h3>
                     <div class="vertical-scroll-container">
                         <div id="vertical-ticker-list">
-                            <p class="loading-text">Loading signals...</p>
+                            <p class_="loading-text">Loading signals...</p>
                         </div>
                     </div>
                 </div>
@@ -99,7 +98,12 @@
                     <p>© 2025 Danso. All rights reserved.</p>
                 </footer>
 
-            </div> </div>     </div>         <div id="landingPopup" class="popup-overlay">
+            </div> 
+        </div> </div> 
+        </div> 
+    </div> 
+
+    <div id="landingPopup" class="popup-overlay">
         <div class="popup-content">
             <div class="popup-header">
                 <h2>Launch Special Access</h2>
@@ -156,7 +160,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', (event) => {
-            // --- [Video & Ticker Logic] ---
+            // --- [기존 비디오/티커 로직] ---
             const videoContainer = document.getElementById('video-container');
             const video = document.getElementById('intro-video');
             const mainContent = document.getElementById('main-content');
@@ -214,7 +218,7 @@
                     });
             }
 
-            // --- [Popup Logic] ---
+            // --- [추가된 팝업 로직] ---
             const hideDate = localStorage.getItem("landing_popup_closed");
             const today = new Date().toISOString().split('T')[0];
 
@@ -224,7 +228,7 @@
             }
         });
 
-        // Popup Close Function
+        // 팝업 닫기 함수
         function closePopup() {
             const popup = document.getElementById("landingPopup");
             const checkbox = document.getElementById("dontShowToday");

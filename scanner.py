@@ -1,7 +1,6 @@
 import asyncio
 import websockets
 import os
-import redis
 import pandas as pd
 import pandas_ta as ta
 import json
@@ -384,57 +383,38 @@ def calculate_volume_ratio(df):
 
 async def find_active_tickers():
     """
-    [수정됨] Redis Relay 방식
-    1. Fetcher가 가져온 'market_snapshot'을 Redis에서 읽음 (API 호출 X)
-    2. 급등주 조건 필터링
-    3. STS 봇을 위해 'sts_candidates' 키로 Redis에 저장
+    비동기 방식(httpx)으로 Top Gainers 스캔
     """
-    # Redis 연결 확인 (전역 변수 r 사용, 없으면 연결 시도)
-    global r  # scanner.py 상단에 r이 정의되어 있다고 가정
-    if 'r' not in globals() or r is None:
-        import redis
-        try:
-            r = redis.from_url(os.environ.get('REDIS_URL'))
-        except Exception as e:
-            print(f"❌ [Scanner] Redis 연결 실패: {e}")
-            return set()
-
-    try:
-        # 1. Redis에서 전체 시장 데이터 읽기 (0.001초 소요)
-        data_str = r.get('market_snapshot')
-        if not data_str:
-            print("⚠️ [Scanner] Redis에 데이터가 없습니다. (Fetcher가 실행 중인가요?)")
-            return set()
-            
-        tickers_data = json.loads(data_str)
-        tickers_to_watch = set()
-        
-        # 2. 필터링 로직 (기존과 동일)
-        for t in tickers_data:
-            price = t.get('day', {}).get('c', 0)
-            change = t.get('todaysChangePerc', 0)
-            ticker = t.get('ticker')
-            
-            # 조건: $20 미만이고 상승 중인 것 (설정에 맞게 조정)
-            if ticker and 0 < price <= MAX_PRICE and change > 0:
-                tickers_to_watch.add(ticker)
-                
-            if len(tickers_to_watch) >= TOP_N: break
-
-        print(f"-> [Scanner] Redis 조회 완료. {len(tickers_to_watch)}개 감시 대상 포착.")
-        
-        # 3. 🔥 [핵심 추가] 찾은 종목을 STS 봇이 볼 수 있게 Redis에 저장
-        if tickers_to_watch:
-            # set은 JSON 변환이 안 되므로 list로 변환해서 저장
-            r.set('sts_candidates', json.dumps(list(tickers_to_watch)))
-            
-        return tickers_to_watch
-
-    except Exception as e:
-        print(f"❌ [Scanner] 로직 오류: {e}")
-        import traceback
-        traceback.print_exc()
+    if not POLYGON_API_KEY:
+        print(f"-> ❌ [사냥꾼] 1단계 스캔 오류: POLYGON_API_KEY가 설정되지 않았습니다.")
         return set()
+        
+    print(f"\n[사냥꾼] 1단계: 'Top Gainers' (조건: ${MAX_PRICE} 미만) 스캔 중...")
+    
+    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey={POLYGON_API_KEY}"
+
+    tickers_to_watch = set()
+    try:
+        # requests 대신 httpx 사용 (비동기)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+
+        if data.get('status') == 'OK':
+            for ticker in data.get('tickers', []):
+                price = ticker.get('lastTrade', {}).get('p', 999) 
+                ticker_symbol = ticker.get('ticker')
+                is_price_ok = price <= MAX_PRICE
+                if is_price_ok and ticker_symbol:
+                    tickers_to_watch.add(ticker_symbol)
+                if len(tickers_to_watch) >= TOP_N: break
+            print(f"-> [사냥꾼] 1단계 스캔 완료. 총 {len(tickers_to_watch)}개 종목 포착.")
+            
+    except Exception as e:
+        print(f"-> ❌ [사냥꾼] 1단계 스캔 오류 (API 키/한도 확인): {e}")
+        return tickers_to_watch
+    return tickers_to_watch
 
 async def fetch_initial_data(ticker):
     """

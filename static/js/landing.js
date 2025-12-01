@@ -1,4 +1,4 @@
-// static/js/landing.js (V5: Premium Matte Silver & Ink Black Chart)
+// static/js/landing.js (V4: Cinematic Galaxy & Volatile Chart - Korean Comment)
 
 const canvas = document.getElementById('heroCanvas');
 const ctx = canvas.getContext('2d');
@@ -7,8 +7,7 @@ let width = window.innerWidth;
 let height = window.innerHeight;
 
 // 1. 고해상도(Retina) 디스플레이 지원 (선명도 향상)
-// Optimization: Limit dpr to 1.5 to prevent lag on high-res mobile devices
-const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+const dpr = window.devicePixelRatio || 1;
 canvas.width = width * dpr;
 canvas.height = height * dpr;
 ctx.scale(dpr, dpr);
@@ -19,8 +18,7 @@ window.addEventListener('resize', () => {
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
-    initParticles();
-    generateChartPath(); // 리사이즈 시 차트 경로도 재생성
+    initParticles(); 
 });
 
 // 은하의 중심 (화면 중앙)
@@ -35,44 +33,51 @@ const handleMove = (e) => {
         cx = e.clientX;
         cy = e.clientY;
     }
-    // 시차(Parallax) 효과: 부드럽게 움직임
-    vortexCenter.x = (width / 2) + (cx - width / 2) * 0.05;
-    vortexCenter.y = (height / 2) + (cy - height / 2) * 0.05;
+    // 시차(Parallax) 효과: 마우스 반대 방향으로 중심을 살짝 이동시켜 깊이감 부여
+    vortexCenter.x = (width / 2) + (cx - width / 2) * 0.08;
+    vortexCenter.y = (height / 2) + (cy - height / 2) * 0.08;
 };
 window.addEventListener('mousemove', handleMove);
 window.addEventListener('touchmove', handleMove);
 
-// --- 파티클 엔진: 메탈릭 더스트 (Metallic Dust) ---
+// --- 파티클 엔진: 로그 나선 은하 (Logarithmic Spiral) ---
 class Particle {
     constructor() {
         this.init();
     }
 
     init() {
+        // 나선 수학 공식: r = a * e^(b * theta)
+        // 자연스러운 분포를 위해 각도와 거리를 랜덤화
+        
         this.angle = Math.random() * Math.PI * 2;
+        // 가우시안 분포 느낌으로 거리를 설정 (중심에 더 많이 모이게)
         const r = Math.random();
-        this.distance = (r * r) * (Math.max(width, height) * 0.7); // 더 넓게 퍼지게
+        this.distance = (r * r) * (Math.max(width, height) * 0.6);
         
         this.x = vortexCenter.x + Math.cos(this.angle) * this.distance;
         this.y = vortexCenter.y + Math.sin(this.angle) * this.distance;
         
-        // 크기: 아주 미세한 입자들
+        // 크기 다양화: 작은 점들로 깊이감 표현
         this.size = Math.random() * 1.5; 
         
-        // ✨ [색상 변경] 실버, 쿨 그레이, 화이트 톤 (고급스러움)
-        // Apple Aluminum colors
-        const colors = ['#f5f5f7', '#e1e1e3', '#c8c8cc', '#a5a5aa', '#ffffff'];
+        // 색상 팔레트: 딥 틸(Deep Teal)부터 밝은 시안/화이트까지
+        const colors = ['#0f2e38', '#1c5b6e', '#00ff9d', '#ffffff', '#00e0ff'];
         this.color = colors[Math.floor(Math.random() * colors.length)];
         
-        // 속도: 아주 천천히, 우아하게
-        this.speed = (100 / (this.distance + 100)) * 0.0015;
-        this.opacity = Math.random() * 0.4 + 0.1; // 은은하게
+        // 공전 속도: 중심에 가까울수록 빠르게 (케플러 법칙 응용)
+        this.speed = (100 / (this.distance + 50)) * 0.005;
+        this.opacity = Math.random() * 0.8 + 0.2;
     }
 
     update() {
+        // 회전
         this.angle += this.speed;
+        
+        // 새로운 위치 계산
         this.x = vortexCenter.x + Math.cos(this.angle) * this.distance;
         this.y = vortexCenter.y + Math.sin(this.angle) * this.distance;
+
         this.draw();
     }
 
@@ -86,120 +91,122 @@ class Particle {
     }
 }
 
-// --- 차트 엔진: 잉크 블랙 (Ink Black) & 섀도우 ---
+// --- 네온 차트 엔진: 뾰족함(Spiky) & 발광(Glow) ---
 let chartPoints = [];
 let drawIndex = 0;
+const drawSpeed = 2; // 프레임당 픽셀 수
+let isAnimating = true; // 자동 시작
 
 function generateChartPath() {
     chartPoints = [];
+    // 왼쪽에서 시작해서 오른쪽 끝까지
     const startX = 0; 
     const endX = width;
     
-    // 차트는 화면 하단에서 시작해 중앙을 가로지름
-    let currentY = height * 0.7;
+    // 차트는 주로 화면 하단 2/3 지점에서 시작해 우상향
+    let currentY = height * 0.8;
     let currentX = startX;
-    const stepX = width / 120; // 포인트 간격 더 부드럽게
+    const stepX = width / 80; // 고해상도 포인트
 
     while (currentX <= endX) {
-        // 우상향 트렌드 (완만하게)
-        const trendUp = (currentX / width) * 1.5; 
+        // 오른쪽으로 갈수록 위로 올라가는 경향 (강세장 표현)
+        const trendUp = (currentX / width) * 2.5; 
         
-        // 노이즈: 너무 뾰족하지 않고 유려하게 (Liquid 느낌)
-        const noise = (Math.random() - 0.45) * 30; 
+        // 랜덤한 변동성(Noise) 추가 -> 뾰족한 차트 모양 생성
+        const noise = (Math.random() - 0.45) * 40; // 약간 상향 편향
         
+        // 트렌드 적용
         currentY += noise - trendUp;
-        
-        // 화면 중앙 부근에 머물도록 제한
-        currentY = Math.max(height * 0.35, Math.min(height * 0.75, currentY));
+
+        // 화면 밖으로 너무 나가지 않게 제한
+        currentY = Math.max(height * 0.15, Math.min(height * 0.9, currentY));
         
         chartPoints.push({ x: currentX, y: currentY });
         currentX += stepX;
     }
+    // 마지막 점은 화면 오른쪽 밖으로 확실히 보내기
+    chartPoints.push({ x: width, y: chartPoints[chartPoints.length-1].y - 20 });
 }
 
 function drawArrowHead(x, y) {
-    // 화살표 대신 끝에 작은 점(Dot)을 찍어 모던하게 마무으리
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-Math.PI / 4); // 화살표를 약간 위로 회전
     ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#1d1d1f'; // Deep Black
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-20, 10);
+    ctx.lineTo(-20, -10);
+    ctx.closePath();
+    ctx.fillStyle = '#00ff9d';
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = '#00ff9d';
     ctx.fill();
-    
-    // 은은한 후광 (Shadow)
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
-    ctx.stroke();
+    ctx.restore();
 }
 
 function drawChart() {
     if (chartPoints.length < 2) return;
 
-    // 1. 라인 스타일: 딥 블랙 (Deep Black)
+    // 1. 네온 라인 설정
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.lineWidth = 2.5; // 너무 두껍지 않게, 세련되게
-    ctx.strokeStyle = '#1d1d1f'; // Apple Matte Black
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#00ff9d'; // 레퍼런스의 그 밝은 녹색
     
-    // 2. 그림자: 발광(Glow) 대신 그림자(Shadow)로 깊이감 표현
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 8;
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.12)'; // 부드러운 그림자
+    // 2. 강력한 발광 효과 (3중 레이어)
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = 'rgba(0, 255, 157, 0.8)';
     
     // 3. 라인 그리기
     ctx.beginPath();
     ctx.moveTo(chartPoints[0].x, chartPoints[0].y);
     
+    // 애니메이션 인덱스에 따라 그릴 포인트 개수 결정
     const maxPoints = Math.floor(drawIndex);
     const visiblePoints = Math.min(maxPoints, chartPoints.length);
 
-    // 곡선(Quadratic Curve)을 사용하여 유체처럼 부드럽게 연결
-    for (let i = 1; i < visiblePoints - 1; i++) {
-        const xc = (chartPoints[i].x + chartPoints[i + 1].x) / 2;
-        const yc = (chartPoints[i].y + chartPoints[i + 1].y) / 2;
-        ctx.quadraticCurveTo(chartPoints[i].x, chartPoints[i].y, xc, yc);
+    for (let i = 1; i < visiblePoints; i++) {
+        // 부드러우면서도 뾰족함을 유지하기 위해 직선 연결 사용
+        const p = chartPoints[i];
+        ctx.lineTo(p.x, p.y); 
     }
     ctx.stroke();
     
-    // 4. 하단 채우기 (그라데이션: 블랙 -> 투명)
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    
+    // 4. 라인 아래 그라데이션 채우기
+    ctx.shadowBlur = 0; // 채우기에는 그림자 제거
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.06)'); // 아주 연한 블랙
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');   // 투명
+    gradient.addColorStop(0, 'rgba(0, 255, 157, 0.15)');
+    gradient.addColorStop(1, 'rgba(0, 255, 157, 0)');
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.moveTo(chartPoints[0].x, height);
-    ctx.lineTo(chartPoints[0].x, chartPoints[0].y);
+    ctx.moveTo(chartPoints[0].x, height); // 왼쪽 하단 시작
+    ctx.lineTo(chartPoints[0].x, chartPoints[0].y); // 라인 시작점
     
-    for (let i = 1; i < visiblePoints - 1; i++) {
-        const xc = (chartPoints[i].x + chartPoints[i + 1].x) / 2;
-        const yc = (chartPoints[i].y + chartPoints[i + 1].y) / 2;
-        ctx.quadraticCurveTo(chartPoints[i].x, chartPoints[i].y, xc, yc);
+    for (let i = 1; i < visiblePoints; i++) {
+        ctx.lineTo(chartPoints[i].x, chartPoints[i].y);
     }
     
-    if (visiblePoints > 1) {
-        ctx.lineTo(chartPoints[visiblePoints-1].x, height);
+    if (visiblePoints > 0) {
+        ctx.lineTo(chartPoints[visiblePoints-1].x, height); // 바닥으로 내리기
         ctx.closePath();
         ctx.fill();
         
-        // 끝점 장식
-        if (visiblePoints >= chartPoints.length - 2) {
-           drawArrowHead(chartPoints[chartPoints.length-1].x, chartPoints[chartPoints.length-1].y);
+        // 끝점에 화살표 머리 그리기
+        if (visiblePoints === chartPoints.length) {
+           drawArrowHead(chartPoints[visiblePoints-1].x, chartPoints[visiblePoints-1].y);
         }
     }
 
     // 애니메이션 진행
     if (drawIndex < chartPoints.length) {
-        drawIndex += 0.3; // 천천히 우아하게 그려짐 (속도 조절)
+        drawIndex += 0.5; // 그리는 속도 조절
     }
 }
 
 
 // --- 메인 루프 ---
-// Optimization: Reduce particle count for mobile
-const isMobile = width < 768;
-const particleCount = isMobile ? 150 : 400; // 파티클 수를 줄여 여백의 미 강조
+const particleCount = 1600; // 밀도 높은 은하수
 let particles = [];
 
 function initParticles() {
@@ -211,10 +218,11 @@ function initParticles() {
 }
 
 function animate() {
-    // 배경 지우기: ClearRect 사용 (투명 배경 유지하여 CSS 배경 보이기 위함)
-    ctx.clearRect(0, 0, width, height);
+    // 잔상 효과: 시네마틱한 모션 블러를 위해 반투명 배경으로 덮음
+    ctx.fillStyle = 'rgba(5, 7, 10, 0.3)'; // 배경색과 일치
+    ctx.fillRect(0, 0, width, height);
 
-    // 파티클 업데이트
+    // 은하수 그리기
     particles.forEach(p => p.update());
 
     // 차트 그리기
@@ -223,7 +231,7 @@ function animate() {
     requestAnimationFrame(animate);
 }
 
-// 클릭 시 리셋
+// 클릭 시 차트 다시 그리기
 window.addEventListener('click', () => {
     drawIndex = 0;
     generateChartPath();

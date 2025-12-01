@@ -2,7 +2,7 @@
 // (V5.3) STS Dashboard Engine: Deep Space Visuals & Real-time Data Binding
 
 /* ==========================================================================
-   PART 1. VISUAL ENGINE (배경 효과 )
+   PART 1. VISUAL ENGINE (배경 효과 - 건드리지 않음)
    ========================================================================== */
 const canvas = document.getElementById('heroCanvas');
 const ctx = canvas.getContext('2d');
@@ -28,8 +28,7 @@ class Star {
         this.speedX = (Math.random() - 0.5) * 0.2;
         this.speedY = (Math.random() * 0.5) + 0.1;
         this.opacity = Math.random() * 0.5 + 0.1;
-        // Softened palette for premium feel
-        this.color = ['#222222', '#00ff9d', '#e0e0e0', '#888888'][Math.floor(Math.random() * 4)];
+        this.color = ['#052e22', '#00ff9d', '#ffffff', '#00bcd4'][Math.floor(Math.random() * 4)];
     }
     update() {
         this.x += this.speedX; this.y -= this.speedY;
@@ -44,7 +43,7 @@ class Star {
 
 function initParticles() { particles = []; for (let i = 0; i < particleCount; i++) particles.push(new Star()); }
 function drawConnections() {
-    ctx.globalAlpha = 0.05; ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 0.5; // Softer connection line
+    ctx.globalAlpha = 0.05; ctx.strokeStyle = '#00ff9d'; ctx.lineWidth = 0.5;
     for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
             const dx = particles[i].x - particles[j].x;
@@ -80,6 +79,7 @@ setInterval(updateClock, 1000);
 updateClock();
 
 // 2. 데이터 가져오기 (Polling 방식: 1.5초마다 DB 조회)
+// 웹소켓 서버가 없으므로 이 방식이 가장 확실합니다.
 async function updateDashboard() {
     try {
         const res = await fetch('/api/sts/status');
@@ -98,7 +98,7 @@ async function updateDashboard() {
             renderMicroPanel(data.targets[0]);
         }
         
-        // (C) 상단 정보창 업데이트
+        // (C) 상단 정보창 업데이트 (이게 아까 에러나던 부분)
         if (els.signals) els.signals.innerText = data.targets.length;
         if (els.winrate) els.winrate.innerText = "RUNNING";
 
@@ -109,10 +109,10 @@ async function updateDashboard() {
 
 function renderTable(targets) {
     if (!els.tbody) return;
-    els.tbody.innerHTML = ''; 
+    els.tbody.innerHTML = ''; // 기존 "JMIA" 등 가짜 데이터 삭제
 
     if (targets.length === 0) {
-        els.tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:#888;">SCANNING MARKETS...</td></tr>`;
+        els.tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:#666;">SCANNING MARKETS...</td></tr>`;
         return;
     }
 
@@ -128,12 +128,10 @@ function renderTable(targets) {
         let statusText = 'WATCHING';
         let rowClass = ''; 
 
-        // Modified visual states for cleaner premium feel
         if (item.status === 'FIRED') {
             statusClass = 'fired';
             statusText = 'FIRED';
-            // Softer emergency red, less aggressive
-            rowClass = 'style="background: rgba(255, 50, 50, 0.05);"';
+            rowClass = 'style="background: rgba(255, 51, 51, 0.1);"';
         } else if (scoreVal >= 60 || item.status === 'AIMING') {
             statusClass = 'aiming';
             statusText = 'AIMING';
@@ -143,13 +141,12 @@ function renderTable(targets) {
         const vpinVal = item.vpin || 0;
         const barWidth = Math.min(Math.abs(obi) * 50 + 50, 100);
         
-        // 리스크 텍스트 - Cleaned up styling logic
+        // 리스크 텍스트
         let riskText = 'Low';
         if (vpinVal > 0.6) riskText = 'Extreme';
         else if (vpinVal > 0.4) riskText = 'High';
         else if (vpinVal > 0.2) riskText = 'Med';
 
-        // Updated Table Row Render - Clean contrast, minimal neon
         const html = `
             <tr ${rowClass}>
                 <td><span class="ticker-badge">$${ticker}</span></td>
@@ -157,7 +154,7 @@ function renderTable(targets) {
                 <td class="mono-text ${scoreVal >= 80 ? 'text-green' : 'text-dim'}">${score}</td>
                 <td>
                     <div class="mini-bar">
-                        <div style="width:${barWidth}%; opacity:${Math.min(Math.abs(obi)+0.5, 1)}"></div>
+                        <div style="width:${barWidth}%; opacity:${Math.min(Math.abs(obi)+0.3, 1)}"></div>
                     </div>
                 </td>
                 <td><span class="text-dim">${riskText}</span></td>
@@ -176,11 +173,10 @@ function renderMicroPanel(topItem) {
     const vpin = (topItem.vpin || 0).toFixed(2);
     const speed = topItem.tick_speed || 0;
 
-    // Updated Micro Panel - Removed glow text classes, using clean semantic styles
     els.microPanel.innerHTML = `
         <div class="micro-row">
             <span>TARGET FOCUS</span>
-            <span class="text-highlight mono-text" style="font-weight:700;">$${topItem.ticker}</span>
+            <span class="text-green mono-text" style="font-weight:bold;">$${topItem.ticker}</span>
         </div>
         <div class="micro-row">
             <span>OBI (Order Flow)</span>
@@ -210,20 +206,13 @@ function renderMicroPanel(topItem) {
     const setVal = (id, val) => { const e = document.getElementById(id); if(e) e.innerText = val; };
     
     setVal('risk-entry', '$' + price.toFixed(2));
-    
-    const targetEl = document.getElementById('risk-target');
-    if (targetEl) {
-        targetEl.innerText = "TRAILING 🚀"; // Strategic indicator
-        targetEl.style.color = "#00ff9d";   // Kept accent green for key signal
-    }
-
+    setVal('risk-target', '$' + (price + atrSim * 1.5).toFixed(2));
     setVal('risk-stop', '$' + (price - atrSim).toFixed(2));
     
     const probEl = document.getElementById('risk-prob');
     if (probEl) {
         const prob = (topItem.ai_score || 0);
         probEl.innerText = prob.toFixed(1) + '%';
-        // Clean conditional styling: Green only for high confidence
         probEl.className = prob >= 80 ? "value mono-text text-green" : "value mono-text";
     }
 }

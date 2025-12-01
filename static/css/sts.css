@@ -1,13 +1,9 @@
-/* --- STS ENGINE CONSOLE STYLE (Premium Apple Metallic Theme) --- */
+/* --- STS ENGINE CONSOLE STYLE --- */
 
 /* 1. Global Layout overrides for STS */
 .main-container.full-width {
-    max-width: 1400px;
+    max-width: 1400px; /* 대시보드는 더 넓게 */
     padding: 20px;
-    /* Brushed Aluminum MacBook Feel */
-    background: 
-        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.8) 0%, transparent 60%),
-        linear-gradient(145deg, #E3E4E6 0%, #D1D3D7 100%);
 }
 
 /* Header Specific */
@@ -17,262 +13,177 @@
     align-items: center;
     margin-bottom: 24px;
     padding-bottom: 16px;
-    /* Clean metallic divider */
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    border-bottom: 1px solid var(--border-primary);
 }
 
 .brand-logo {
     font-family: var(--font-primary);
     font-size: 24px;
-    font-weight: 700; 
-    font-style: normal; 
-    /* Matte Black Text (No Glow) */
-    color: #111111;
-    text-shadow: none;
-    letter-spacing: -0.5px;
+    font-weight: 800;
+    font-style: italic;
+    color: #fff;
+    text-shadow: 0 0 15px rgba(0, 255, 157, 0.4);
 }
-.brand-logo span { 
-    /* Subtle Apple Green Accent */
-    color: #06C167; 
-    text-shadow: none;
-}
+.brand-logo span { color: var(--neon-green); }
 
 .system-status {
     display: flex; gap: 24px;
     font-size: 13px;
-    color: #666666; /* Matte Deep Gray */
-    font-weight: 500;
+    color: var(--text-secondary);
 }
 .status-item { display: flex; align-items: center; gap: 8px; }
 .dot {
-    width: 6px; height: 6px;
-    background: #06C167;
-    border-radius: 50%; 
-    box-shadow: none; /* Clean flat dot */
+    width: 8px; height: 8px; background: var(--neon-green);
+    border-radius: 50%; box-shadow: 0 0 8px var(--neon-green);
 }
 .blink { animation: blinker 2s infinite; }
-@keyframes blinker { 50% { opacity: 0.4; } }
+@keyframes blinker { 50% { opacity: 0.3; } }
 
 /* 2. Grid System */
 .sts-grid {
     display: grid;
-    grid-template-columns: 1.5fr 1fr;
-    gap: 24px; 
+    grid-template-columns: 1.5fr 1fr; /* 1.5 : 1 비율 */
+    gap: 20px;
 }
-.full-span { grid-column: 1 / -1; }
+.full-span { grid-column: 1 / -1; } /* 첫번째 줄은 꽉 차게 */
 
 /* Mobile Responsive */
 @media (max-width: 900px) {
     .sts-grid { grid-template-columns: 1fr; }
 }
 
-/* 3. Premium Glass Card & Typography Utils */
+/* 3. Glass Card & Typography Utils */
 .glass-card {
-    /* Frosted White Glass */
-    background: rgba(255, 255, 255, 0.75);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
-    
-    /* Subtle Metal Rim */
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    border-top: 1px solid rgba(255, 255, 255, 0.9); 
-    
-    border-radius: 18px;
+    background: var(--bg-card);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border-primary);
+    border-top: 1px solid var(--glass-highlight);
+    border-radius: var(--radius-main);
     padding: 24px;
-    
-    /* Soft Ambient Shadow (Apple Elevation) */
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow-primary);
 }
 
 .card-header {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 20px; padding-bottom: 12px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    margin-bottom: 20px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-secondary);
 }
 .card-header h3 {
-    margin: 0; font-size: 15px; 
-    color: #111111; /* Black Text */
-    font-weight: 600;
+    margin: 0; font-size: 16px; 
+    color: var(--text-primary);
     display: flex; align-items: center; gap: 10px;
-    letter-spacing: -0.2px;
 }
-.card-header h3 i { 
-    color: #06C167; 
-    font-size: 14px;
-}
+.card-header h3 i { color: var(--neon-green); }
 
-.mono-text { 
-    font-family: 'JetBrains Mono', monospace; 
-    color: #333;
-    letter-spacing: -0.3px;
-}
-.text-green { color: #06C167; font-weight: 600; }
-.text-dim { color: #888888; }
-.text-warn { color: #FF9500; } /* Apple Amber */
-.text-highlight { color: #111111; font-weight: 700; }
+.mono-text { font-family: var(--font-mono); }
+.text-green { color: var(--neon-green); }
+.text-dim { color: var(--text-tertiary); }
+.text-warn { color: #f59e0b; } /* Attention Yellow */
+.text-highlight { color: #fff; font-weight: bold; }
 .mb-20 { margin-bottom: 20px; }
 .mt-15 { margin-top: 15px; }
 
-/* 4. Table Styles - Minimalist Clean */
+/* 4. Table Styles */
 .sts-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sts-table th {
-    text-align: left; 
-    color: #666666; 
-    font-weight: 500;
-    padding: 12px 16px; 
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-    font-size: 11px; 
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    text-align: left; color: var(--text-tertiary); font-weight: 500;
+    padding: 12px 8px; border-bottom: 1px solid var(--border-secondary);
+    font-size: 12px; letter-spacing: 1px;
 }
 .sts-table td {
-    padding: 16px; 
-    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-    color: #111111; 
-    vertical-align: middle;
-    font-weight: 400;
+    padding: 16px 8px; border-bottom: 1px solid rgba(255,255,255,0.03);
+    color: var(--text-secondary); vertical-align: middle;
 }
 
-/* Ticker Badge - Metallic Pill */
 .ticker-badge {
-    background: #FFFFFF;
-    color: #111111;
-    padding: 6px 10px; border-radius: 6px;
-    font-family: var(--font-mono); 
-    font-weight: 600; font-size: 13px;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    background: rgba(0, 255, 157, 0.1);
+    color: var(--neon-green);
+    padding: 6px 12px; border-radius: 6px;
+    font-family: var(--font-mono); font-weight: 700;
+    border: 1px solid rgba(0, 255, 157, 0.2);
 }
 
-/* Status Badges */
 .status-badge {
     padding: 4px 10px; border-radius: 99px;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
-    text-transform: uppercase;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
 }
 .status-badge.aiming {
-    background: rgba(6, 193, 103, 0.1); 
-    color: #06C167;
-    border: 1px solid rgba(6, 193, 103, 0.3);
-    animation: none; /* Removing harsh pulse */
+    background: rgba(0, 255, 157, 0.15); color: var(--neon-green);
+    border: 1px solid var(--neon-green);
+    animation: pulse-border 1.5s infinite;
 }
 .status-badge.watching {
-    background: rgba(0, 0, 0, 0.03); 
-    color: #888;
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.05); color: var(--text-tertiary);
+    border: 1px solid var(--border-secondary);
 }
-/* Keep animation name but disable aggressive styling */
 @keyframes pulse-border {
-    0% { box-shadow: 0 0 0 0 rgba(6, 193, 103, 0.2); }
-    70% { box-shadow: 0 0 0 4px rgba(6, 193, 103, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(6, 193, 103, 0); }
+    0% { box-shadow: 0 0 0 0 rgba(0, 255, 157, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(0, 255, 157, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(0, 255, 157, 0); }
 }
 
 /* 5. Microstructure & Risk Components */
 .micro-row {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 16px; font-size: 13px; color: #555;
+    margin-bottom: 12px; font-size: 14px;
 }
 .micro-item {
     display: flex; justify-content: space-between; align-items: center;
-    padding-top: 16px; margin-top: 16px;
-    border-top: 1px solid rgba(0, 0, 0, 0.05);
-    font-size: 13px; color: #666;
+    padding-top: 12px; border-top: 1px solid var(--border-secondary);
+    font-size: 14px;
 }
 .progress-wrapper { text-align: right; width: 60%; }
-.val-text { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; color: #111; }
-
-/* Progress Bar - Matte Clean */
+.val-text { font-size: 14px; font-weight: bold; display: block; margin-bottom: 4px; }
 .progress-bg {
-    height: 4px; 
-    background: rgba(0, 0, 0, 0.06);
+    height: 4px; background: rgba(255,255,255,0.1);
     border-radius: 2px; overflow: hidden;
 }
-.progress-fill { height: 100%; transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
-.progress-fill.green { 
-    background: #06C167; 
-    box-shadow: none; 
-}
-.progress-fill.warn { background: #FF9500; }
+.progress-fill { height: 100%; transition: width 0.5s; }
+.progress-fill.green { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
+.progress-fill.warn { background: #f59e0b; }
 
 .risk-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
 }
 .risk-item {
-    background: rgba(0, 0, 0, 0.02); 
-    padding: 16px; border-radius: 12px;
-    border: 1px solid rgba(0, 0, 0, 0.04);
-    display: flex; flex-direction: column; gap: 6px;
+    background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px;
+    display: flex; flex-direction: column; gap: 4px;
 }
-.risk-item .label { font-size: 11px; color: #888; font-weight: 500; letter-spacing: 0.5px; }
-.risk-item .value { font-size: 18px; font-weight: 700; color: #111; letter-spacing: -0.5px; }
-.risk-item.highlight { 
-    border: 1px solid rgba(6, 193, 103, 0.3); 
-    background: rgba(6, 193, 103, 0.05); 
-}
+.risk-item .label { font-size: 11px; color: var(--text-tertiary); }
+.risk-item .value { font-size: 16px; font-weight: 700; color: #fff; }
+.risk-item.highlight { border: 1px solid var(--neon-green); background: rgba(0, 255, 157, 0.05); }
 
 /* 6. Performance & Heatmap */
-.stat-flex { display: flex; gap: 16px; margin-bottom: 24px; }
+.stat-flex { display: flex; gap: 15px; margin-bottom: 20px; }
 .stat-box {
     flex: 1; text-align: center;
-    background: rgba(255, 255, 255, 0.6); 
-    padding: 20px; border-radius: 12px;
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px;
 }
-.stat-box .val { 
-    font-size: 28px; font-weight: 700; margin-top: 8px; 
-    color: #111; letter-spacing: -1px;
-}
+.stat-box .val { font-size: 24px; font-weight: 700; margin-top: 5px; }
 
 .chart-mini { margin-top: 10px; }
 .bar-chart {
-    display: flex; align-items: flex-end; gap: 6px;
-    height: 60px; margin-top: 15px;
+    display: flex; align-items: flex-end; gap: 4px;
+    height: 60px; margin-top: 10px;
 }
-.bar { 
-    flex: 1; 
-    background: rgba(0, 0, 0, 0.08); 
-    border-radius: 2px;
-}
-.bar.active { 
-    background: #06C167; 
-    opacity: 0.9; 
-    box-shadow: none; 
-}
+.bar { flex: 1; background: rgba(255,255,255,0.1); border-radius: 2px 2px 0 0; }
+.bar.active { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
 
-.heatmap-grid { display: flex; gap: 12px; }
+.heatmap-grid { display: flex; gap: 8px; }
 .heat-block {
-    flex: 1; padding: 16px 0; text-align: center;
-    border-radius: 8px; font-weight: 600; font-size: 12px; 
-    color: #333;
-    transition: transform 0.2s;
+    flex: 1; padding: 15px 0; text-align: center;
+    border-radius: 6px; font-weight: 700; font-size: 12px; color: #000;
 }
-.heat-block.hot { 
-    background: rgba(6, 193, 103, 0.2); 
-    color: #04723A;
-    box-shadow: none; 
-    border: 1px solid rgba(6, 193, 103, 0.3);
-}
-.heat-block.warm { 
-    background: rgba(0, 0, 0, 0.05); 
-    color: #333; 
-    border: 1px solid rgba(0, 0, 0, 0.1);
-}
-.heat-block.cool { 
-    background: rgba(0, 0, 0, 0.02); 
-    color: #999; 
-    border: 1px solid rgba(0, 0, 0, 0.05);
-}
+.heat-block.hot { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); }
+.heat-block.warm { background: rgba(0, 255, 157, 0.5); color: #fff; }
+.heat-block.cool { background: rgba(255, 255, 255, 0.1); color: var(--text-secondary); }
 
 /* Mini Bar in Table */
 .mini-bar {
-    width: 80px; height: 4px; 
-    background: rgba(0, 0, 0, 0.06);
+    width: 80px; height: 4px; background: rgba(255,255,255,0.1);
     border-radius: 2px;
 }
 .mini-bar div {
-    height: 100%; background: #06C167;
-    box-shadow: none;
-    opacity: 0.9;
+    height: 100%; background: var(--neon-green);
+    box-shadow: 0 0 5px var(--neon-green);
 }
