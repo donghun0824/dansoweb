@@ -13,6 +13,7 @@ from authlib.integrations.flask_client import OAuth
 from flask_socketio import SocketIO, emit
 # Database & Cache
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 import redis
 
@@ -47,12 +48,32 @@ executor = ThreadPoolExecutor(max_workers=4)
 
 # --- 2. DATABASE HELPER FUNCTIONS ---
 
+# [2] 커넥션 풀 생성 (전역 변수로 한 번만 실행됨)
+try:
+    # 최소 1개, 최대 20개까지 연결을 유지함
+    pg_pool = psycopg2.pool.ThreadedConnectionPool(1, 20, DATABASE_URL)
+    if pg_pool:
+        logger.info("✅ [DB] Connection Pool created successfully.")
+except Exception as e:
+    logger.error(f"❌ [DB] Error creating connection pool: {e}")
+    pg_pool = None
+
+# [3] 함수 교체: 연결 빌려오기
 def get_db_connection():
-    """Creates a fresh PostgreSQL connection."""
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL environment variable is missing.")
-    conn = psycopg2.connect(DATABASE_URL)
-    return conn
+    """풀에서 연결을 하나 빌려옵니다."""
+    if not pg_pool:
+        # 만약 풀이 안 만들어졌다면(에러 시) 비상용으로 직접 연결
+        return psycopg2.connect(DATABASE_URL)
+    return pg_pool.getconn()
+
+# [4] (중요) 함수 추가: 연결 반납하기
+def release_db_connection(conn):
+    """다 쓴 연결을 풀에 반납합니다. (닫는 게 아님!)"""
+    if pg_pool and conn:
+        pg_pool.putconn(conn)
+    elif conn:
+        # 풀이 없어서 직접 만든 연결이었다면 그냥 닫음
+        release_db_connection(conn)
 
 def init_db():
     """Initialize database tables on startup."""
@@ -109,10 +130,10 @@ def init_db():
                     logger.error(f"Migration Error: {e}")
 
         cursor.close()
-        conn.close()
+        release_db_connection(conn)
         logger.info("✅ [DB] Init success.")
     except Exception as e:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
         logger.error(f"❌ [DB] Init failed: {e}")
 
 # --- 3. AUTHENTICATION & LOGIN CONFIG ---
@@ -149,7 +170,7 @@ def load_user(user_id):
     except Exception as e:
         logger.error(f"Login session error: {e}")
     finally:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
     return None
 
 # --- 4. WEBSOCKET HANDLERS ---
@@ -251,7 +272,7 @@ def fetch_unified_data_from_db():
         logger.error(f"DB Query Error in fetch_unified_data: {e}")
         return None # Signal failure
     finally:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
 
 
 @app.route('/api/dashboard/unified')
@@ -351,7 +372,7 @@ def google_callback():
             user = User(id=user_data[0], email=user_data[1], is_premium=user_data[2])
         
         cursor.close()
-        conn.close()
+        release_db_connection(conn)
         login_user(user)
         return redirect(url_for('dashboard_page'))
     except Exception as e:
@@ -400,10 +421,10 @@ def get_dashboard_data():
         cursor.execute("SELECT ticker, price, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time, probability_score FROM recommendations ORDER BY time DESC LIMIT 50")
         recommendations = cursor.fetchall()
         cursor.close()
-        conn.close()
+        release_db_connection(conn)
         return jsonify({'status': status, 'signals': signals, 'recommendations': recommendations})
     except Exception as e:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
         return jsonify({'status': {}, 'signals': [], 'recommendations': []})
 
 @app.route('/api/sts/status')
@@ -437,10 +458,10 @@ def get_sts_status():
                 'status': r['status']
             })
         cursor.close()
-        conn.close()
+        release_db_connection(conn)
         return jsonify({'targets': targets, 'logs': []})
     except Exception as e:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
         return jsonify({'targets': [], 'logs': [], 'error': str(e)})
 
 @app.route('/api/posts', methods=['GET', 'POST'])
@@ -455,7 +476,7 @@ def handle_posts():
             cursor.execute("SELECT author, content, TO_CHAR(time, 'YYYY-MM-DD HH24:MI:SS') as time FROM posts ORDER BY time DESC LIMIT 100")
             posts = cursor.fetchall()
             cursor.close()
-            conn.close()
+            release_db_connection(conn)
             return jsonify({"status": "OK", "posts": posts})
             
         elif request.method == 'POST':
@@ -466,11 +487,11 @@ def handle_posts():
             cursor.execute("INSERT INTO posts (author, content, time) VALUES (%s, %s, %s)", (author, content, datetime.now()))
             conn.commit()
             cursor.close()
-            conn.close()
+            release_db_connection(conn)
             return jsonify({"status": "OK", "message": "Post created."})
             
     except Exception as e:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/quote/<string:ticker>')
@@ -563,13 +584,13 @@ def set_alert_threshold():
         cursor = conn.cursor()
         cursor.execute("UPDATE fcm_tokens SET min_score = %s WHERE token = %s", (int(threshold), token))
         if cursor.rowcount == 0:
-            cursor.close(); conn.close()
+            cursor.close(); release_db_connection(conn)
             return jsonify({"status": "error", "message": "Token not found"}), 404
         conn.commit()
-        cursor.close(); conn.close()
+        cursor.close(); release_db_connection(conn)
         return jsonify({"status": "OK", "message": "Threshold updated"}), 200
     except Exception as e:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/subscribe', methods=['POST'])
@@ -583,10 +604,10 @@ def subscribe():
         cursor = conn.cursor()
         cursor.execute("INSERT INTO fcm_tokens (token) VALUES (%s) ON CONFLICT (token) DO NOTHING", (token,))
         conn.commit()
-        cursor.close(); conn.close()
+        cursor.close(); release_db_connection(conn)
         return jsonify({"status": "success"}), 201
     except Exception as e:
-        if conn: conn.close()
+        if conn: release_db_connection(conn)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/admin/secret/count')
@@ -611,7 +632,7 @@ def check_user_count():
             conn.rollback()
         
         cursor.close()
-        conn.close()
+        release_db_connection(conn)
         
         active_users = max(user_count, device_count)
         remaining = 1000 - active_users
