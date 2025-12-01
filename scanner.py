@@ -1,6 +1,7 @@
 import asyncio
 import websockets
 import os
+import redis
 import pandas as pd
 import pandas_ta as ta
 import json

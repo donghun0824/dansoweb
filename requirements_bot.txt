@@ -58,3 +58,6 @@ xgboost
 scikit-learn
 joblib
 redis
+supervisor
+flask-socketio
+authlib
