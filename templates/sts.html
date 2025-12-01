@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DANSO TERMINAL PRO</title>
     
+    <title>DANSO TERMINAL PRO</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -188,6 +188,47 @@
         
         /* Pro Badge */
         .pro-badge { background: linear-gradient(135deg, var(--royal-blue), #5AC8FA); color: white; padding: 2px 6px; border-radius: 6px; font-size: 9px; font-weight: 800; margin-left: 8px; box-shadow: 0 2px 5px rgba(0,122,255,0.3); }
+
+        /* =========================================
+           📱 MOBILE RESPONSIVE (모바일 전용 스타일)
+           ========================================= */
+        @media (max-width: 1024px) {
+            body {
+                height: auto; /* 고정 높이 해제 */
+                overflow-y: auto; /* 세로 스크롤 허용 */
+            }
+
+            .layout-container {
+                display: flex;
+                flex-direction: column; /* 가로 배치 -> 세로 배치 변경 */
+                height: auto;
+                padding: 10px;
+                gap: 12px;
+            }
+
+            /* 내비게이션 축소 */
+            nav { padding: 0 16px; }
+            .logo-area span, .logo-area .pro-badge { display: none; } /* 로고 글자 숨김 */
+            .ai-filter-group span { display: none; } /* 라벨 숨김 */
+            .ai-filter-group input { width: 40px; }
+            
+            /* 사용자 이름 숨김 (아이콘만 표시) */
+            .user-pill span { display: none; }
+
+            /* 1. 상태바 (최상단) */
+            .status-bar { order: 1; height: 44px; padding: 0 12px; flex-shrink: 0; }
+
+            /* 2. 메인 뷰 (차트 & 테이블) */
+            .main-view { order: 2; height: auto; min-height: 500px; }
+            .main-view > div:first-of-type { max-height: 300px; overflow-x: auto; } /* 테이블 가로 스크롤 */
+
+            /* 3. 스캐너 (높이 제한) */
+            .scanner-panel { order: 3; height: 250px; }
+
+            /* 4. 우측 패널 (신호 & 채팅) */
+            .right-panel { order: 4; height: auto; gap: 12px; }
+            .right-sub-panel { height: 300px; flex: none; }
+        }
 
     </style>
 </head>
