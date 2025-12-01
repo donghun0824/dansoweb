@@ -1,246 +1,185 @@
-<!DOCTYPE html>
-<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
+    <title>Danso - AI Powered Scalping Assistant</title>
+    <meta name="description" content="실시간 급등주 포착부터 정밀 타격 AI 신호까지. 상위 1% 트레이더를 위한 AI 어시스턴트 Danso입니다.">
     <meta name="naver-site-verification" content="eb8016dc00057f4fdb6cb38e81cb7e507a4e1886" />
     <meta name="google-site-verification" content="rrMaS_Uo8i_SC9M4XfatAMijOT2vpn7vkm1x6FKuQbk" />
     
-    <title>Danso AI - AI Powered Scalping Signals</title>
-
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
     <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
     <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
 </head>
 <body>
 
-    <canvas id="heroCanvas"></canvas>
-
-    <div class="content-wrapper">
-
-        <div id="video-container">
-            <video id="intro-video" 
-                   src="{{ url_for('static', filename='videos/danso_promo.mp4') }}" 
-                   autoplay 
-                   muted 
-                   playsinline>
-            </video>
-        </div>
-
-        <div id="main-content">
-            
-            <header class="landing-header landing-container">
-                <div class="header-logo">
-                    <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
-                </div>
-                <nav class="header-nav">
-                     <a href="/login" class="nav-button secondary">Login</a> 
-                     <a href="/signup" class="nav-button primary">Sign Up</a> 
-                </nav>
-            </header>
-
-            <section class="hero-section landing-container">
-                <div class="hero-content">
-                    <span class="hero-subtitle-text">HERO SECTION</span>
-                    <h1 class="hero-title">Danso AI -<br>AI Powered Scalping Signals</h1>
-                    <p class="hero-description">The AI watcher monitors the market for high-probability signals, so you don't have to.</p>
-                    <div class="hero-cta-buttons">
-                        <a href="/dashboard" class="cta-button primary">Access Dashboard</a>
-                        <a href="#features" class="cta-button secondary">Learn More</a>
-                    </div>
-                </div>
-                
-                <div class="hero-feed-vertical">
-                    <h3 class="widget-title">Live Top Gainers</h3>
-                    <div class="vertical-scroll-container">
-                        <div id="vertical-ticker-list">
-                            <p class_="loading-text">Loading signals...</p>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <div class="lower-content-wrapper">
-
-                <section class="features-section landing-container" id="features">
-                    <h2 class="section-title">Why Danso?</h2>
-                    <div class="features-grid">
-                        
-                        <div class="feature-card">
-                            <span class="hero-subtitle-text">AI-DRIVEN WATCHER</span>
-                            <h3>AI-Driven Watcher</h3>
-                            <p>Our core AI ("The Watcher") filters market noise to find high-probability scalping opportunities (Pattern A/B).</p>
-                        </div>
-                        
-                        <div class="feature-card">
-                            <span class="hero-subtitle-text">REAL-TIME SIGNALS</span>
-                            <h3>Real-Time Signals</h3>
-                            <p>No delays. Get instant push notifications the moment a high-probability signal is detected by the engine.</p>
-                        </div>
-                        
-                        <div class="feature-card">
-                            <span class="hero-subtitle-text">COMMUNITY INSIGHTS</span>
-                            <h3>Community Insights</h3>
-                            <p>Share feedback, discuss signals, and grow with a community of traders all focused on the same goal.</p>
-                        </div>
-
-                    </div>
-                </section>
-                
-                <footer class="landing-footer landing-container">
-                    <p>© 2025 Danso. All rights reserved.</p>
-                </footer>
-
-            </div> 
-        </div> </div> 
-        </div> 
-    </div> 
-
-    <div id="landingPopup" class="popup-overlay">
-        <div class="popup-content">
-            <div class="popup-header">
-                <h2>Launch Special Access</h2>
-                <button class="close-btn" onclick="closePopup()">×</button>
-            </div>
-            
-            <div class="popup-body">
-                <div class="popup-section highlight-box">
-                    <h3 class="neon-accent">1-Week Free Trial</h3>
-                    <p class="main-desc">Full access is complimentary until <strong>next Monday</strong>.</p>
-                    <ul class="clean-list">
-                        <li><span class="accent-dot"></span> Converts to paid membership afterwards.</li>
-                        <li><span class="accent-dot"></span> Limited to the first 1,000 users.</li>
-                    </ul>
-                </div>
-
-                <div class="popup-section">
-                    <h3 class="neon-accent">Getting Started</h3>
-                    <ol class="clean-ol">
-                        <li>Log in and access the <strong>Dashboard</strong>.</li>
-                        <li>Enable **Notifications** to receive signals.</li>
-                        <li>Monitor real-time AI detection.</li>
-                    </ol>
-                </div>
-
-                <div class="popup-section">
-                    <h3 class="neon-accent">Web App Installation</h3>
-                    <div class="install-guide">
-                        <div class="guide-item">
-                            <span class="os-label">iOS (Safari)</span>
-                            <p>Tap 'Share' icon → Select 'Add to Home Screen'</p>
-                        </div>
-                        <div class="guide-item">
-                            <span class="os-label">Android (Chrome)</span>
-                            <p>Tap menu icon → Select 'Install App'</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="popup-section footer-info">
-                    <p class="disclaimer">Trading involves risk. AI analysis does not guarantee results.</p>
-                    <p class="contact">Support: dansoweb@gmail.com</p>
-                </div>
-            </div>
-
-            <div class="popup-footer">
-                <label class="dont-show">
-                    <input type="checkbox" id="dontShowToday"> Don't show again today
-                </label>
-                <button class="confirm-btn" onclick="closePopup()">ENTER DASHBOARD</button>
+    <nav class="navbar">
+        <div class="container nav-container">
+            <a href="/" class="logo">
+                <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
+                <span>DANSO</span>
+            </a>
+            <div class="nav-buttons">
+                <a href="/login" class="btn btn-text">로그인</a>
+                <a href="/register" class="btn btn-primary">무료로 시작하기</a>
             </div>
         </div>
-    </div>
+    </nav>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', (event) => {
-            // --- [기존 비디오/티커 로직] ---
-            const videoContainer = document.getElementById('video-container');
-            const video = document.getElementById('intro-video');
-            const mainContent = document.getElementById('main-content');
-
-            function showMainContent() {
-                if (!mainContent.classList.contains('visible')) {
-                    videoContainer.classList.add('fade-out');
-                    mainContent.classList.add('visible');
-                    document.body.style.overflowY = 'auto'; 
-                    loadVerticalTicker(); 
-                }
-            }
-
-            if(video) {
-                video.onended = () => { showMainContent(); };
-                video.onerror = () => { showMainContent(); };
-            }
-            setTimeout(() => { showMainContent(); }, 4000); 
-
-            function loadVerticalTicker() {
-                const list = document.getElementById('vertical-ticker-list');
-                if(!list) return;
-                
-                fetch('/api/market_overview')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'OK' && data.gainers && data.gainers.length > 0) {
-                            list.innerHTML = ''; 
-                            const gainers = data.gainers.slice(0, 15);
-                            const fullList = [...gainers, ...gainers]; 
-                            
-                            fullList.forEach(ticker => {
-                                const item = document.createElement('div');
-                                item.className = 'v-ticker-item';
-                                const change = ticker.todaysChangePerc || 0;
-                                const changeVal = parseFloat(change).toFixed(2);
-                                let changeClass = 'change-zero';
-                                if (change > 0) changeClass = 'change-positive';
-                                if (change < 0) changeClass = 'change-negative';
-                                
-                                item.innerHTML = `
-                                    <span class="name">${ticker.ticker}</span>
-                                    <span class="price">$${parseFloat(ticker.lastTrade.p).toFixed(2)}</span>
-                                    <span class="font-mono ${changeClass}">${changeVal > 0 ? '+' : ''}${changeVal}%</span>
-                                `;
-                                list.appendChild(item);
-                            });
-                        } else {
-                            list.innerHTML = '<p class="loading-text">No market data available.</p>';
-                        }
-                    })
-                    .catch(error => {
-                        console.error("Error loading vertical ticker:", error);
-                        list.innerHTML = '<p class="loading-text">Error loading feed.</p>';
-                    });
-            }
-
-            // --- [추가된 팝업 로직] ---
-            const hideDate = localStorage.getItem("landing_popup_closed");
-            const today = new Date().toISOString().split('T')[0];
-
-            if (hideDate !== today) {
-                const popup = document.getElementById("landingPopup");
-                if(popup) popup.style.display = "flex";
-            }
-        });
-
-        // 팝업 닫기 함수
-        function closePopup() {
-            const popup = document.getElementById("landingPopup");
-            const checkbox = document.getElementById("dontShowToday");
+    <section class="hero-section">
+        <div class="container hero-content">
+            <h1 class="hero-title">
+                상위 1% 스캘퍼가 되는<br>
+                <span class="highlight">가장 빠르고 확실한 방법</span>
+            </h1>
+            <p class="hero-subtitle">
+                실시간 급등주 포착부터 정밀 타격 AI 신호까지.<br>
+                Danso가 당신의 트레이딩을 24시간 보조합니다.
+            </p>
+            <div class="hero-cta">
+                <a href="/register" class="btn btn-large btn-primary">지금 시작하기 (Free)</a>
+                <a href="#features" class="btn btn-large btn-outline">기능 더보기</a>
+            </div>
             
-            if (checkbox && checkbox.checked) {
-                const today = new Date().toISOString().split('T')[0];
-                localStorage.setItem("landing_popup_closed", today);
-            }
-            if(popup) popup.style.display = "none";
-        }
-    </script>
+            <div class="hero-image-wrapper">
+                <img src="{{ url_for('static', filename='images/dashboard_preview.png') }}" alt="Danso Dashboard Interface" class="dashboard-preview">
+                <div class="glow-effect"></div>
+            </div>
+        </div>
+    </section>
 
-    <script src="{{ url_for('static', filename='js/landing.js') }}" defer></script>
+    <section class="stats-section">
+        <div class="container stats-grid">
+            <div class="stat-item">
+                <span class="stat-number">98%</span>
+                <span class="stat-label">신호 정확도</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">0.1s</span>
+                <span class="stat-label">실시간 반응속도</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">24/7</span>
+                <span class="stat-label">시장 감시</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">Risk-0</span>
+                <span class="stat-label">철저한 리스크 관리</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="feature-section" id="features">
+        <div class="container feature-layout">
+            <div class="feature-text">
+                <div class="tag">REALTIME SCANNER</div>
+                <h2>더 이상 차트 앞에서<br>밤새지 마세요.</h2>
+                <p>
+                    Danso의 AI 스캐너가 전체 시장을 1초 단위로 감시합니다.<br>
+                    급등하는 종목을 포착하는 즉시 알림을 보내드립니다.
+                </p>
+            </div>
+            <div class="feature-image">
+                <img src="{{ url_for('static', filename='images/feature_scanner.png') }}" alt="Scanner Feature">
+            </div>
+        </div>
+    </section>
+
+    <section class="feature-section reverse">
+        <div class="container feature-layout">
+            <div class="feature-text">
+                <div class="tag">STS ENGINE</div>
+                <h2>확률 높은 자리에만<br>정밀하게 타격하세요.</h2>
+                <p>
+                    단순한 감이 아닙니다. 호가창(Orderbook)과 수급(VPIN)을 분석하여<br>
+                    AI가 최적의 진입 타점과 손절가를 계산해 줍니다.
+                </p>
+            </div>
+            <div class="feature-image">
+                <img src="{{ url_for('static', filename='images/feature_sniper.png') }}" alt="Sniper Feature">
+            </div>
+        </div>
+    </section>
+
+    <section class="grid-section">
+        <div class="container">
+            <div class="section-header text-center">
+                <h2>단 하나의 솔루션으로<br>완성되는 트레이딩</h2>
+                <p>초보자부터 전문가까지 필요한 모든 도구를 담았습니다.</p>
+            </div>
+            
+            <div class="feature-grid">
+                <div class="grid-card">
+                    <i class="fas fa-bolt icon"></i>
+                    <h3>초고속 스캐닝</h3>
+                    <p>나스닥 전 종목을 1초 단위로 스캔하여 급등주를 찾습니다.</p>
+                </div>
+                <div class="grid-card">
+                    <i class="fas fa-brain icon"></i>
+                    <h3>AI 승률 예측</h3>
+                    <p>XGBoost 모델이 과거 패턴을 학습해 상승 확률을 계산합니다.</p>
+                </div>
+                <div class="grid-card">
+                    <i class="fas fa-shield-alt icon"></i>
+                    <h3>리스크 관리</h3>
+                    <p>진입 전 손절가와 목표가를 미리 제시하여 뇌동매매를 막습니다.</p>
+                </div>
+                <div class="grid-card">
+                    <i class="fas fa-mobile-alt icon"></i>
+                    <h3>모바일 푸시</h3>
+                    <p>외출 중에도 기회를 놓치지 않도록 실시간 알림을 보냅니다.</p>
+                </div>
+                <div class="grid-card">
+                    <i class="fas fa-chart-line icon"></i>
+                    <h3>실시간 차트</h3>
+                    <p>TradingView 차트와 연동하여 기술적 분석을 지원합니다.</p>
+                </div>
+                <div class="grid-card">
+                    <i class="fas fa-users icon"></i>
+                    <h3>트레이더 커뮤니티</h3>
+                    <p>다른 사용자들과 인사이트를 공유하고 함께 성장하세요.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-section">
+        <div class="container cta-content">
+            <h2>트레이딩 승률을 높이는<br>가장 확실한 선택</h2>
+            <p>지금 바로 Danso와 함께 시작하세요.</p>
+            <a href="/auth/google" class="btn btn-large btn-white">
+                <i class="fab fa-google"></i> 구글로 3초 만에 시작하기
+            </a>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Logo" style="height: 24px;">
+                    <span>Danso Inc.</span>
+                </div>
+                <div class="footer-links">
+                    <a href="#">이용약관</a>
+                    <a href="#">개인정보처리방침</a>
+                    <a href="#">문의하기</a>
+                </div>
+            </div>
+            <div class="copyright">
+                © 2025 Danso Inc. All rights reserved. Backed by AI Technology.
+            </div>
+        </div>
+    </footer>
+
 </body>
 </html>
