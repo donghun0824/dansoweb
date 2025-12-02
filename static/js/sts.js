@@ -227,6 +227,32 @@ function updateKeyStats(data) {
     
     if(els.indTimestamp) els.indTimestamp.innerText = new Date().toLocaleTimeString();
 }
+// [추가] 신호(Signals) 피드를 그리는 함수
+function renderSignals(logs) {
+    if (!els.signals) return;
+    els.signals.innerHTML = '';
+    
+    // 로그가 없으면 리턴
+    if (!logs || logs.length === 0) return;
+
+    logs.forEach(log => {
+        // 타임스탬프 처리 (시:분:초만 자르기)
+        const timeStr = log.timestamp ? log.timestamp.split(' ')[1] : '--:--:--';
+        
+        const html = `
+            <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span style="background:rgba(52, 199, 89, 0.15); color:#34C759; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY</span>
+                    <span style="font-size:10px; color:#999;">${timeStr}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:bold; color:#1D1D1F;">${log.ticker}</span>
+                    <span style="font-family:'JetBrains Mono'; font-size:13px;">$${parseFloat(log.price).toFixed(2)}</span>
+                </div>
+            </div>`;
+        els.signals.insertAdjacentHTML('beforeend', html);
+    });
+}
 
 /* ==========================================================================
    PART 3. CHART ENGINE
