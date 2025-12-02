@@ -102,7 +102,8 @@ def get_sts_status():
         # 2. 상위 3개만 조회 (LIMIT 3) -> 화면이 깔끔해짐
         query = """
             SELECT ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status 
-            FROM sts_live_targets 
+            FROM sts_live_targets
+            WHERE last_updated > NOW() - INTERVAL '1 minute'
             ORDER BY 
                 CASE 
                     WHEN status = 'FIRED' THEN 1 

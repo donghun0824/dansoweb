@@ -30,15 +30,30 @@ async function requestNotificationPermission() {
 
 async function getFCMToken() {
     const VAPID_PUBLIC_KEY = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
+    
     try {
+        console.log("1. Service Worker 등록 대기 중...");
         const registration = await navigator.serviceWorker.ready;
-        const token = await getToken(messaging, { vapidKey: VAPID_PUBLIC_KEY, serviceWorkerRegistration: registration });
+        console.log("2. Service Worker 준비 완료:", registration);
+
+        console.log("3. 토큰 요청 시작...");
+        const token = await getToken(messaging, { 
+            vapidKey: VAPID_PUBLIC_KEY, 
+            serviceWorkerRegistration: registration 
+        });
+
         if (token) {
+            console.log("4. 토큰 발급 성공:", token);
             window.currentFCMToken = token;
             sendTokenToServer(token);
             alert("✅ STS 알림 활성화 완료!");
+        } else {
+            console.log("4. 토큰이 없음 (권한 문제일 수 있음)");
         }
-    } catch (err) { console.error("Token Error:", err); }
+    } catch (err) { 
+        console.error("❌ Token Error 상세:", err); 
+        alert("토큰 발급 실패: " + err.message);
+    }
 }
 
 function sendTokenToServer(token) {
@@ -49,12 +64,6 @@ onMessage(messaging, (payload) => {
     new Notification(payload.notification.title, { body: payload.notification.body, icon: "/static/images/danso_logo.png" });
 });
 
-
-/* ==========================================================================
-   PART 1. VISUAL ENGINE (배경 효과 - 맥북 스타일이라 일단 주석 처리 또는 제거 가능)
-   (사용자 요청에 따라 이 부분은 제거하거나, 필요하면 다시 살릴 수 있습니다.)
-   ========================================================================== */
-// (맥북 UI에서는 캔버스가 없으므로 이 부분은 실행되지 않도록 처리합니다.)
 
 
 /* ==========================================================================
@@ -119,25 +128,25 @@ function renderTable(targets) {
         const price = item.price ? parseFloat(item.price).toFixed(2) : "0.00";
         let rawScore = item.ai_score || item.ai_prob || 0; 
         const scoreVal = parseFloat(rawScore);
-        // AI 점수 보정 (0.xx -> 100)
         const displayScore = scoreVal <= 1 ? Math.round(scoreVal * 100) : scoreVal.toFixed(0);
         
-        const obi = item.obi ? item.obi.toFixed(2) : "0.00";
-        const vpin = item.vpin ? item.vpin.toFixed(2) : "0.00";
+        // [수정] 데이터 타입 안전성 확보 (String -> Float)
+        const obi = item.obi ? parseFloat(item.obi) : 0;
+        const vpin = item.vpin ? parseFloat(item.vpin) : 0;
         
-        // 리스크 텍스트 (기존 로직)
+        // [수정] 숫자로 변환된 변수 사용
         let riskText = 'Low';
-        if (item.vpin > 0.6) riskText = 'Extreme';
-        else if (item.vpin > 0.4) riskText = 'High';
-        else if (item.vpin > 0.2) riskText = 'Med';
+        if (vpin > 0.6) riskText = 'Extreme';
+        else if (vpin > 0.4) riskText = 'High';
+        else if (vpin > 0.2) riskText = 'Med';
 
         const html = `
             <tr onclick="loadChartForTicker('${item.ticker}')" style="cursor:pointer;">
                 <td style="font-weight:800; color:#1D1D1F;">${item.ticker}</td>
                 <td style="font-family:'Roboto Mono'; font-weight:600;">$${price}</td>
                 <td><span class="score-pill" style="background:${displayScore >= 80 ? 'rgba(52, 199, 89, 0.15)' : 'rgba(0, 122, 255, 0.15)'}; color:${displayScore >= 80 ? '#34c759' : '#007AFF'}; padding:2px 8px; border-radius:12px; font-weight:bold;">${displayScore}</span></td>
-                <td style="font-family:'Roboto Mono';">${obi}</td>
-                <td style="font-family:'Roboto Mono';">${vpin} (${riskText})</td>
+                <td style="font-family:'Roboto Mono';">${obi.toFixed(2)}</td>
+                <td style="font-family:'Roboto Mono';">${vpin.toFixed(2)} (${riskText})</td>
                 <td style="font-weight:600;">${item.status}</td>
             </tr>
         `;
@@ -188,14 +197,25 @@ function renderSignals(logs) {
    ========================================================================== */
 
 async function loadChartForTicker(ticker) {
-    currentModalTicker = ticker;
     if (!els.chartContainer) return;
+
+    // [중요 수정] 기존 차트 인스턴스가 존재하면 메모리에서 해제 및 제거
+    if (lightweightChart) {
+        lightweightChart.remove();
+        lightweightChart = null; 
+        candleSeries = null;
+    }
     
-    // 차트 초기화
-    els.chartContainer.innerHTML = '';
+    // 차트 컨테이너 내부 HTML 비우기 (잔여 요소 제거)
+    els.chartContainer.innerHTML = ''; 
+
+    currentModalTicker = ticker;
+    
+    // 플레이스홀더 숨김 처리
     const placeholder = els.chartContainer.parentElement.querySelector('div[style*="absolute"]'); 
     if(placeholder) placeholder.style.display = 'none';
 
+    // 새 차트 생성
     lightweightChart = createChart(els.chartContainer, {
         width: els.chartContainer.clientWidth, 
         height: 250, 
@@ -208,6 +228,11 @@ async function loadChartForTicker(ticker) {
     candleSeries = lightweightChart.addCandlestickSeries({
         upColor: '#34c759', downColor: '#ff3b30', borderVisible: false, wickUpColor: '#34c759', wickDownColor: '#ff3b30'
     });
+    
+    // 반응형 대응: 창 크기 조절 시 차트 크기 자동 조절 (선택 사항)
+    // window.addEventListener('resize', () => {
+    //     if(lightweightChart) lightweightChart.resize(els.chartContainer.clientWidth, 250);
+    // });
 
     // 데이터 로드
     try {
