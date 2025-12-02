@@ -268,6 +268,8 @@ async function loadChartForTicker(ticker) {
     } catch(e) { console.error("Chart Load Error:", e); }
 }
 
+window.loadChartForTicker = loadChartForTicker;
+
 // 3. 엔진 가동
 setInterval(updateDashboard, 1500);
 updateDashboard();
