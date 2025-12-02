@@ -91,13 +91,15 @@ document.addEventListener('DOMContentLoaded', function() {
         window.onclick = (e) => { if (e.target == modal) closeModal(); };
     }
 
-    // --- 데이터 함수들 ---
+    // --- [수정됨] 실시간 데이터 가져오기 (엔드포인트 복구) ---
     async function fetchDashboardData() {
         try {
-            const response = await fetch('/api/sts/status');
+            // 🚨 핵심 수정: '/api/dashboard' -> '/api/sts/status'로 변경
+            // 이제 data.targets와 data.logs가 정상적으로 들어옵니다.
+            const response = await fetch('/api/sts/status'); 
             const data = await response.json();
             
-            // 상태
+            // 2. 상태 텍스트 갱신
             const statusText = document.getElementById('scan-status-text');
             if (statusText && data.targets) {
                 statusText.innerHTML = data.targets.length > 0 ? '<span style="color:#34c759">● Active</span>' : 'Idle';
@@ -105,39 +107,71 @@ document.addEventListener('DOMContentLoaded', function() {
                 if(countEl) countEl.textContent = `${data.targets.length} Targets`;
             }
 
-            // 테이블/리스트
+            // 3. 테이블/리스트 그리기
             const listContainer = document.getElementById('ticker-list-container');
             const stsTableBody = document.getElementById('sts-target-table-body');
 
-            if (listContainer && listContainer.tagName === 'TBODY') { // Dashboard Table
+            // (Type A) 대시보드 메인 테이블 (클릭 시 STS로 이동)
+            if (listContainer && listContainer.tagName === 'TBODY') {
                 listContainer.innerHTML = '';
+                // data.targets가 이제 존재하므로 루프가 정상 작동합니다.
                 data.targets.forEach(t => {
                     const scoreDisplay = t.ai_prob > 0 ? Math.round(t.ai_prob * 100) : '<i class="fa-solid fa-spinner fa-spin"></i>';
-                    const row = `<tr onclick="window.location.href='/sts?ticker=${t.ticker}'" style="cursor:pointer;"><td style="font-weight:800;">${t.ticker}</td><td>$${t.price}</td><td style="color:${t.ai_prob>0.7?'#34c759':'#1D1D1F'}">${scoreDisplay}</td><td>${t.obi.toFixed(2)}</td><td>${t.status}</td></tr>`;
+                    
+                    const row = `
+                        <tr onclick="window.location.href='/sts?ticker=${t.ticker}'" style="cursor:pointer;">
+                            <td style="font-weight:800;">${t.ticker}</td>
+                            <td>$${t.price}</td>
+                            <td style="color:${t.ai_prob > 0.7 ? '#34c759' : '#1D1D1F'}">${scoreDisplay}</td>
+                            <td>${t.obi.toFixed(2)}</td>
+                            <td>${t.status}</td>
+                        </tr>`;
                     listContainer.insertAdjacentHTML('beforeend', row);
                 });
-            } else if (listContainer && listContainer.tagName === 'DIV') { // STS Sidebar
+            } 
+            // (Type B) STS 사이드바 리스트
+            else if (listContainer && listContainer.tagName === 'DIV') {
                 listContainer.innerHTML = '';
                 data.targets.forEach(t => {
-                    const row = `<div class="ticker-row" onclick="openTickerModal('${t.ticker}')"><div><div class="t-symbol">${t.ticker}</div><div class="t-name" style="font-size:10px; color:#8E8E93;">Score ${Math.round(t.ai_prob * 100)}</div></div><div class="t-price">$${t.price}</div></div>`;
+                    const row = `
+                        <div class="ticker-row" onclick="openTickerModal('${t.ticker}')">
+                            <div><div class="t-symbol">${t.ticker}</div><div class="t-name" style="font-size:10px; color:#8E8E93;">Score ${Math.round(t.ai_prob * 100)}</div></div>
+                            <div class="t-price">$${t.price}</div>
+                        </div>`;
                     listContainer.insertAdjacentHTML('beforeend', row);
                 });
             }
 
-            if (stsTableBody) { // STS Main Table
+            // (Type C) STS 메인 테이블
+            if (stsTableBody) {
                 stsTableBody.innerHTML = '';
                 data.targets.forEach(t => {
-                    const row = `<tr onclick="openTickerModal('${t.ticker}')" style="cursor:pointer;"><td style="font-weight:800;">${t.ticker}</td><td>$${t.price}</td><td><span class="score-badge">${Math.round(t.ai_prob * 100)}</span></td><td>${t.obi.toFixed(2)}</td><td>${t.vpin.toFixed(2)}</td><td>${t.status}</td></tr>`;
+                    const row = `
+                        <tr onclick="openTickerModal('${t.ticker}')" style="cursor:pointer;">
+                            <td style="font-weight:800;">${t.ticker}</td>
+                            <td>$${t.price}</td>
+                            <td><span class="score-badge">${Math.round(t.ai_prob * 100)}</span></td>
+                            <td>${t.obi.toFixed(2)}</td>
+                            <td>${t.vpin.toFixed(2)}</td>
+                            <td>${t.status}</td>
+                        </tr>`;
                     stsTableBody.insertAdjacentHTML('beforeend', row);
                 });
             }
 
-            // 신호
+            // 4. 신호 피드 (Signals)
             const signalContainer = document.getElementById('signal-feed-container');
             if (signalContainer && data.logs) {
                 signalContainer.innerHTML = '';
                 data.logs.forEach(log => {
-                    const item = `<div class="signal-item" style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05);"><div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span class="signal-tag" style="background:#34c759; color:white; padding:2px 6px; border-radius:4px; font-size:10px;">BUY</span><span class="signal-time">${log.timestamp}</span></div><div style="display:flex; justify-content:space-between;"><span style="font-weight:bold;">${log.ticker}</span><span>$${log.price}</span></div></div>`;
+                    const item = `
+                        <div class="signal-item" style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05);">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                                <span class="signal-tag" style="background:#34c759; color:white; padding:2px 6px; border-radius:4px; font-size:10px;">BUY</span>
+                                <span class="signal-time">${log.timestamp}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between;"><span style="font-weight:bold;">${log.ticker}</span><span>$${log.price}</span></div>
+                        </div>`;
                     signalContainer.insertAdjacentHTML('beforeend', item);
                 });
             }
