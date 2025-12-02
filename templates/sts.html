@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>DANSO TERMINAL PRO - AI Powered Scalping Platform</title>
+    <title>DANSO TERMINAL PRO</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,528 +13,195 @@
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/danso_logo.png') }}">
-
-    <style>
+    
+ <style>
         /* ==========================================================================
-   DANSO TERMINAL PRO - macOS SILVER & WEBULL GLASS UI THEME
-   Pure CSS Overhaul
-   ========================================================================== */
+           DANSO TERMINAL PRO - macOS SILVER & WEBULL GLASS UI THEME (MERGED)
+           ========================================================================== */
 
-:root {
-    /* --- Palette: Apple Silver & Aluminum --- */
-    --app-bg-grad: linear-gradient(180deg, #F5F5F7 0%, #E5E5EA 100%);
-    --panel-glass: rgba(255, 255, 255, 0.65);
-    --panel-glass-solid: rgba(255, 255, 255, 0.85);
-    --panel-border: rgba(255, 255, 255, 0.6);
-    --panel-border-inner: rgba(0, 0, 0, 0.05);
-    
-    /* --- Typography: San Francisco Style --- */
-    --font-stack: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --font-mono: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
-    
-    /* --- Colors: Financial & UI --- */
-    --text-primary: #1D1D1F;
-    --text-secondary: #86868B;
-    --text-tertiary: #AEAEB2;
-    --accent-blue: #0071E3;
-    --accent-blue-dim: rgba(0, 113, 227, 0.1);
-    --accent-green: #34C759;
-    --accent-red: #FF3B30;
-    --accent-orange: #FF9500;
-    
-    /* --- Depth & Shadows --- */
-    --shadow-depth-1: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-    --shadow-depth-2: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0,0,0,0.02);
-    --shadow-depth-3: 0 12px 32px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0,0,0,0.04);
-    --glass-blur: blur(25px);
-}
+        :root {
+            /* --- Palette: Apple Silver & Aluminum --- */
+            --app-bg-grad: linear-gradient(180deg, #F5F5F7 0%, #E5E5EA 100%);
+            --panel-glass: rgba(255, 255, 255, 0.65);
+            --panel-border: rgba(255, 255, 255, 0.6);
+            --panel-border-inner: rgba(0, 0, 0, 0.05);
+            
+            /* --- Colors: Financial & UI --- */
+            --text-primary: #1D1D1F;
+            --text-secondary: #86868B;
+            --text-tertiary: #AEAEB2;
+            --accent-blue: #0071E3;
+            --accent-blue-dim: rgba(0, 113, 227, 0.1);
+            --accent-green: #34C759;
+            --accent-red: #FF3B30;
+            
+            /* --- Shadows --- */
+            --shadow-depth-1: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-depth-2: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --glass-blur: blur(25px);
+            
+            --font-stack: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
+            --font-mono: "SF Mono", "JetBrains Mono", monospace;
+        }
 
-/* --- Global Reset & Base --- */
-* {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
+        /* --- Global Reset --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; outline: none; -webkit-font-smoothing: antialiased; }
+        
+        body {
+            background: var(--app-bg-grad);
+            font-family: var(--font-stack);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
 
-body {
-    background: var(--app-bg-grad);
-    font-family: var(--font-stack);
-    color: var(--text-primary);
-    overflow: hidden; /* App-like feel */
-}
+        /* --- Scrollbar --- */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.15); border-radius: 10px; }
 
-/* Scrollbar Styling (macOS Style) */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.15);
-    border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.25);
-}
+        /* ==========================================================================
+           NAVIGATION BAR
+           ========================================================================== */
+        nav {
+            height: 56px;
+            background: rgba(245, 245, 247, 0.8);
+            backdrop-filter: saturate(180%) blur(20px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px;
+            z-index: 100; position: relative;
+        }
+        .logo-area { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text-primary); }
+        .logo-area img { height: 28px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1)); }
+        .pro-badge { background: linear-gradient(135deg, #0071E3, #5E5CE6); color: white; padding: 3px 8px; border-radius: 12px; font-size: 9px; margin-left: 5px; }
 
-/* ==========================================================================
-   NAVIGATION BAR
-   ========================================================================== */
-nav {
-    height: 56px !important; /* Slightly taller for breathing room */
-    background: rgba(245, 245, 247, 0.8) !important;
-    backdrop-filter: saturate(180%) blur(20px) !important;
-    -webkit-backdrop-filter: saturate(180%) blur(20px) !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
-    padding: 0 20px !important;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset; /* Top highlight */
-}
+        .nav-right { display: flex; gap: 12px; align-items: center; }
+        .ai-filter-group { background: rgba(255,255,255,0.5); padding: 4px 8px; border-radius: 8px; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(0,0,0,0.06); }
+        .ai-filter-group input { width: 40px; border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; text-align: center; font-family: var(--font-mono); font-weight: 600; background: #fff; }
+        .ai-filter-group button { background: #fff; border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; padding: 4px 8px; font-weight: 600; font-size: 11px; }
+        .user-pill { display: flex; align-items: center; gap: 8px; }
+        .user-pill img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.15); }
 
-.logo-area {
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
-    text-shadow: 0 1px 0 #fff;
-}
+        /* ==========================================================================
+           MAIN LAYOUT (3-Column Grid) - [핵심: 이 부분이 레이아웃을 잡습니다]
+           ========================================================================== */
+        .layout-container {
+            display: grid;
+            grid-template-columns: 280px 1fr 320px; /* 좌:280, 중:자동, 우:320 */
+            height: calc(100vh - 56px);
+            gap: 16px;
+            padding: 16px;
+            max-width: 1920px; margin: 0 auto;
+        }
 
-.logo-area img {
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
-}
+        /* Panels Common Glass Style */
+        .panel, .right-sub-panel, .chart-section, .indicator-section {
+            background: var(--panel-glass);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            box-shadow: var(--shadow-depth-2);
+            position: relative;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        
+        .panel-header {
+            height: 48px;
+            padding: 0 16px;
+            border-bottom: 1px solid var(--panel-border-inner);
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;
+        }
 
-.pro-badge {
-    background: linear-gradient(135deg, #0071E3, #5E5CE6) !important;
-    font-size: 9px !important;
-    padding: 3px 8px !important;
-    border-radius: 12px !important;
-    letter-spacing: 0.5px;
-    box-shadow: 0 2px 6px rgba(0, 113, 227, 0.3) !important;
-    text-shadow: none;
-}
+        /* --- Left Column: Scanner --- */
+        .scanner-panel { grid-column: 1; }
+        #ticker-list-container { flex: 1; overflow-y: auto; padding: 12px; }
+        
+        .ticker-row {
+            background: rgba(255,255,255,0.5); border-radius: 10px; margin-bottom: 8px; padding: 10px;
+            cursor: pointer; transition: 0.2s; border: 1px solid transparent;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .ticker-row:hover { background: #fff; transform: scale(1.02); box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+        .t-symbol { font-weight: 700; font-size: 14px; }
+        .t-score { font-size: 10px; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; color: var(--text-secondary); }
+        .t-price { font-family: var(--font-mono); font-weight: 600; font-size: 14px; }
+        .scanner-footer { padding: 12px; background: rgba(255,255,255,0.3); font-size: 11px; font-weight: 500; color: var(--text-secondary); border-top: 1px solid rgba(0,0,0,0.05); }
 
-/* Right Side Controls */
-.ai-filter-group {
-    background: rgba(255, 255, 255, 0.5) !important;
-    border: 1px solid rgba(0, 0, 0, 0.06) !important;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,0.03) !important;
-    border-radius: 8px !important;
-    padding: 4px 8px !important;
-}
+        /* --- Center Column: Chart & Stats --- */
+        .center-col { grid-column: 2; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+        
+        .chart-section { flex: 65; background: #fff; /* 차트는 흰 배경 */ box-shadow: var(--shadow-depth-2); }
+        .chart-overlay {
+            position: absolute; top: 20px; left: 20px; z-index: 10;
+            background: rgba(255,255,255,0.8); backdrop-filter: blur(8px);
+            padding: 8px 16px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.05);
+            box-shadow: var(--shadow-depth-1);
+        }
 
-.ai-filter-group span {
-    color: var(--text-secondary) !important;
-    font-size: 11px !important;
-    font-weight: 500 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
+        .indicator-section { flex: 35; }
+        .metrics-grid {
+            flex: 1; display: grid; grid-template-columns: repeat(6, 1fr);
+            gap: 1px; background: rgba(0,0,0,0.06); border-top: 1px solid rgba(0,0,0,0.06); overflow-y: auto;
+        }
+        .metric-cell {
+            background: rgba(255,255,255,0.85); backdrop-filter: blur(10px);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 8px; transition: 0.2s;
+        }
+        .metric-cell:hover { background: #fff; z-index: 1; }
+        .metric-label { font-size: 9px; color: var(--text-tertiary); font-weight: 600; margin-bottom: 4px; text-transform: uppercase; }
+        .metric-value { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--text-primary); }
+        .metric-cell.featured .metric-value { color: var(--accent-blue); font-size: 18px; font-weight: 700; }
 
-.ai-filter-group input {
-    background: #FFFFFF !important;
-    border: 1px solid rgba(0, 0, 0, 0.1) !important;
-    border-radius: 6px !important;
-    color: var(--text-primary) !important;
-    font-family: var(--font-mono) !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-    transition: all 0.2s ease;
-}
+        /* --- Right Column: Signals & Chat --- */
+        .right-panel { grid-column: 3; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+        .right-sub-panel { flex: 1; }
+        
+        #signal-feed-container, #community-feed-container { flex: 1; overflow-y: auto; padding: 12px; }
+        .signal-item {
+            background: #fff; border: 1px solid rgba(0,0,0,0.04); border-radius: 12px;
+            padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+        .signal-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+        .signal-action { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 700; text-transform: uppercase; }
+        .signal-action.buy { background: rgba(52, 199, 89, 0.15); color: var(--accent-green); }
+        
+        .chat-input-area { padding: 12px; background: #fff; border-top: 1px solid rgba(0,0,0,0.05); display: flex; gap: 8px; }
+        .chat-input { flex: 1; background: #F5F5F7; border: none; padding: 10px 14px; border-radius: 20px; font-size: 13px; }
+        .chat-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--accent-blue); color: white; border: none; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 113, 227, 0.4); }
 
-.ai-filter-group input:focus {
-    border-color: var(--accent-blue) !important;
-    box-shadow: 0 0 0 3px var(--accent-blue-dim) !important;
-}
-
-.ai-filter-group button {
-    background: #FFFFFF !important;
-    color: var(--text-primary) !important;
-    border: 1px solid rgba(0, 0, 0, 0.1) !important;
-    border-radius: 6px !important;
-    font-weight: 500 !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-    transition: all 0.2s ease;
-}
-
-.ai-filter-group button:hover {
-    background: #F5F5F7 !important;
-    transform: translateY(-1px);
-}
-
-#subscribe-btn {
-    background: var(--text-primary) !important;
-    color: #fff !important;
-    border: none !important;
-}
-
-/* User Profile */
-.user-pill {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding-right: 0 !important;
-}
-
-.user-pill img {
-    box-shadow: 0 2px 5px rgba(0,0,0,0.15) !important;
-    border: 2px solid #fff !important;
-}
-
-.btn-logout {
-    opacity: 0.5;
-    transition: opacity 0.2s;
-}
-.btn-logout:hover {
-    opacity: 1;
-    background: transparent !important;
-}
-
-/* ==========================================================================
-   MAIN LAYOUT & PANELS (GLASSMORPHISM)
-   ========================================================================== */
-.layout-container {
-    padding: 16px !important;
-    gap: 16px !important;
-    max-width: 1920px;
-    margin: 0 auto;
-}
-
-/* Common Panel Styling */
-.panel, .right-sub-panel, .chart-section, .indicator-section {
-    background: var(--panel-glass) !important;
-    backdrop-filter: var(--glass-blur) !important;
-    -webkit-backdrop-filter: var(--glass-blur) !important;
-    border: 1px solid var(--panel-border) !important;
-    border-radius: 16px !important;
-    box-shadow: var(--shadow-depth-2) !important;
-    position: relative;
-    /* Inner light rim for 3D glass effect */
-    box-shadow: 
-        inset 0 1px 0 0 rgba(255, 255, 255, 0.7), 
-        var(--shadow-depth-2) !important;
-}
-
-.panel-header {
-    background: transparent !important; /* Remove old gradient */
-    border-bottom: 1px solid var(--panel-border-inner) !important;
-    height: 48px !important;
-    color: var(--text-secondary) !important;
-    font-size: 11px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.5px !important;
-    padding: 0 20px !important;
-}
-
-/* ==========================================================================
-   LEFT PANEL: SCANNER
-   ========================================================================== */
-.scanner-panel {
-    background: rgba(255, 255, 255, 0.5) !important; /* Slightly more opaque */
-}
-
-#ticker-list-container {
-    padding: 12px !important;
-}
-
-.ticker-row {
-    background: rgba(255, 255, 255, 0.5) !important;
-    border: 1px solid transparent !important;
-    border-bottom: 1px solid rgba(0,0,0,0.03) !important;
-    border-radius: 10px !important;
-    margin-bottom: 8px !important;
-    box-shadow: none !important;
-    transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
-}
-
-.ticker-row:hover {
-    background: #FFFFFF !important;
-    transform: scale(1.02) !important;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.06) !important;
-    z-index: 10;
-}
-
-/* Active Selection State */
-.ticker-row[style*="border-color"] {
-    background: #fff !important;
-    box-shadow: 0 0 0 2px var(--accent-blue) inset !important;
-    border-color: transparent !important;
-}
-
-.t-symbol {
-    font-weight: 700 !important;
-    font-size: 14px !important;
-}
-
-.t-score {
-    background: rgba(0,0,0,0.04) !important;
-    color: var(--text-secondary) !important;
-    font-size: 10px !important;
-    border-radius: 4px !important;
-    padding: 2px 6px !important;
-}
-
-.ticker-row.high-score .t-score {
-    background: linear-gradient(90deg, #FF9500, #FF3B30) !important;
-    color: white !important;
-    font-weight: 700;
-}
-
-.t-price {
-    font-family: var(--font-mono) !important;
-    letter-spacing: -0.5px;
-}
-
-.t-change {
-    font-size: 11px !important;
-    font-weight: 600 !important;
-    border-radius: 6px !important;
-}
-.text-up { color: var(--accent-green) !important; background: rgba(52, 199, 89, 0.1) !important; }
-.text-down { color: var(--accent-red) !important; background: rgba(255, 59, 48, 0.1) !important; }
-
-.scanner-footer {
-    background: rgba(255,255,255,0.3) !important;
-    backdrop-filter: blur(5px);
-    border-top: 1px solid rgba(0,0,0,0.05) !important;
-    font-weight: 500;
-}
-
-/* ==========================================================================
-   CENTER PANEL: CHARTS & METRICS
-   ========================================================================== */
-/* Chart Container */
-.chart-section {
-    background: #FFFFFF !important; /* Clean canvas for chart */
-    border: 1px solid rgba(0,0,0,0.05) !important;
-    box-shadow: var(--shadow-depth-3) !important;
-}
-
-.chart-overlay {
-    background: rgba(255, 255, 255, 0.8);
-    backdrop-filter: blur(8px);
-    padding: 8px 16px;
-    border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.05);
-    box-shadow: var(--shadow-depth-1);
-    top: 20px !important;
-    left: 20px !important;
-}
-
-.chart-ticker {
-    font-family: var(--font-stack) !important;
-    color: var(--text-primary) !important;
-    text-shadow: none !important;
-}
-
-.chart-price {
-    font-family: var(--font-mono) !important;
-    letter-spacing: -1px;
-    text-shadow: none !important;
-}
-
-/* Metrics Grid - The "Webull" Table Look */
-.indicator-section {
-    box-shadow: var(--shadow-depth-2) !important;
-}
-
-.metrics-grid {
-    background: rgba(0, 0, 0, 0.06) !important; /* Separator color */
-    gap: 1px !important; /* Create crisp grid lines */
-    padding: 0 !important;
-    border-top: 1px solid rgba(0,0,0,0.06) !important;
-}
-
-.metric-cell {
-    background: rgba(255, 255, 255, 0.85) !important;
-    backdrop-filter: blur(10px);
-    box-shadow: none !important;
-    transition: background 0.2s ease !important;
-    padding: 12px 6px !important;
-}
-
-.metric-cell:hover {
-    background: #FFFFFF !important;
-    z-index: 1 !important;
-}
-
-.metric-label {
-    color: var(--text-tertiary) !important;
-    font-size: 9px !important;
-    letter-spacing: 0.5px !important;
-    font-weight: 600 !important;
-}
-
-.metric-value {
-    font-size: 16px !important;
-    font-weight: 600 !important;
-    letter-spacing: -0.5px;
-    margin-top: 4px;
-}
-
-.metric-cell.featured {
-    background: #fff !important;
-}
-.metric-cell.featured .metric-value {
-    color: var(--accent-blue) !important;
-    font-weight: 700 !important;
-}
-
-/* ==========================================================================
-   RIGHT PANEL: SIGNALS & CHAT
-   ========================================================================== */
-/* Signal Cards */
-.signal-item {
-    background: #FFFFFF !important;
-    border: 1px solid rgba(0,0,0,0.04) !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04) !important;
-    border-radius: 12px !important;
-    margin-bottom: 12px !important;
-    padding: 16px !important;
-}
-
-.signal-item:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
-}
-
-.signal-action {
-    font-size: 9px !important;
-    border-radius: 4px !important;
-    padding: 4px 8px !important;
-}
-
-.signal-details {
-    color: var(--text-secondary) !important;
-    line-height: 1.5;
-    margin-top: 8px;
-    font-size: 12px !important;
-}
-
-/* Chat Area */
-#community-feed-container {
-    background: rgba(255,255,255,0.4);
-}
-
-#community-feed-container > div {
-    /* Chat bubbles styling (targeted via inline style structure in JS, enhancing here) */
-    background: #FFFFFF !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-    border: none !important;
-}
-
-.chat-input-area {
-    background: white !important;
-    border-top: 1px solid rgba(0,0,0,0.05) !important;
-    padding: 16px !important;
-}
-
-.chat-input {
-    background: #F5F5F7 !important;
-    border: none !important;
-    border-radius: 20px !important;
-    padding: 10px 16px !important;
-    font-size: 14px !important;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,0.05) !important;
-}
-
-.chat-input:focus {
-    background: #fff !important;
-    box-shadow: inset 0 0 0 1px var(--accent-blue), 0 0 0 3px var(--accent-blue-dim) !important;
-}
-
-.chat-btn {
-    background: var(--accent-blue) !important;
-    box-shadow: 0 2px 8px rgba(0, 113, 227, 0.4) !important;
-    width: 38px !important;
-    height: 38px !important;
-}
-
-.chat-btn:hover {
-    background: #0077ED !important;
-    transform: scale(1.05) !important;
-}
-
-/* ==========================================================================
-   UTILITY & ANIMATIONS
-   ========================================================================== */
-.status-badge {
-    background: rgba(52, 199, 89, 0.1) !important;
-    color: var(--accent-green) !important;
-    border: 1px solid rgba(52, 199, 89, 0.2);
-}
-
-/* Subtle pulse for live status */
-.live-indicator {
-    box-shadow: 0 0 0 rgba(52, 199, 89, 0.4);
-    animation: macPulse 2s infinite;
-}
-
-@keyframes macPulse {
-    0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.4); }
-    70% { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0); }
-}
-/* MAIN GRID LAYOUT FIX */
-.layout-container {
-    display: grid !important;
-    grid-template-columns: 320px 1fr 340px !important; /* Left | Center | Right */
-    grid-template-rows: auto;
-    height: calc(100vh - 56px);
-}
-
-/* Column Alignment */
-.center-col {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 16px !important;
-}
-
-.right-panel {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 16px !important;
-}
-.panel.scanner-panel {
-    grid-column: 1 !important;
-}
-
-.center-col {
-    grid-column: 2 !important;
-}
-
-.right-panel {
-    grid-column: 3 !important;
-}
-.right-panel {
-    display: flex !important;
-    flex-direction: column;
-    gap: 16px;
-}
-.nav-right {
-    margin-left: auto !important;
-    display: flex !important;
-    align-items: center !important;
-    gap: 16px !important;
-}
-    </style>
+        /* Utility */
+        .live-indicator { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 8px var(--accent-green); display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        
+        @media (max-width: 1024px) {
+            .layout-container { display: flex; flex-direction: column; height: auto; overflow-y: visible; }
+            .center-col { min-height: 500px; }
+        }
+    </style>   
 </head>
 <body>
 
     <nav>
         <div class="logo-area">
-            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="DANSO">
-            <span>DANSO</span> <span class="pro-badge">PRO</span>
+            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="DANSO Logo">
+            <span>DANSO</span>
+            <span class="pro-badge" style="background:linear-gradient(135deg, #007AFF, #AF52DE); color:white; padding:2px 6px; border-radius:4px; font-size:10px;">PRO</span>
         </div>
         
-        <div class="nav-right">
-            <div class="ai-filter-group">
-                <span>AI Filter:</span>
-                <input type="number" id="min-score-input" value="80">
-                <button id="save-score-btn">SET</button>
-                <button id="subscribe-btn"><i class="fa-regular fa-bell"></i> Alerts</button>
+        <div class="nav-right" style="display:flex; gap:16px; align-items:center;">
+            <div class="ai-filter-group" style="background:rgba(255,255,255,0.7); padding:6px 12px; border-radius:10px;">
+                <span style="font-size:12px; font-weight:600;">AI Filter:</span>
+                <input type="number" id="min-score-input" value="80" style="width:40px; border:none; background:transparent; font-weight:bold; text-align:center;">
+                <button id="save-score-btn" style="background:#007AFF; color:white; border:none; border-radius:4px; cursor:pointer;">SET</button>
+                <button id="subscribe-btn" style="background:transparent; border:none; cursor:pointer;"><i class="fa-regular fa-bell"></i> Alerts</button>
             </div>
-            
-            <div class="user-pill">
-                <img src="https://ui-avatars.com/api/?name=Trader&background=007AFF&color=fff" alt="User">
-                <span>Trader</span>
+
+            <div class="user-pill" style="display:flex; align-items:center; gap:8px;">
+                <img src="https://ui-avatars.com/api/?name=Trader&background=007AFF&color=fff" alt="User Avatar" style="width:28px; height:28px; border-radius:50%;">
+                <span style="font-size:13px; font-weight:600;">Trader</span>
             </div>
         </div>
     </nav>
@@ -542,82 +209,73 @@ nav {
     <div class="layout-container">
 
         <aside class="panel scanner-panel">
-            <div class="panel-header">
+            <div class="panel-header" style="padding:12px 16px; font-size:11px; font-weight:700; color:#6E6E73; border-bottom:1px solid rgba(0,0,0,0.08); display:flex; justify-content:space-between;">
                 <span>Scanner Feed</span>
                 <i class="fa-solid fa-bolt" style="color:var(--blue-accent);"></i>
             </div>
+            
             <div id="ticker-list-container">
-                <div style="padding:40px; text-align:center; color:#999;">Waiting for engine...</div>
+                <div style="padding:50px 20px; text-align:center; color:#999;">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i><br><br>
+                    Waiting for engine...
+                </div>
             </div>
-            <div style="padding:10px; font-size:11px; border-top:0.5px solid #eee; display:flex; justify-content:space-between;">
-                <span id="scan-status-text">Idle</span>
+            
+            <div class="scanner-footer" style="padding:10px; font-size:11px; color:#888; border-top:1px solid rgba(0,0,0,0.08);">
+                <span id="scan-status-text">Status: Idle</span> | 
                 <span id="scan-watching-count">0 Targets</span>
             </div>
         </aside>
 
         <div class="center-col">
             <div class="chart-section" id="chart-container">
-                <div class="chart-overlay">
-                    <span id="overlay-ticker">SELECT TICKER</span>
-                    <span id="overlay-price">--</span>
+                <div class="chart-overlay" style="position:absolute; top:16px; left:20px; z-index:10;">
+                    <span id="overlay-ticker" style="font-size:24px; font-weight:800;">SELECT TICKER</span>
+                    <span id="overlay-price" style="font-family:'JetBrains Mono'; font-size:20px; color:var(--green-accent);">--</span>
                 </div>
             </div>
 
-            <div class="indicator-section">
-                <div class="panel-header">
+            <div class="indicator-section panel">
+                <div class="panel-header" style="padding:12px 16px; font-size:11px; font-weight:700; color:#6E6E73; border-bottom:1px solid rgba(0,0,0,0.08);">
                     <span>Key Statistics</span>
-                    <span style="font-size:9px; background:#eee; padding:2px 6px; border-radius:4px;">REAL-TIME</span>
+                    <span class="status-badge" style="background:#eee; padding:2px 6px; border-radius:4px; float:right;">REAL-TIME</span>
                 </div>
                 <div class="metrics-grid">
-                    <div class="metric-cell"><span class="metric-label">OBI</span><span class="metric-value" id="ind-obi">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">OBI MOM</span><span class="metric-value" id="ind-obi-mom">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">VPIN</span><span class="metric-value" id="ind-vpin">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">Tick Speed</span><span class="metric-value" id="ind-tick-speed">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">Tick Accel</span><span class="metric-value" id="ind-tick-accel">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">OBI</span><span class="metric-value" id="ind-obi">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">OBI MOM</span><span class="metric-value" id="ind-obi-mom">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">VPIN</span><span class="metric-value" id="ind-vpin">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Tick Speed</span><span class="metric-value" id="ind-tick-speed">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Tick Accel</span><span class="metric-value" id="ind-tick-accel">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">VWAP Dist</span><span class="metric-value" id="ind-vwap-dist">--</span></div>
                     
-                    <div class="metric-cell"><span class="metric-label">VWAP Dist</span><span class="metric-value" id="ind-vwap-dist">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">VWAP Slope</span><span class="metric-value" id="ind-vwap-slope">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">Squeeze</span><span class="metric-value" id="ind-squeeze">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">RVOL</span><span class="metric-value" id="ind-rvol">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">ATR</span><span class="metric-value" id="ind-atr">--</span></div>
-
-                    <div class="metric-cell"><span class="metric-label">Pump Accel</span><span class="metric-value" id="ind-pump-accel">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">Spread</span><span class="metric-value" id="ind-spread">--</span></div>
-                    
-                    <div class="metric-cell featured">
-                        <span class="metric-label">Hybrid Score</span>
-                        <span class="metric-value" id="ind-score" style="color:var(--blue-accent); font-size:18px;">--</span>
-                    </div>
-                    <div class="metric-cell">
-                        <span class="metric-label">Win Prob</span>
-                        <span class="metric-value" id="ind-prob">--%</span>
-                    </div>
-                    
-                    <div class="metric-cell" style="grid-column: span 5; background:#fafafa;">
-                        <span class="metric-label">Last Updated: <span id="ind-timestamp" style="font-weight:400;">--</span></span>
-                    </div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">VWAP Slope</span><span class="metric-value" id="ind-vwap-slope">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Squeeze</span><span class="metric-value" id="ind-squeeze">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">RVOL</span><span class="metric-value" id="ind-rvol">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">ATR</span><span class="metric-value" id="ind-atr">--</span></div>
+                    <div class="metric-cell" style="background:#F2F8FF;"><span class="metric-label" style="font-size:10px; color:#007AFF;">Hybrid Score</span><span class="metric-value" id="ind-score" style="color:#007AFF; font-size:18px; font-weight:bold;">--</span></div>
+                    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Win Prob</span><span class="metric-value" id="ind-prob">--%</span></div>
                 </div>
             </div>
         </div>
 
-        <aside class="right-panel">
-            <div class="right-sub-panel">
-                <div class="panel-header">
+        <aside class="right-panel" style="display:flex; flex-direction:column; gap:12px;">
+            <div class="right-sub-panel" style="flex:1;">
+                <div class="panel-header" style="padding:12px 16px; font-size:11px; font-weight:700; color:#6E6E73; border-bottom:1px solid rgba(0,0,0,0.08); display:flex; justify-content:space-between;">
                     <span>Sniper Signals</span>
-                    <i class="fa-solid fa-crosshairs" style="color:var(--red-accent);"></i>
+                    <i class="fa-solid fa-crosshairs" style="color: var(--red-accent);"></i>
                 </div>
                 <div id="signal-feed-container"></div>
             </div>
             
-            <div class="right-sub-panel">
-                <div class="panel-header">
+            <div class="right-sub-panel" style="flex:1;">
+                <div class="panel-header" style="padding:12px 16px; font-size:11px; font-weight:700; color:#6E6E73; border-bottom:1px solid rgba(0,0,0,0.08); display:flex; justify-content:space-between;">
                     <span>Trader Chat</span>
-                    <i class="fa-solid fa-comments" style="color:var(--blue-accent);"></i>
+                    <i class="fa-solid fa-comments" style="color: var(--blue-accent);"></i>
                 </div>
                 <div id="community-feed-container"></div>
-                <form id="post-form" class="chat-input-area" onsubmit="return false;">
-                    <input type="text" class="chat-input" placeholder="Message..." required>
-                    <button id="post-submit-btn" class="chat-btn"><i class="fa-solid fa-arrow-up"></i></button>
+                <form id="post-form" class="chat-input-area" onsubmit="return false;" style="padding:10px; border-top:1px solid rgba(0,0,0,0.08); display:flex; gap:8px;">
+                    <input type="text" class="chat-input" placeholder="Message..." style="flex:1; padding:8px; border-radius:8px; border:1px solid #ddd;">
+                    <button id="post-submit-btn" class="chat-btn" style="width:32px; background:#007AFF; color:white; border:none; border-radius:8px;"><i class="fa-solid fa-arrow-up"></i></button>
                 </form>
             </div>
         </aside>
