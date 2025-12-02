@@ -122,16 +122,21 @@ def init_db():
             conn.commit()
         except psycopg2.Error:
             conn.rollback()
-        # [Phase 3] DB 스키마 확장 (Entry, TP, SL, Strategy 컬럼 추가)
+        # [Phase 9.5] 대시보드용 테이블 확장 (누락된 컬럼 추가)
         try:
-            cursor.execute("ALTER TABLE signals ADD COLUMN entry REAL")
-            cursor.execute("ALTER TABLE signals ADD COLUMN tp REAL")
-            cursor.execute("ALTER TABLE signals ADD COLUMN sl REAL")
-            cursor.execute("ALTER TABLE signals ADD COLUMN strategy TEXT")
+            # 기존 컬럼 외에 Webull 패널에 필요한 데이터 추가
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN obi_mom REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN tick_accel REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN vwap_slope REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN squeeze_ratio REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN rvol REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN atr REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN pump_accel REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN spread REAL DEFAULT 0")
             conn.commit()
-            print("✅ [DB] signals 테이블 컬럼 확장 완료 (entry, tp, sl, strategy)")
+            print("✅ [DB] sts_live_targets 테이블 확장 완료 (모든 지표 저장 가능)")
         except psycopg2.Error:
-            conn.rollback() # 이미 컬럼이 있으면 패스    
+            conn.rollback() # 이미 있으면 패스
             
         cursor.close()
         db_pool.putconn(conn)
@@ -189,10 +194,14 @@ def update_dashboard_db(ticker, metrics, score, status):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # [수정] 모든 지표를 저장하도록 쿼리 확장
         query = """
         INSERT INTO sts_live_targets 
-        (ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status, last_updated)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        (ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status, 
+         obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread, last_updated)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         ON CONFLICT (ticker) DO UPDATE SET
             price = EXCLUDED.price,
             ai_score = EXCLUDED.ai_score,
@@ -201,16 +210,43 @@ def update_dashboard_db(ticker, metrics, score, status):
             tick_speed = EXCLUDED.tick_speed,
             vwap_dist = EXCLUDED.vwap_dist,
             status = EXCLUDED.status,
+            
+            obi_mom = EXCLUDED.obi_mom,
+            tick_accel = EXCLUDED.tick_accel,
+            vwap_slope = EXCLUDED.vwap_slope,
+            squeeze_ratio = EXCLUDED.squeeze_ratio,
+            rvol = EXCLUDED.rvol,
+            atr = EXCLUDED.atr,
+            pump_accel = EXCLUDED.pump_accel,
+            spread = EXCLUDED.spread,
+            
             last_updated = NOW();
         """
+        
+        # metrics 딕셔너리에서 안전하게 값 추출 (없으면 0)
         cursor.execute(query, (
-            ticker, float(metrics['last_price']), float(score), 
-            float(metrics['obi']), float(metrics['vpin']), 
-            int(metrics['tick_speed']), float(metrics['vwap_dist']), status
+            ticker, 
+            float(metrics.get('last_price', 0)), 
+            float(score), 
+            float(metrics.get('obi', 0)), 
+            float(metrics.get('vpin', 0)), 
+            int(metrics.get('tick_speed', 0)), 
+            float(metrics.get('vwap_dist', 0)), 
+            status,
+            # [추가된 데이터 매핑]
+            float(metrics.get('obi_mom', 0)),
+            float(metrics.get('tick_accel', 0)),
+            float(metrics.get('vwap_slope', 0)),
+            float(metrics.get('squeeze_ratio', 0)),
+            float(metrics.get('rvol', 0)),
+            float(metrics.get('atr', 0)),
+            float(metrics.get('pump_accel', 0)),
+            float(metrics.get('spread', 0))
         ))
         conn.commit()
         cursor.close()
     except Exception as e:
+        # print(f"❌ DB Update Error: {e}")
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)

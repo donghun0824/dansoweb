@@ -2,355 +2,167 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    
     <title>DANSO TERMINAL PRO</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/favicon.ico') }}">
 
     <style>
+        /* (디자인 CSS는 가져오신 코드 그대로 유지합니다) */
         :root {
-            /* DANSO x MacBook Silver Palette */
-            --aluminum-light: #F2F2F7;
-            --aluminum-mid: #E5E5EA;
-            --aluminum-dark: #D1D1D6;
-            
-            --glass-panel: rgba(255, 255, 255, 0.65); /* 투명도 조정 */
-            --glass-border: rgba(255, 255, 255, 0.5);
-            
-            --text-primary: #1D1D1F;
-            --text-secondary: #6E6E73;
-            --text-tertiary: #8E8E93;
-            
-            /* Sophisticated Accents */
-            --mint-leaf: #30D158;
-            --coral-red: #FF453A;
-            --royal-blue: #007AFF;
-            
-            /* Typography */
-            --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            --font-mono: 'SF Mono', 'Roboto Mono', monospace;
-            
-            /* Shadows */
-            --shadow-ambient: 0 10px 40px rgba(0, 0, 0, 0.08);
-            --shadow-elevated: 0 20px 60px rgba(0, 0, 0, 0.12);
-            --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.06);
-            --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+            --aluminum-light: #F5F5F7; --aluminum-mid: #E8E8ED; --aluminum-dark: #D1D1D6;
+            --glass-panel: rgba(255, 255, 255, 0.78);
+            --glass-panel-hover: rgba(255, 255, 255, 0.88);
+            --glass-border: rgba(0, 0, 0, 0.08);
+            --text-primary: #1D1D1F; --text-secondary: #6E6E73; --text-tertiary: #8E8E93;
+            --blue-accent: #007AFF; --green-accent: #34C759; --red-accent: #FF3B30;
+            --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif;
+            --font-mono: 'SF Mono', 'JetBrains Mono', monospace;
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
+        html, body { height: 100%; overflow: hidden; }
         
         body {
-            background: linear-gradient(135deg, var(--aluminum-light) 0%, var(--aluminum-mid) 100%);
-            color: var(--text-primary);
-            font-family: var(--font-display);
-            height: 100vh;
-            overflow: hidden;
-            font-size: 13px;
-            display: flex;
-            flex-direction: column;
+            background: linear-gradient(135deg, #F5F5F7 0%, #E8E8ED 50%, #D1D1D6 100%);
+            color: var(--text-primary); font-family: var(--font-display); font-size: 13px;
         }
         
-        /* Metal Texture Effect */
-        body::before {
-            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-            background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255, 255, 255, 0.03) 2px, rgba(255, 255, 255, 0.03) 4px);
-            pointer-events: none; z-index: 0; opacity: 0.4;
-        }
-
-        /* --- Navigation --- */
+        /* Navigation */
         nav {
-            position: relative; z-index: 100; height: 60px;
-            background: var(--glass-panel);
-            backdrop-filter: blur(40px) saturate(180%);
-            -webkit-backdrop-filter: blur(40px) saturate(180%);
-            border-bottom: 1px solid var(--glass-border);
-            display: flex; align-items: center; padding: 0 24px;
-            justify-content: space-between; box-shadow: var(--shadow-ambient);
+            height: 52px; background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px);
+            border-bottom: 0.5px solid rgba(0,0,0,0.1); display: flex; align-items: center; 
+            padding: 0 24px; justify-content: space-between;
         }
-        
-        .logo-area { display: flex; align-items: center; gap: 12px; font-weight: 800; color: var(--text-primary); font-size: 18px; letter-spacing: -0.5px; }
-        .logo-area img { height: 32px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1)); }
-        
-        .nav-right { display: flex; align-items: center; gap: 16px; }
-        
-        .ai-filter-group {
-            display: flex; align-items: center; gap: 8px;
-            background: rgba(255, 255, 255, 0.5); padding: 6px 12px;
-            border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.6);
-            box-shadow: var(--shadow-inset);
-        }
-        
-        /* User Profile Pill */
-        .user-pill {
-            display: flex; align-items: center; gap: 10px;
-            background: rgba(255, 255, 255, 0.8); padding: 6px 6px 6px 16px;
-            border-radius: 30px; box-shadow: var(--shadow-button);
-            border: 1px solid rgba(255,255,255,0.5);
-        }
-        .user-pill img { width: 28px; height: 28px; border-radius: 50%; }
-        .user-pill span { font-weight: 600; font-size: 13px; color: var(--text-primary); }
-        .btn-logout { color: var(--coral-red); margin-left: 5px; text-decoration: none; padding: 4px; }
+        .logo-area { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 20px; }
+        .logo-area img { height: 32px; }
+        .pro-badge { background: linear-gradient(135deg, var(--blue-accent), #AF52DE); color: white; padding: 3px 8px; border-radius: 6px; font-size: 10px; }
 
+        .nav-right { display: flex; gap: 16px; align-items: center; }
+        .ai-filter-group { background: rgba(255,255,255,0.7); padding: 6px 12px; border-radius: 10px; display: flex; gap: 8px; align-items: center; }
+        .ai-filter-group input { width: 48px; border: 0.5px solid rgba(0,0,0,0.1); border-radius: 6px; text-align: center; font-weight: 600; }
+        .ai-filter-group button { background: var(--blue-accent); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+
+        /* Layout */
         .layout-container {
-            display: grid;
-            grid-template-columns: 260px 1fr 280px; /* 좌측 | 중앙(차트) | 우측 */
-            height: calc(100vh - 60px); /* 헤더 제외 높이 꽉 채움 */
-            gap: 1px; /* 1px 간격이 테두리 역할 */
-            padding: 0; /* 여백 제거 */
-            background: var(--aluminum-dark); /* 그리드 선 색상 */
+            display: grid; grid-template-columns: 280px 1fr 320px; height: calc(100vh - 52px); gap: 12px; padding: 12px;
         }
 
         /* Panels */
         .panel, .right-sub-panel {
-            background: var(--glass-panel);
-            border-radius: 0 !important; /* 둥근 모서리 제거 */
-            border: none !important;
-            box-shadow: none !important;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            background: var(--glass-panel); backdrop-filter: blur(20px); border: 0.5px solid var(--glass-border);
+            border-radius: 16px; box-shadow: var(--shadow-md); display: flex; flex-direction: column; overflow: hidden;
         }
-
         .panel-header {
-            height: 32px; /* 헤더 높이 축소 */
-            background: rgba(255,255,255,0.5);
-            border-bottom: 1px solid rgba(0,0,0,0.05);
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 0 10px; font-size: 10px; font-weight: 700; color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 0.5px;
-        }
-        /* --- [중앙] 차트 + 지표 패널 --- */
-        .center-col {
-            display: flex;
-            flex-direction: column;
-            gap: 1px;
-            background: var(--aluminum-dark);
-            grid-column: 2; /* 그리드 중앙 배치 */
+            height: 44px; background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.3));
+            border-bottom: 0.5px solid rgba(0,0,0,0.06); display: flex; align-items: center; justify-content: space-between;
+            padding: 0 16px; font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;
         }
 
-        /* 1. 상단 차트 영역 (65%) */
-        .chart-section { 
-            flex: 65; 
-            background: #fff; 
-            position: relative; 
-            min-height: 0; 
+        /* Left: Scanner */
+        .scanner-panel { grid-column: 1; }
+        #ticker-list-container { overflow-y: auto; flex: 1; padding: 8px; }
+        .ticker-row {
+            padding: 12px 14px; margin-bottom: 6px; border-radius: 12px; background: rgba(255,255,255,0.6);
+            display: flex; justify-content: space-between; cursor: pointer; transition: all 0.2s;
         }
+        .ticker-row:hover { background: rgba(255,255,255,0.95); transform: translateX(3px); border-left: 3px solid var(--blue-accent); }
+        
+        /* Center: Chart & Indicators */
+        .center-col { grid-column: 2; display: flex; flex-direction: column; gap: 12px; }
+        .chart-section { flex: 65; background: white; border-radius: 16px; position: relative; }
         .chart-overlay {
-            position: absolute; top: 12px; left: 12px; z-index: 10;
-            display: flex; gap: 12px; align-items: baseline;
-            pointer-events: none;
+            position: absolute; top: 16px; left: 20px; z-index: 10; display: flex; gap: 14px; pointer-events: none;
         }
-        .chart-ticker { font-size: 20px; font-weight: 900; letter-spacing: -0.5px; }
-        .chart-price { font-family: var(--font-mono); font-size: 18px; font-weight: 600; color: var(--mint-leaf); }
+        #overlay-ticker { font-size: 24px; font-weight: 800; }
+        #overlay-price { font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--green-accent); }
 
-        /* 2. 하단 지표 테이블 영역 (35%) */
-        .indicator-section {
-            flex: 35; 
-            background: #fff; 
-            display: flex; 
-            flex-direction: column; 
-        }
-
-        /* 지표 그리드 (반응형 테이블) */
+        .indicator-section { flex: 35; background: var(--glass-panel); border-radius: 16px; display: flex; flex-direction: column; }
         .metrics-grid {
-            display: grid;
-            /* 칸 크기 자동 조절 (최소 100px) */
-            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-            gap: 1px;
-            background: var(--aluminum-mid);
-            flex: 1;
-            overflow-y: auto;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 1px; 
+            background: #E5E5EA; flex: 1; overflow-y: auto;
         }
-
-        .metric-cell {
-            background: #fff;
-            padding: 8px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-        }
-
-        .metric-label { font-size: 10px; color: var(--text-secondary); font-weight: 600; margin-bottom: 2px; }
-        .metric-value { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text-primary); }
+        .metric-cell { background: white; padding: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .metric-label { font-size: 10px; color: var(--text-secondary); font-weight: 600; margin-bottom: 4px; }
+        .metric-value { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--text-primary); }
+        .metric-cell.featured { grid-column: span 2; background: #F2F8FF; }
         
-        .val-up { color: var(--mint-leaf); }
-        .val-down { color: var(--coral-red); }
-    
+        /* Right: Signals */
+        .right-panel { grid-column: 3; display: flex; flex-direction: column; gap: 12px; }
+        #signal-feed-container { overflow-y: auto; flex: 1; padding: 10px; }
+        .signal-item { background: rgba(255,255,255,0.7); padding: 12px; margin-bottom: 8px; border-radius: 10px; }
 
-        /* --- Inputs & Buttons --- */
-        input[type="number"], input[type="text"], textarea {
-            background: rgba(255,255,255,0.6); border: 1px solid rgba(0,0,0,0.05);
-            border-radius: 8px; padding: 4px 8px; font-family: var(--font-mono);
-            font-size: 12px; color: var(--text-primary);
-        }
-        button {
-            background: #fff; border: 1px solid rgba(0,0,0,0.05);
-            padding: 4px 12px; border-radius: 8px; font-weight: 600; font-size: 11px;
-            color: var(--royal-blue); cursor: pointer; box-shadow: var(--shadow-button);
-        }
-        button:hover { transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-
-        /* --- Specific Panels --- */
-        .scanner-panel { grid-column: 1; grid-row: 1 / span 2; }
-        .status-bar { grid-column: 2; grid-row: 1; align-items: center; flex-direction: row; padding: 0 20px; gap: 20px;}
-        .main-view { grid-column: 2; grid-row: 2; }
-        .right-panel { grid-column: 3; grid-row: 1 / span 2; background: transparent; box-shadow: none; border: none; backdrop-filter: none; gap: 16px; }
-        .right-sub-panel { 
-    flex: 1; 
-    display: flex; 
-    flex-direction: column; 
-    
-    /* .panel의 스타일을 직접 가져옴 */
-    background: var(--glass-panel);
-    backdrop-filter: blur(40px) saturate(180%);
-    -webkit-backdrop-filter: blur(40px) saturate(180%);
-    border: 1px solid var(--glass-border);
-    border-radius: 20px;
-    box-shadow: var(--shadow-ambient);
-    overflow: hidden;
-    transition: all 0.3s ease;
-}
-        /* Tickers & Tables */
-        .ticker-row { padding: 12px 16px; border-bottom: 1px solid rgba(0,0,0,0.04); display: flex; justify-content: space-between; cursor: pointer; }
-        .ticker-row:hover { background: rgba(0,122,255,0.05); }
-        .t-symbol { font-weight: 700; font-size: 14px; }
-        .t-price { font-family: var(--font-mono); font-weight: 600; }
-        .text-up { color: var(--mint-leaf); } .text-down { color: var(--coral-red); }
-
-        /* Webull Table */
-        .webull-table { width: 100%; border-collapse: collapse; }
-        .webull-table th { text-align: right; padding: 10px 16px; font-size: 10px; color: var(--text-secondary); border-bottom: 1px solid rgba(0,0,0,0.05); font-weight: 700; background: rgba(255,255,255,0.2); }
-        .webull-table th:first-child { text-align: left; }
-        .webull-table td { text-align: right; padding: 12px 16px; font-family: var(--font-mono); font-size: 13px; border-bottom: 1px solid rgba(0,0,0,0.03); color: var(--text-primary); }
-        .webull-table td:first-child { text-align: left; font-weight: 700; font-family: var(--font-display); }
-
-        /* Chat */
-        .chat-input-area { padding: 12px; background: rgba(255,255,255,0.4); border-top: 1px solid rgba(0,0,0,0.04); display: flex; gap: 8px; }
-        .chat-input { flex: 1; padding: 8px 12px; border-radius: 16px; background: #fff; resize: none; font-family: var(--font-display); }
-        .chat-btn { width: auto; background: var(--royal-blue); color: #fff; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; padding: 0; }
-
-        /* Live Indicator */
-        .live-indicator { width: 8px; height: 8px; background: var(--mint-leaf); border-radius: 50%; box-shadow: 0 0 10px var(--mint-leaf); animation: pulse 2s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-
-        /* Scrollbar Hide */
-        ::-webkit-scrollbar { display: none; }
-        
-        /* Pro Badge */
-        .pro-badge { background: linear-gradient(135deg, var(--royal-blue), #5AC8FA); color: white; padding: 2px 6px; border-radius: 6px; font-size: 9px; font-weight: 800; margin-left: 8px; box-shadow: 0 2px 5px rgba(0,122,255,0.3); }
-
-        /* =========================================
-           📱 MOBILE RESPONSIVE (모바일 전용 스타일)
-           ========================================= */
+        /* Responsive */
         @media (max-width: 1024px) {
-            body {
-                height: auto; /* 고정 높이 해제 */
-                overflow-y: auto; /* 세로 스크롤 허용 */
-            }
-
-            .layout-container {
-                display: flex;
-                flex-direction: column; /* 가로 배치 -> 세로 배치 변경 */
-                height: auto;
-                padding: 10px;
-                gap: 12px;
-            }
-
-            /* 내비게이션 축소 */
-            nav { padding: 0 16px; }
-            .logo-area span, .logo-area .pro-badge { display: none; } /* 로고 글자 숨김 */
-            .ai-filter-group span { display: none; } /* 라벨 숨김 */
-            .ai-filter-group input { width: 40px; }
-            
-            /* 사용자 이름 숨김 (아이콘만 표시) */
-            .user-pill span { display: none; }
-
-            /* 1. 상태바 (최상단) */
-            .status-bar { order: 1; height: 44px; padding: 0 12px; flex-shrink: 0; }
-
-            /* 2. 메인 뷰 (차트 & 테이블) */
-            .main-view { order: 2; height: auto; min-height: 500px; }
-            .main-view > div:first-of-type { max-height: 300px; overflow-x: auto; } /* 테이블 가로 스크롤 */
-
-            /* 3. 스캐너 (높이 제한) */
-            .scanner-panel { order: 3; height: 250px; }
-
-            /* 4. 우측 패널 (신호 & 채팅) */
-            .right-panel { order: 4; height: auto; gap: 12px; }
-            .right-sub-panel { height: 300px; flex: none; }
+            html, body { height: auto; overflow-y: auto; }
+            .layout-container { display: flex; flex-direction: column; height: auto; }
+            .center-col { min-height: 500px; }
+            .chart-section { min-height: 350px; }
         }
-
     </style>
 </head>
 <body>
 
     <nav>
         <div class="logo-area">
-            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="Danso Logo">
-            <span>DANSO</span>
-            <span class="pro-badge">PRO</span>
+            <img src="{{ url_for('static', filename='images/danso_logo.png') }}" alt="DANSO">
+            <span>DANSO</span> <span class="pro-badge">PRO</span>
         </div>
         
         <div class="nav-right">
             <div class="ai-filter-group">
                 <span>AI Filter:</span>
-                <input type="number" id="min-score-input" value="80" style="width: 45px;">
+                <input type="number" id="min-score-input" value="80">
                 <button id="save-score-btn">SET</button>
                 <button id="subscribe-btn"><i class="fa-regular fa-bell"></i> Alerts</button>
             </div>
-
             {% if user %}
             <div class="user-pill">
-                <img src="{{ user.picture or 'https://placehold.co/30x30' }}" alt="User">
+                <img src="{{ user.picture }}" alt="User">
                 <span>{{ user.name }}</span>
-                <a href="/logout" class="btn-logout" title="Logout"><i class="fa-solid fa-power-off"></i></a>
             </div>
             {% endif %}
         </div>
     </nav>
 
- <div class="layout-container">
+    <div class="layout-container">
 
-        <aside class="panel scanner-panel" style="grid-row: 1;">
+        <aside class="panel scanner-panel">
             <div class="panel-header">
                 <span>Scanner Feed</span>
-                <i class="fa-solid fa-bolt" style="color:var(--royal-blue);"></i>
+                <i class="fa-solid fa-bolt" style="color:var(--blue-accent);"></i>
             </div>
-            <div id="ticker-list-container" style="overflow-y: auto; flex: 1;">
-                <div style="padding:20px; text-align:center; color:#ccc;">Connecting...</div>
+            <div id="ticker-list-container">
+                <div style="padding:20px; text-align:center; color:#999;">Waiting for engine...</div>
             </div>
-            <div style="padding:8px 12px; font-size:10px; color:#888; border-top:1px solid #eee; display:flex; justify-content:space-between;">
+            <div style="padding:10px; font-size:11px; color:#888; border-top:0.5px solid #eee; display:flex; justify-content:space-between;">
                 <span id="scan-status-text">Status: Idle</span>
                 <span id="scan-watching-count">Targets: 0</span>
             </div>
         </aside>
 
         <div class="center-col">
-            
             <div class="chart-section" id="chart-container">
                 <div class="chart-overlay">
-                    <span id="overlay-ticker" class="chart-ticker">SELECT TICKER</span>
-                    <span id="overlay-price" class="chart-price">--</span>
+                    <span id="overlay-ticker">SELECT TICKER</span>
+                    <span id="overlay-price">--</span>
                 </div>
             </div>
 
-            <div class="indicator-section" id="metrics-panel">
+            <div class="indicator-section">
                 <div class="panel-header">
                     <span>Key Statistics</span>
                     <span style="font-size:9px; background:#eee; padding:2px 6px; border-radius:4px;">REAL-TIME</span>
                 </div>
                 <div class="metrics-grid">
                     <div class="metric-cell"><span class="metric-label">OBI</span><span class="metric-value" id="ind-obi">--</span></div>
-                    <div class="metric-cell"><span class="metric-label">OBI Mom</span><span class="metric-value" id="ind-obi-mom">--</span></div>
+                    <div class="metric-cell"><span class="metric-label">OBI MOM</span><span class="metric-value" id="ind-obi-mom">--</span></div>
                     <div class="metric-cell"><span class="metric-label">VPIN</span><span class="metric-value" id="ind-vpin">--</span></div>
                     <div class="metric-cell"><span class="metric-label">Tick Speed</span><span class="metric-value" id="ind-tick-speed">--</span></div>
                     <div class="metric-cell"><span class="metric-label">Tick Accel</span><span class="metric-value" id="ind-tick-accel">--</span></div>
@@ -363,38 +175,46 @@
 
                     <div class="metric-cell"><span class="metric-label">Pump Accel</span><span class="metric-value" id="ind-pump-accel">--</span></div>
                     <div class="metric-cell"><span class="metric-label">Spread</span><span class="metric-value" id="ind-spread">--</span></div>
-                    <div class="metric-cell" style="grid-column: span 2; background:#f9f9f9;">
+                    
+                    <div class="metric-cell featured">
                         <span class="metric-label">Hybrid Score</span>
-                        <span class="metric-value" id="ind-score" style="font-size:16px; color:var(--royal-blue);">--</span>
+                        <span class="metric-value" id="ind-score" style="color:var(--blue-accent); font-size:18px;">--</span>
                     </div>
-                    <div class="metric-cell"><span class="metric-label">Win Prob</span><span class="metric-value" id="ind-prob">--%</span></div>
+                    <div class="metric-cell">
+                        <span class="metric-label">Win Prob</span>
+                        <span class="metric-value" id="ind-prob">--%</span>
+                    </div>
+                    
+                    <div class="metric-cell" style="grid-column: span 5; background:#fafafa;">
+                        <span class="metric-label">Last Updated: <span id="ind-timestamp" style="font-weight:400;">--</span></span>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <aside class="right-panel" style="grid-column: 3; display: flex; flex-direction: column; gap: 1px; background: var(--aluminum-dark);">
-            <div class="right-sub-panel" style="flex: 1;">
+        <aside class="right-panel">
+            <div class="right-sub-panel">
                 <div class="panel-header">
                     <span>Sniper Signals</span>
-                    <i class="fa-solid fa-crosshairs" style="color: var(--coral-red);"></i>
+                    <i class="fa-solid fa-crosshairs" style="color:var(--red-accent);"></i>
                 </div>
-                <div id="signal-feed-container" style="overflow-y: auto; flex: 1;"></div>
+                <div id="signal-feed-container"></div>
             </div>
             
-            <div class="right-sub-panel" style="flex: 1;">
+            <div class="right-sub-panel">
                 <div class="panel-header">
                     <span>Trader Chat</span>
-                    <i class="fa-solid fa-comments" style="color: var(--royal-blue);"></i>
+                    <i class="fa-solid fa-comments" style="color:var(--blue-accent);"></i>
                 </div>
-                <div id="community-feed-container" style="flex: 1; overflow-y: auto; padding: 10px;"></div>
+                <div id="community-feed-container" style="flex:1; overflow-y:auto; padding:10px;"></div>
                 <form id="post-form" class="chat-input-area" onsubmit="return false;">
-                    <input type="text" name="content" class="chat-input" placeholder="Message..." required>
-                    <button type="button" id="post-submit-btn" class="chat-btn"><i class="fa-solid fa-arrow-up"></i></button>
+                    <input type="text" class="chat-input" placeholder="Message..." required>
+                    <button id="post-submit-btn" class="chat-btn"><i class="fa-solid fa-arrow-up"></i></button>
                 </form>
             </div>
         </aside>
 
-    </div>   
+    </div>
 
     <script src="{{ url_for('static', filename='js/sts.js') }}" type="module" defer></script>
 

@@ -25,15 +25,15 @@ window.currentFCMToken = null;
 let chart = null;
 let candleSeries = null;
 let currentTicker = null;
-let marketDataMap = {}; // 실시간 데이터를 저장해두는 맵
+let marketDataMap = {}; // Stores real-time data for quick access
 
-// Webull 스타일 HTML ID 매핑 (HTML 수정본과 일치)
+// Map HTML IDs from your Webull-style layout
 const els = {
     scannerList: document.getElementById('ticker-list-container'),
     chartContainer: document.getElementById('chart-container'),
     signals: document.getElementById('signal-feed-container'),
     
-    // Status
+    // Status Bar
     statusText: document.getElementById('scan-status-text'),
     countText: document.getElementById('scan-watching-count'),
     
@@ -73,24 +73,29 @@ async function updateDashboard() {
         const data = await res.json();
         if (!data || !data.targets) return;
 
-        // 1. 데이터 맵핑 저장 (클릭 시 즉시 로딩용)
+        // 1. Store data mapping for instant access on click
         data.targets.forEach(t => {
             marketDataMap[t.ticker] = t;
         });
 
-        // 2. 좌측 스캐너 리스트 렌더링
+        // 2. Render Left Scanner List
         renderScannerList(data.targets);
         
-        // 3. 현재 보고 있는 종목 실시간 갱신
+        // 3. Auto-select first ticker if none selected
+        if (!currentTicker && data.targets.length > 0) {
+            selectTicker(data.targets[0].ticker);
+        }
+        
+        // 4. Update Bottom Panel for current ticker
         if (currentTicker && marketDataMap[currentTicker]) {
             updateKeyStats(marketDataMap[currentTicker]);
         }
 
-        // 4. 상태 텍스트
+        // 5. Update Status Text
         if(els.statusText) els.statusText.innerText = "Active (V9.3)";
         if(els.countText) els.countText.innerText = `${data.targets.length} Targets`;
 
-        // 5. 시그널 로그
+        // 6. Render Signals Log
         if (data.logs) renderSignals(data.logs);
 
     } catch (e) {
@@ -108,72 +113,66 @@ function renderScannerList(targets) {
     }
 
     targets.forEach(item => {
-        // AI Score 또는 Prob 사용
-        const score = Math.round(item.ai_score || item.ai_prob || 0);
+        const score = Math.round(item.ai_score || 0);
         const price = parseFloat(item.price).toFixed(2);
-        const isActive = (item.ticker === currentTicker) ? 'background:#EBF5FF; border-left:3px solid #007AFF;' : '';
+        // Highlight active ticker
+        const isActive = (item.ticker === currentTicker) ? 'background:rgba(0,122,255,0.1); border-left:3px solid #007AFF;' : '';
 
         const html = `
-            <div class="ticker-row" style="${isActive}; cursor:pointer; padding:10px; border-bottom:1px solid #eee;" onclick="selectTicker('${item.ticker}')">
+            <div class="ticker-row" style="${isActive}; cursor:pointer; padding:10px 12px; border-bottom:1px solid #eee; transition: background 0.2s;" onclick="selectTicker('${item.ticker}')">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
-                        <div style="font-weight:800; font-size:14px;">${item.ticker}</div>
-                        <div style="font-size:10px; color:#666;">Score <span style="font-weight:bold; color:${score>=80?'#007AFF':'#333'}">${score}</span></div>
+                        <div class="t-sym" style="font-weight:800; font-size:14px; color:#1D1D1F;">${item.ticker}</div>
+                        <div class="t-sub" style="font-size:10px; color:#86868B;">Score <span style="font-weight:bold; color:${score>=80?'#007AFF':'#333'}">${score}</span></div>
                     </div>
-                    <div style="font-family:'JetBrains Mono'; font-weight:600;">$${price}</div>
+                    <div class="t-price" style="font-family:'JetBrains Mono'; font-weight:600; font-size:13px; color:#1D1D1F;">$${price}</div>
                 </div>
             </div>`;
         els.scannerList.insertAdjacentHTML('beforeend', html);
     });
 }
 
-// 🔥 [핵심] 하단 Webull 패널 데이터 채우기
+// 🔥 [CORE] Populate Webull-style Bottom Panel
 function updateKeyStats(data) {
-    // 1. Chart Overlay
+    // 1. Update Chart Overlay
     if(els.overlayTicker) els.overlayTicker.innerText = data.ticker;
     if(els.overlayPrice) els.overlayPrice.innerText = `$${parseFloat(data.price).toFixed(2)}`;
 
-    // 2. Helper for formatting
-    const fmt = (val, fixed=2) => val ? parseFloat(val).toFixed(fixed) : '--';
+    // 2. Helper formatters
+    const fmt = (val, fixed=2) => val !== undefined && val !== null ? parseFloat(val).toFixed(fixed) : '--';
     const color = (val) => parseFloat(val) > 0 ? '#34C759' : (parseFloat(val) < 0 ? '#FF3B30' : '#333');
 
-    // 3. Fill Data Grid
-    if(els.indObi) {
-        els.indObi.innerText = fmt(data.obi);
-        els.indObi.style.color = color(data.obi);
-    }
-    if(els.indObiMom) els.indObiMom.innerText = fmt(data.obi_mom); // DB에 컬럼 있는지 확인 필요 (없으면 0)
+    // 3. Inject Data into Grid Cells
+    if(els.indObi) { els.indObi.innerText = fmt(data.obi); els.indObi.style.color = color(data.obi); }
+    if(els.indObiMom) { els.indObiMom.innerText = fmt(data.obi_mom); els.indObiMom.style.color = color(data.obi_mom); }
     
-    if(els.indVpin) {
-        els.indVpin.innerText = fmt(data.vpin);
-        els.indVpin.style.color = data.vpin > 0.8 ? '#FF3B30' : '#333';
+    if(els.indVpin) { 
+        els.indVpin.innerText = fmt(data.vpin); 
+        els.indVpin.style.color = parseFloat(data.vpin) > 0.8 ? '#FF3B30' : '#333'; 
     }
     
     if(els.indTickSpeed) els.indTickSpeed.innerText = data.tick_speed || '0';
-    if(els.indTickAccel) {
-        // 틱 가속도는 DB 컬럼 추가 안 했으면 계산된 값 없을 수 있음 -> 일단 패스하거나 0
-        els.indTickAccel.innerText = '0'; 
-    }
-
-    if(els.indVwapDist) {
-        els.indVwapDist.innerText = fmt(data.vwap_dist) + '%';
-        els.indVwapDist.style.color = color(data.vwap_dist);
-    }
+    if(els.indTickAccel) { els.indTickAccel.innerText = fmt(data.tick_accel, 1); els.indTickAccel.style.color = color(data.tick_accel); }
     
-    // DB에 저장되지 않는 실시간 계산 값들은 일단 화면엔 표시하되 데이터가 없으면 '--' 처리
-    if(els.indVwapSlope) els.indVwapSlope.innerText = '--'; 
-    if(els.indSqueeze) els.indSqueeze.innerText = '--';
-    if(els.indRvol) els.indRvol.innerText = '--';
+    if(els.indVwapDist) { els.indVwapDist.innerText = fmt(data.vwap_dist) + '%'; els.indVwapDist.style.color = color(data.vwap_dist); }
+    if(els.indVwapSlope) { els.indVwapSlope.innerText = fmt(data.vwap_slope, 1); els.indVwapSlope.style.color = color(data.vwap_slope); }
+    if(els.indSqueeze) els.indSqueeze.innerText = fmt(data.squeeze_ratio);
+    if(els.indRvol) { 
+        els.indRvol.innerText = fmt(data.rvol, 1) + 'x'; 
+        els.indRvol.style.fontWeight = parseFloat(data.rvol) > 3 ? '800' : '400'; 
+    }
+    if(els.indAtr) els.indAtr.innerText = fmt(data.atr, 3);
     
-    // ATR, Spread 등은 DB에 없으면 표시 불가. (엔진 업그레이드 시 DB 컬럼도 늘려야 함)
-    // 하지만 현재는 주요 지표(Score, Price, OBI, VPIN) 위주로 표시
+    if(els.indPumpAccel) { els.indPumpAccel.innerText = fmt(data.pump_accel) + '%'; els.indPumpAccel.style.color = color(data.pump_accel); }
+    if(els.indSpread) els.indSpread.innerText = fmt(data.spread) + '%';
     
     if(els.indScore) {
-        const score = Math.round(data.ai_score || 0);
-        els.indScore.innerText = score;
-        els.indScore.style.color = score >= 80 ? '#007AFF' : '#333';
+        const s = Math.round(data.ai_score || 0);
+        els.indScore.innerText = s;
+        els.indScore.style.color = s >= 80 ? '#007AFF' : '#333'; // Blue for Elite
         
-        if(els.indProb) els.indProb.innerText = `${Math.min(99, Math.round(score * 0.95))}%`;
+        // Calculate Win Probability based on score
+        if(els.indProb) els.indProb.innerText = s >= 60 ? `${Math.min(99, Math.round(s*0.95))}%` : '--';
     }
     
     if(els.indTimestamp) els.indTimestamp.innerText = new Date().toLocaleTimeString();
@@ -184,14 +183,14 @@ function renderSignals(logs) {
     els.signals.innerHTML = '';
     logs.forEach(log => {
         const html = `
-            <div style="padding:10px; border-bottom:1px solid #eee;">
+            <div style="padding:10px; border-bottom:1px solid #eee; transition: background 0.2s;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="background:#34c759; color:white; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY</span>
+                    <span style="background:rgba(52, 199, 89, 0.15); color:#34C759; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY</span>
                     <span style="font-size:10px; color:#999;">${log.timestamp.split(' ')[1] || log.timestamp}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-weight:bold;">${log.ticker}</span>
-                    <span style="font-family:'JetBrains Mono';">$${log.price}</span>
+                    <span style="font-weight:bold; color:#1D1D1F;">${log.ticker}</span>
+                    <span style="font-family:'JetBrains Mono'; font-size:13px;">$${parseFloat(log.price).toFixed(2)}</span>
                 </div>
             </div>`;
         els.signals.insertAdjacentHTML('beforeend', html);
@@ -202,36 +201,38 @@ function renderSignals(logs) {
    PART 3. CHART ENGINE
    ========================================================================== */
 
-// 전역 함수 등록
+// Make accessible to HTML
 window.selectTicker = async function(ticker) {
     currentTicker = ticker;
-    // 1. 데이터 있으면 즉시 패널 갱신
+    // 1. Instant update if data exists
     if (marketDataMap[ticker]) updateKeyStats(marketDataMap[ticker]);
-    // 2. 차트 로드
+    // 2. Load chart
     await loadChart(ticker);
 }
 
 async function loadChart(ticker) {
     if (!els.chartContainer) return;
     
+    // Reset Chart
     if (chart) { chart.remove(); chart = null; }
     els.chartContainer.innerHTML = ''; 
     
-    // 오버레이 복구
+    // Restore Overlay
     const overlayHTML = `
-        <div class="chart-overlay" style="position:absolute; top:12px; left:12px; z-index:10; display:flex; gap:10px; align-items:baseline; pointer-events:none;">
-            <span id="overlay-ticker" style="font-size:20px; font-weight:900; color:#000;">${ticker}</span>
+        <div class="chart-overlay" style="position:absolute; top:12px; left:16px; z-index:10; display:flex; gap:10px; align-items:baseline; pointer-events:none;">
+            <span id="overlay-ticker" style="font-size:20px; font-weight:900; letter-spacing:-0.5px; color:#000;">${ticker}</span>
             <span id="overlay-price" style="font-family:'JetBrains Mono'; font-size:18px; font-weight:600; color:#34C759;">Loading...</span>
         </div>`;
     els.chartContainer.insertAdjacentHTML('afterbegin', overlayHTML);
     els.overlayTicker = document.getElementById('overlay-ticker');
     els.overlayPrice = document.getElementById('overlay-price');
 
+    // Create Chart
     chart = createChart(els.chartContainer, {
         width: els.chartContainer.clientWidth,
         height: els.chartContainer.clientHeight || 350,
         layout: { background: { color: '#ffffff' }, textColor: '#333' },
-        grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
+        grid: { vertLines: { color: 'rgba(0,0,0,0.05)' }, horzLines: { color: 'rgba(0,0,0,0.05)' } },
         rightPriceScale: { borderColor: '#e1e1e1' },
         timeScale: { borderColor: '#e1e1e1', timeVisible: true, secondsVisible: false },
         crosshair: { mode: 1 } 
@@ -242,20 +243,26 @@ async function loadChart(ticker) {
     });
 
     try {
-        // 실제 데이터 연동 (API가 없으면 더미 데이터 사용)
         const res = await fetch(`/api/chart_data/${ticker}`);
         if(res.ok) {
             const json = await res.json();
-            if(json.status === 'OK') candleSeries.setData(json.results);
+            if(json.status === 'OK') {
+                candleSeries.setData(json.results);
+            }
         } else {
-            // Fallback Dummy Data (데모용)
+            // Fallback for demo
             candleSeries.setData(generateDummyData());
         }
         chart.timeScale().fitContent();
         
-        window.addEventListener('resize', () => {
-            if(chart) chart.applyOptions({ width: els.chartContainer.clientWidth, height: els.chartContainer.clientHeight });
+        // Responsive resize
+        const resizeObserver = new ResizeObserver(entries => {
+            if (entries.length === 0 || entries[0].target !== els.chartContainer) { return; }
+            const newRect = entries[0].contentRect;
+            chart.applyOptions({ width: newRect.width, height: newRect.height });
         });
+        resizeObserver.observe(els.chartContainer);
+        
     } catch(e) { console.error(e); }
 }
 
@@ -279,7 +286,7 @@ function generateDummyData() {
 // PART 4. INIT & FCM
 // ==========================================================================
 
-setInterval(updateDashboard, 1000); 
+setInterval(updateDashboard, 1000); // 1-second polling
 updateDashboard();
 
 document.addEventListener('DOMContentLoaded', () => {
