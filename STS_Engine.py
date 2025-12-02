@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor # [V5.3] 추가
 import firebase_admin
 from firebase_admin import credentials, messaging
 import traceback
+import pytz
 # 커스텀 지표 모듈 임포트
 import indicators_sts as ind 
 
@@ -33,19 +34,19 @@ WS_URI = "wss://socket.polygon.io/stocks"
 STS_TARGET_COUNT = 3
 STS_MIN_VOLUME_DOLLAR = 1e6
 STS_MAX_SPREAD_PCT = 1.0      
-STS_MAX_VPIN = 0.65           # [V5.3] 필터 완화 (0.55 -> 0.65)
+STS_MAX_VPIN = 0.80         # [V5.3] 필터 완화 (0.55 -> 0.65)
 OBI_LEVELS = 20               # [V5.3] 오더북 깊이 확장 (5 -> 20)
 
 # 후보 선정(Target Selector) 필터 기준
 STS_MIN_DOLLAR_VOL = 200000  # 최소 거래대금 $300k (약 4억원)
 STS_MAX_PRICE = 50.0         # 최대 가격 $30 (저가주 집중)
-STS_MIN_RVOL = 1.5           # (SniperBot 단계) 최소 상대 거래량
+STS_MIN_RVOL = 3.0           # (SniperBot 단계) 최소 상대 거래량
 STS_MAX_SPREAD_ENTRY = 0.9   # (SniperBot 단계) 진입 허용 스프레드
 
 # AI & Risk Params
 MODEL_FILE = "sts_xgboost_model.json"
 AI_PROB_THRESHOLD = 0.85      
-ATR_TRAIL_MULT = 1.5          
+ATR_TRAIL_MULT = 1.5        
 HARD_STOP_PCT = 0.015         
 
 # Logging
@@ -56,7 +57,12 @@ REPLAY_LOG_FILE = "sts_replay_data_v5.csv"
 DB_UPDATE_INTERVAL = 3.0      # 3초
 GC_INTERVAL = 300             
 GC_TTL = 600                  
-THREAD_POOL = ThreadPoolExecutor(max_workers=3) # [V5.3] 알림 전송용 풀
+
+# [변경] 기존 단일 풀(max=3)을 폐기하고 용도별로 분리
+# DB 작업용 (빠르고 빈번함) -> 10개 레인
+DB_WORKER_POOL = ThreadPoolExecutor(max_workers=10) 
+# 알림 발송용 (느리고 가끔 발생) -> 5개 레인
+NOTI_WORKER_POOL = ThreadPoolExecutor(max_workers=5)
 
 # Global DB Pool
 db_pool = None
@@ -71,8 +77,8 @@ def init_db():
     try:
         if db_pool is None:
             # 봇용 연결 1개 (최적화)
-            db_pool = psycopg2.pool.SimpleConnectionPool(2, 5, dsn=DATABASE_URL)
-            print("✅ [DB] Connection Pool Initialized (Limit: 1)")
+            db_pool = psycopg2.pool.SimpleConnectionPool(5, 20, dsn=DATABASE_URL)
+            print("✅ [DB] Connection Pool Initialized (Limit: 20)")
             
         conn = db_pool.getconn()
         cursor = conn.cursor()
@@ -116,6 +122,16 @@ def init_db():
             conn.commit()
         except psycopg2.Error:
             conn.rollback()
+        # [Phase 3] DB 스키마 확장 (Entry, TP, SL, Strategy 컬럼 추가)
+        try:
+            cursor.execute("ALTER TABLE signals ADD COLUMN entry REAL")
+            cursor.execute("ALTER TABLE signals ADD COLUMN tp REAL")
+            cursor.execute("ALTER TABLE signals ADD COLUMN sl REAL")
+            cursor.execute("ALTER TABLE signals ADD COLUMN strategy TEXT")
+            conn.commit()
+            print("✅ [DB] signals 테이블 컬럼 확장 완료 (entry, tp, sl, strategy)")
+        except psycopg2.Error:
+            conn.rollback() # 이미 컬럼이 있으면 패스    
             
         cursor.close()
         db_pool.putconn(conn)
@@ -199,25 +215,33 @@ def update_dashboard_db(ticker, metrics, score, status):
     finally:
         if conn: db_pool.putconn(conn)
 
-def log_signal_to_db(ticker, price, score):
-    """[V5.3] Score 포함 저장"""
+# [수정] 상세 매매 전략을 DB에 기록
+def log_signal_to_db(ticker, price, score, entry=0, tp=0, sl=0, strategy=""):
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO signals (ticker, price, score, time) VALUES (%s, %s, %s, %s)", 
-                       (ticker, price, float(score), datetime.now()))
+        
+        # 컬럼이 늘어난 버전에 맞춰 Insert
+        query = """
+            INSERT INTO signals (ticker, price, score, entry, tp, sl, strategy, time) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(query, (
+            ticker, float(price), float(score), 
+            float(entry), float(tp), float(sl), 
+            strategy, datetime.now()
+        ))
         conn.commit()
         cursor.close()
     except Exception as e:
-        # print(f"❌ [DB Signal Error] {e}")
+        print(f"❌ [DB Signal Error] {e}", flush=True)
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)
 
-# --- FCM Sending Logic ---
+# [수정] 알림 디자인 고도화 (이모지 & 손익비 표시)
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
-    """[V5.3] ThreadPoolExecutor에서 실행될 동기 함수"""
     if not firebase_admin._apps: return
 
     conn = None
@@ -232,19 +256,40 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             db_pool.putconn(conn)
             return
 
-        # 알림 내용 구성
-        noti_title = f"💎 {ticker} SIGNAL (SCORE {probability_score})"
-        if entry and tp and sl:
-            noti_body = f"진입: ${entry:.4f} | 익절: ${tp:.4f} | 손절: ${sl:.4f}"
+        # 1. 점수별 티어 이모지 설정
+        if probability_score >= 90:
+            icon = "💎 ELITE"
+        elif probability_score >= 80:
+            icon = "🔥 HOT"
         else:
-            noti_body = f"현재가: ${price:.4f} | AI 점수: {probability_score}점"
+            icon = "✅ VALID"
 
+        # 2. 알림 제목 구성
+        noti_title = f"{icon} {ticker} 포착! (점수: {probability_score})"
+
+        # 3. 알림 본문 구성 (전략 유무에 따라 다르게)
+        if entry and tp and sl:
+            # 손익비 계산
+            risk = entry - sl
+            reward = tp - entry
+            rr = reward / risk if risk > 0 else 0
+            
+            noti_body = (
+                f"Entry: ${entry:.3f}\n"
+                f"🎯 TP: ${tp:.3f} | 🛡️ SL: ${sl:.3f}\n"
+                f"⚖️ 손익비 1:{rr:.1f}"
+            )
+        else:
+            noti_body = f"현재가: ${price:.4f} | AI 확신도: {probability_score}%"
+
+        # 4. 데이터 페이로드
         data_payload = {
-            'type': 'hybrid_signal', 'ticker': ticker, 'price': str(price),
-            'score': str(probability_score), 'title': noti_title, 'body': noti_body,
-            'entry': str(entry) if entry else "", 'tp': str(tp) if tp else "", 'sl': str(sl) if sl else ""
+            'type': 'signal', 'ticker': ticker, 
+            'price': str(price), 'score': str(probability_score), 
+            'title': noti_title, 'body': noti_body
         }
         
+        # 5. 전송 로직 (기존과 동일하지만 안정성 강화)
         failed_tokens = []
         for row in subscribers:
             token = row[0]
@@ -258,7 +303,12 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                     data=data_payload,
                     android=messaging.AndroidConfig(
                         priority='high', 
-                        notification=messaging.AndroidNotification(channel_id='high_importance_channel', priority='high', default_sound=True, visibility='public')
+                        notification=messaging.AndroidNotification(
+                            channel_id='high_importance_channel', 
+                            priority='high', 
+                            default_sound=True, 
+                            visibility='public'
+                        )
                     ),
                     apns=messaging.APNSConfig(
                         payload=messaging.APNSPayload(aps=messaging.Aps(alert=messaging.ApsAlert(title=noti_title, body=noti_body), sound="default"))
@@ -266,7 +316,9 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                 )
                 messaging.send(message)
             except Exception as e:
-                if "Requested entity was not found" in str(e): failed_tokens.append(token)
+                # 토큰 만료 에러 등은 삭제 대상에 추가
+                if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e): 
+                    failed_tokens.append(token)
         
         if failed_tokens:
             c = conn.cursor()
@@ -274,17 +326,21 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             conn.commit()
             c.close()
 
-    except Exception:
+    except Exception as e:
+        print(f"❌ [FCM Error] {e}", flush=True)
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)
 
 async def send_fcm_notification(ticker, price, probability_score, entry=None, tp=None, sl=None):
-    """[V5.3] ThreadPoolExecutor 사용"""
+    """[V9.2] 알림 전용 쓰레드 풀 사용"""
     loop = asyncio.get_running_loop()
-    # THREAD_POOL 사용으로 메인 루프 블로킹 방지
-    await loop.run_in_executor(THREAD_POOL, partial(_send_fcm_sync, ticker, price, probability_score, entry, tp, sl))
-
+    
+    # [수정] NOTI_WORKER_POOL 사용
+    await loop.run_in_executor(
+        NOTI_WORKER_POOL, 
+        partial(_send_fcm_sync, ticker, price, probability_score, entry, tp, sl)
+    )
 
 # ==============================================================================
 # 3. CORE CLASSES (Analyzer, Selector, Bot)
@@ -382,81 +438,142 @@ class MicrostructureAnalyzer:
         df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
         df_res = df_res.ffill().fillna(0)
         return df_res.dropna()
-
     def get_metrics(self):
-        # 1. 틱이 너무 적으면(5개 미만) 아예 계산 포기 (정상)
+        # 1. 데이터 검증 (최소 5개 틱 필요)
         if len(self.raw_ticks) < 5: return None
         
+        # 2. DataFrame 생성 (여기서 df가 처음 만들어짐)
         df = pd.DataFrame(self.raw_ticks).set_index('t')
+        
+        # 1초봉 리샘플링
         ohlcv = df['p'].resample('1s').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'})
         volume = df['s'].resample('1s').sum()
         tick_count = df['s'].resample('1s').count()
         
+        # 데이터 합치기
         df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
         df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
         
-        # [중요] 거래 없는 시간은 직전 가격 유지
+        # 결측치 채우기 (ffill -> fillna)
         df = df_res.ffill().fillna(0)
         
-        # 보정 후에도 데이터가 5개 미만이면 리턴
+        # 다시 한번 검증
         if len(df) < 5: return None 
         
         try:
-            # [수정됨] 여기서부터 들여쓰기가 한 칸 더 들어가야 합니다!
-            df['vwap'] = ind.compute_intraday_vwap_series(df, 'close', 'volume')
-            df['fibo_pos'] = ind.compute_fibo_pos(df['high'], df['low'], df['close'], lookback=600)
-            _, df['bb_width_norm'], df['squeeze_flag'] = ind.compute_bb_squeeze(df['close'], window=20, mult=2, norm_window=300)
-            df['rv_60'] = ind.compute_rv_60(df['close'])
-            df['vol_ratio_60'] = ind.compute_vol_ratio_60(df['volume'])
+            # --- [Phase 5] 윈도우 사이즈 설정 ---
+            WIN_MAIN = 60      # 1분
+            WIN_SQZ = 30       # 30초
+            WIN_SLOPE = 5      # 5초
+
+            # --- [지표 계산 시작] ---
+            
+            # 1. VWAP 계산
+            v = df['volume'].values
+            p = df['close'].values
+            df['vwap'] = (p * v).cumsum() / v.cumsum()
+            df['vwap'] = df['vwap'].ffill() 
+            
+            # 2. VWAP 기울기
+            df['vwap_slope'] = (df['vwap'].diff(WIN_SLOPE) / (df['vwap'].shift(WIN_SLOPE) + 1e-9)) * 10000
+            
+            # 3. RVOL (상대 거래량)
+            df['vol_ma'] = df['volume'].rolling(WIN_MAIN).mean()
+            df['rvol'] = df['volume'] / (df['vol_ma'] + 1e-9)
+            
+            # 4. Squeeze (볼린저 밴드)
+            rolling_mean = df['close'].rolling(WIN_SQZ).mean()
+            rolling_std = df['close'].rolling(WIN_SQZ).std()
+            df['bb_width'] = (rolling_std * 4) / df['close']
+            df['squeeze_ratio'] = df['bb_width'] / (df['bb_width'].rolling(WIN_SQZ).mean() + 1e-9)
+            
+            # 5. Pump Accel (가속도)
+            df['pump_5m'] = df['close'].pct_change(300)
+            df['pump_accel'] = df['pump_5m'].diff(60)
+            
+            # 6. Tick Accel (틱 속도 변화량)
             df['tick_accel'] = df['tick_speed'].diff().fillna(0)
+
+            # 7. ATR (변동성)
+            prev_close = df['close'].shift(1)
+            tr1 = df['high'] - df['low']
+            tr2 = (df['high'] - prev_close).abs()
+            tr3 = (df['low'] - prev_close).abs()
+            df['tr'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            df['atr'] = df['tr'].rolling(WIN_MAIN).mean()
             
-            # NaN을 0으로 채움 (AI 입력 오류 방지)
+            # --- [Phase 8: AI용 추가 지표 복구] ---
+            
+            # 8. RV_60 (실현 변동성)
+            log_ret = np.log(df['close'] / df['close'].shift(1))
+            df['rv_60'] = log_ret.rolling(60).std() * np.sqrt(60) * 100
+
+            # 9. Fibo Pos (위치값)
+            rolling_high = df['high'].rolling(600).max()
+            rolling_low = df['low'].rolling(600).min()
+            rng = rolling_high - rolling_low
+            df['fibo_pos'] = (df['close'] - rolling_low) / (rng + 1e-9)
+            
+            # NaN 제거 및 마지막 값 추출
             df = df.fillna(0)
-
             last = df.iloc[-1]
-            raw_df = pd.DataFrame(list(self.raw_ticks)[-100:]) 
-            
-            if len(raw_df) < 1: return None 
 
-            signs = [ind.classify_trade_sign(r.p, r.bid, r.ask) for r in raw_df.itertuples()]
-            signed_vol = raw_df['s'].values * np.array(signs)
-            vpin = ind.compute_vpin(signed_vol)
-            
+            # --- [OBI & VPIN 계산] ---
             bids = np.array([q['s'] for q in self.quotes.get('bids', [])[:OBI_LEVELS]])
             asks = np.array([q['s'] for q in self.quotes.get('asks', [])[:OBI_LEVELS]])
-            obi = ind.compute_order_book_imbalance(bids, asks)
+            bid_vol = np.sum(bids) if len(bids) > 0 else 0
+            ask_vol = np.sum(asks) if len(asks) > 0 else 0
+            obi = (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0
             
             obi_mom = obi - self.prev_obi
             self.prev_obi = obi
             
+            # VPIN (100틱 샘플링)
+            raw_df = pd.DataFrame(list(self.raw_ticks)[-100:])
+            if not raw_df.empty:
+                buy_vol = raw_df[raw_df['p'] >= raw_df['ask']]['s'].sum()
+                sell_vol = raw_df[raw_df['p'] <= raw_df['bid']]['s'].sum()
+                total_vol = buy_vol + sell_vol
+                vpin = abs(buy_vol - sell_vol) / total_vol if total_vol > 0 else 0
+            else:
+                vpin = 0
+
+            # VWAP 거리 & 스프레드
             vwap_dist = (last['close'] - last['vwap']) / last['vwap'] * 100 if last['vwap'] > 0 else 0
             
             best_bid = self.raw_ticks[-1]['bid']
             best_ask = self.raw_ticks[-1]['ask']
-            # 0 나누기 방지
-            if best_bid > 0:
-                spread = (best_ask - best_bid) / best_bid * 100 
-            else:
-                spread = 0
+            spread = (best_ask - best_bid) / best_bid * 100 if best_bid > 0 else 0
 
+            # --- [최종 리턴] ---
             return {
-                'obi': obi, 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'],
-                'vpin': vpin, 'vwap_dist': vwap_dist,
-                'fibo_pos': last['fibo_pos'], 
-                'fibo_dist_382': abs(last['fibo_pos'] - 0.382),
-                'fibo_dist_618': abs(last['fibo_pos'] - 0.618),
-                'bb_width_norm': last['bb_width_norm'], 'squeeze_flag': last['squeeze_flag'],
-                'rv_60': last['rv_60'], 'vol_ratio_60': last['vol_ratio_60'],
-                'spread': spread, 'last_price': last['close'], 'tick_speed': last['tick_speed'], 
-                'timestamp': raw_df.iloc[-1]['t'], 'vwap': last['vwap']
+                'obi': obi, 
+                'obi_mom': obi_mom, 
+                'tick_accel': last['tick_accel'],
+                'vpin': vpin, 
+                'vwap_dist': vwap_dist,
+                'vwap_slope': last['vwap_slope'],
+                'rvol': last['rvol'],
+                'squeeze_ratio': last['squeeze_ratio'],
+                'pump_accel': last['pump_accel'],
+                'atr': last['atr'] if last['atr'] > 0 else last['close'] * 0.005,
+                'spread': spread, 
+                'last_price': last['close'], 
+                'tick_speed': last['tick_speed'], 
+                'timestamp': raw_df.iloc[-1]['t'] if not raw_df.empty else pd.Timestamp.now(), 
+                'vwap': last['vwap'],
+                
+                # AI용 추가 지표
+                'rv_60': last['rv_60'],
+                'fibo_pos': last['fibo_pos'],
+                'bb_width_norm': last['squeeze_ratio']
             }
+            
         except Exception as e:
-            # 🔥 [긴급 수정] 주석 해제하고 에러를 출력하게 변경!
             import traceback
-            print(f"❌ [Metric Calc Error] {self.ticker if hasattr(self, 'ticker') else 'Unknown'}: {e}", flush=True)
-            traceback.print_exc() # 에러가 난 줄번호까지 추적
+            # print(f"❌ [Metric Calc Error] {e}", flush=True) # 너무 시끄러우면 주석 처리
             return None
-
+    
 class TargetSelector:
     def __init__(self):
         self.snapshots = {} 
@@ -593,102 +710,127 @@ class SniperBot:
         self.prob_history = deque(maxlen=5)
         self.last_db_update = 0
         self.last_logged_state = "WATCHING"
+        # [추가] Phase 2-2: 마이크로 테스트용 타이머
+        self.aiming_start_time = 0
+        self.aiming_start_price = 0
+
+        # [추가] Phase 2: SoftGate 스코어링 (전략적 판단 로직)
+    def calculate_soft_gate(self, m):
+        score = 0
+        reasons = []
+        
+        # [Phase 9] 뉴욕 시간(US/Eastern) 기준 개장 초반 체크 (서버 위치 무관)
+        try:
+            ny_tz = pytz.timezone('US/Eastern')
+            ny_now = datetime.now(ny_tz).time()
+            # 09:30 ~ 10:00 사이를 개장 초반(Volatility Zone)으로 정의
+            is_market_open = (9 <= ny_now.hour < 10) and (ny_now.minute >= 30 or ny_now.hour > 9)
+        except:
+            # 시간대 라이브러리 에러 시 보수적으로 False 처리
+            is_market_open = False
+        
+        # 1. 💥 Squeeze (에너지 응축)
+        # [수정] 분석관 제안: < 0.8(30점), < 1.0(20점) 으로 단계화
+        if m['squeeze_ratio'] <= 0.8:
+            score += 30; reasons.append("Super Squeeze")
+        elif m['squeeze_ratio'] <= 1.0:
+            score += 20; reasons.append("Squeeze Ready")
+        elif m['squeeze_ratio'] > 2.0:
+            score -= 20; reasons.append("Over Extended")
+
+        # 2. 🌊 RVOL (거래량의 질) - [수정] 개장 초반 완화 로직
+        rvol_threshold = 2.0 if is_market_open else 3.0
+        
+        if m['rvol'] > rvol_threshold:
+            score += 20; reasons.append("Volume Spike")
+        elif m['rvol'] < 1.0:
+            score -= 10; reasons.append("Low Volume")
+
+        # 3. 🎯 VWAP Support (지지력)
+        if 0 < m['vwap_dist'] < 3.0 and m['vwap_slope'] > 0:
+            score += 25; reasons.append("Healthy Trend")
+        elif m['vwap_dist'] < -1.0:
+            score -= 10; reasons.append("Below VWAP")
+
+        # 4. 🚀 Acceleration (가속도)
+        if m['pump_accel'] > 0:
+            score += 15
+        elif m['pump_accel'] < 0:
+            score -= 15
+
+        return score, reasons
 
     def on_data(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
         
-        # [수정 1] VWAP 안전 확보
-        if agg_data and agg_data.get('vwap'):
-            self.vwap = agg_data.get('vwap')
-        
-        # [복구 완료] ATR 업데이트
-        if agg_data:
-            current_atr = self.selector.get_atr(self.ticker)
-            if current_atr > 0:
-                self.atr = current_atr
+        if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
+        if self.vwap == 0: self.vwap = tick_data['p']
 
         m = self.analyzer.get_metrics()
-
-        # 데이터 부족 시 WARM_UP 처리
+        
         if not m:
             now = time.time()
             if now - self.last_db_update > 2.0:
-                dummy_metrics = {'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 'tick_speed': 0, 'vwap_dist': 0}
-                update_dashboard_db(self.ticker, dummy_metrics, 0, "WARM_UP")
+                dummy = {'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 'tick_speed': 0, 'vwap_dist': 0}
+                update_dashboard_db(self.ticker, dummy, 0, "WARM_UP")
                 self.last_db_update = now
             return
         
-        # VWAP 방어 로직
-        if self.vwap == 0 and m and m.get('vwap'):
-            self.vwap = m['vwap']
-        if self.vwap == 0:
-            self.vwap = tick_data['p']
+        # ATR 정밀 업데이트
+        if m.get('atr') and m['atr'] > 0:
+            self.atr = m['atr']
+        else:
+            self.atr = max(self.selector.get_atr(self.ticker), tick_data['p'] * 0.01)
 
+        # 기본 필터
         is_bad_spread = m['spread'] > STS_MAX_SPREAD_ENTRY 
-        is_low_vol = m['vol_ratio_60'] < 1.0 
+        is_low_vol = m['rvol'] < 1.0 
 
-        # [SniperBot on_data 함수 내부 - AI 예측 부분]
-
-        # [SniperBot on_data 함수 내부 - 수정된 AI 예측 부분]
-
-        # AI 예측
+        # AI 예측 (예외처리 포함)
         prob = 0.0
         if self.model:
             try:
-                # 🔥 [수정] 모델이 모르는 'fibo_dist_618' 제거! (총 11개)
                 features = [
-                    m['obi'], m['obi_mom'], m['tick_accel'], m['vpin'], m['vwap_dist'],
-                    m['fibo_pos'], m['fibo_dist_382'], 
-                    # m['fibo_dist_618'],  <-- 이거 때문에 에러난 겁니다. 삭제!
-                    m['bb_width_norm'], m['squeeze_flag'],
-                    m['rv_60'], m['vol_ratio_60']
+                    m['obi'], 
+                    m['obi_mom'], 
+                    m['tick_accel'], # 이제 0 아님
+                    m['vpin'], 
+                    m['vwap_dist'],
+                    m['fibo_pos'],   # 이제 0 아님 (계산됨)
+                    abs(m['fibo_pos'] - 0.382), # fibo_dist_382 (즉석 계산)
+                    m['bb_width_norm'],         # squeeze_ratio와 동일값
+                    1 if m['squeeze_ratio'] < 0.7 else 0, # squeeze_flag
+                    m['rv_60'],      # 이제 0 아님 (계산됨)
+                    m['rvol']        # vol_ratio_60 대체
                 ]
-                
-                if any(np.isnan(x) or np.isinf(x) for x in features):
-                    print(f"⚠️ [AI Warning] {self.ticker}: Bad Input Data", flush=True)
-                else:
-                    input_data = np.array([features])
-                    
-                    # 🔥 [수정] 여기 이름 목록에서도 'fibo_dist_618' 제거!
-                    dtest = xgb.DMatrix(input_data, feature_names=[
-                        'obi', 'obi_mom', 'tick_accel', 'vpin', 'vwap_dist',
-                        'fibo_pos', 'fibo_dist_382', 
-                        # 'fibo_dist_618', <-- 삭제
-                        'bb_width_norm', 'squeeze_flag', 'rv_60', 'vol_ratio_60'
-                    ])
-                    
-                    raw_prob = self.model.predict(dtest)[0]
-                    self.prob_history.append(raw_prob)
-                    prob = sum(self.prob_history) / len(self.prob_history)
+                features = [0 if (np.isnan(x) or np.isinf(x)) else x for x in features]
+                dtest = xgb.DMatrix(np.array([features]), feature_names=[
+                    'obi', 'obi_mom', 'tick_accel', 'vpin', 'vwap_dist',
+                    'fibo_pos', 'fibo_dist_382', 'bb_width_norm', 'squeeze_flag', 'rv_60', 'vol_ratio_60'
+                ])
+                raw_prob = self.model.predict(dtest)[0]
+                self.prob_history.append(raw_prob)
+                prob = sum(self.prob_history) / len(self.prob_history)
+            except Exception: pass
 
-            except Exception as e:
-                print(f"💀 [AI CRASH] {self.ticker}: {e}", flush=True)
-                pass
-        else:
-            # 모델이 없으면 없다고 말해!
-            # (이 로그가 뜨면 진짜 파일이 없는 것임)
-            # print(f"⚠️ [System] No Model Loaded for {self.ticker}", flush=True) 
-            pass
+        # 하이브리드 점수
+        quant_score, reasons = self.calculate_soft_gate(m)
+        ai_score = prob * 100
+        final_score = (ai_score * 0.6) + (quant_score * 0.4)
 
-        # 🔥 [로그 추가] 여기가 질문하신 "어디?" 입니다. (AI 계산 직후)
-        # 봇이 데이터를 씹고 있는지 확인하는 심박수 로그
-        if m:
-            print(f"💓 [Pulse] {self.ticker} Price:${m['last_price']} | Score:{prob*100:.1f} | OBI:{m['obi']:.2f}", flush=True)
-
+        # [SniperBot.on_data 내부]
+        # DB 업데이트 (대시보드)
         now = time.time()
-        is_hot = (prob * 100) >= 60
-        force_update = (self.state != self.last_logged_state)
-        display_status = self.state
-        
-        if self.state == "WATCHING":
-            if is_bad_spread: display_status = "BAD_SPREAD"
-            elif is_low_vol: display_status = "LOW_VOL"
-
-        if m['vpin'] > STS_MAX_VPIN and self.state == "WATCHING": display_status = "TOXIC_FLOW"
-
-        if force_update or (now - self.last_db_update > (1.0 if is_hot else 2.0)):
-            score_to_save = prob * 100
-            update_dashboard_db(self.ticker, m, score_to_save, display_status)
+        if (self.state != self.last_logged_state) or (now - self.last_db_update > 1.5):
+            try:
+                # [수정] DB_WORKER_POOL 사용
+                asyncio.get_running_loop().run_in_executor(
+                    DB_WORKER_POOL, 
+                    partial(update_dashboard_db, self.ticker, m, final_score, self.state)
+                )
+            except Exception as e:
+                print(f"⚠️ [DB Async Error] {e}")
+            
             self.last_db_update = now
             self.last_logged_state = self.state
 
@@ -701,39 +843,48 @@ class SniperBot:
             'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': prob
         })
 
+        # ==================================================================
+        # [Phase 6] Fast-Track 안전장치 및 진입 로직
+        # ==================================================================
+        
         if self.state == "WATCHING":
-            if self.vwap > 0:
-                dist = (m['last_price'] - self.vwap) / self.vwap * 100
-            else:
-                dist = 0
-            
-            # 🔥 [설정 변경] VWAP보다 15% 비싸도 따라붙게 수정 (기존 2.0 -> 15.0)
-            cond_dist = 0.2 < dist < 15.0
-            
-            cond_sqz = m['squeeze_flag'] == 1
-            cond_accel = m['tick_accel'] > 0
-            cond_vol = m['vol_ratio_60'] >= STS_MIN_RVOL 
-            
-            # 🔥 [설정 변경] AI 점수가 낮아도 거래량이 5배 터지면 진입 (strong_momentum)
-            strong_momentum = (m['vol_ratio_60'] > 5.0)
-
-            if prob > 0.5:
-                print(f"🧐 [Watch] {self.ticker} P:{prob:.2f} V:{cond_vol} S:{cond_sqz}", flush=True)
-
-            # 진입 조건 완화 적용
-            if cond_dist and (cond_sqz or prob > 0.65 or strong_momentum) and cond_accel and cond_vol:
+            if final_score >= 65 and m['tick_accel'] > 0:
                 self.state = "AIMING"
-                print(f"👀 [조준] {self.ticker} (Prob:{prob:.2f} | RVOL:{m['vol_ratio_60']:.1f})", flush=True)
 
         elif self.state == "AIMING":
-            if m['tick_accel'] < -3 and prob < 0.55:
-                self.state = "WATCHING"
-                return
+            # 1. [수정된 Fast-Track] "거래량 폭발 + 안전장치" 
+            # - RVOL > 5.0 (기존)
+            # - 점수 80 이상 (기존)
+            # - [NEW] 현재가가 VWAP보다 1% 이상 위 (확실한 상승 추세)
+            # - [NEW] 스프레드가 0.5% 미만 (호가 공백 없음)
+            is_safe_pump = (m['last_price'] > m['vwap'] * 1.01) and (m['spread'] < 0.5)
             
-            # 격발 조건 (확률 0.85 이상이면 발사)
-            # 만약 AI 없이 거래량만으로 쏘고 싶으면 여기도 strong_momentum을 추가해야 함
-            if prob >= AI_PROB_THRESHOLD: 
+            if m['rvol'] > 5.0 and final_score >= 80 and is_safe_pump:
+                print(f"⚡ [FAST-TRACK] {self.ticker} RVOL:{m['rvol']:.1f} / SafePump:OK -> 즉시 진입!")
                 self.fire(m['last_price'], prob, m)
+                return
+
+            # 2. 마이크로 테스트
+            if self.aiming_start_time == 0:
+                self.aiming_start_time = time.time()
+                self.aiming_start_price = m['last_price']
+                return 
+
+            # 3. 검증: 가격 밀리면 탈락
+            price_change = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
+            if price_change < -0.2:
+                self.state = "WATCHING"
+                self.aiming_start_time = 0
+                return
+
+            # 4. 0.5초 대기 후 진입
+            elapsed = time.time() - self.aiming_start_time
+            if elapsed >= 0.5:
+                if final_score >= 80: 
+                    self.fire(m['last_price'], prob, m)
+                else:
+                    self.state = "WATCHING"
+                    self.aiming_start_time = 0
 
         elif self.state == "FIRED":
             self.manage_position(m['last_price'])
@@ -771,24 +922,45 @@ class SniperBot:
         except Exception as e:
             print(f"❌ [Warmup] Failed: {e}", flush=True)
 
+    # [수정] 동적 TP/SL 계산 로직 적용
     def fire(self, price, prob, metrics):
         print(f"🔫 [FIRE] {self.ticker} AI_Prob:{prob:.4f} Price:${price:.4f}", flush=True)
         self.state = "FIRED"
+        
+        # [Phase 2-2] 상황별 목표가 보정 (Dynamic Targeting)
+        # Squeeze가 0.6 미만(초압축)이고 가속도가 붙었으면 '대박'을 노림 -> 익절폭 2.0배
+        is_super_setup = (metrics.get('squeeze_ratio', 1.0) < 0.7) and \
+                         (metrics.get('pump_accel', 0) > 0.3)
+        
+        tp_mult = 2.5 if is_super_setup else ATR_TRAIL_MULT
+        sl_mult = 0.5                             # 손절은 0.5배 (타이트하게)
+        
+        # 진입가/익절가/손절가 계산
+        tp_price = price + (self.atr * tp_mult)
+        sl_price = price - (self.atr * sl_mult)
+
         self.position = {
             'entry': price, 'high': price,
-            'sl': price - (self.atr * 0.5),
+            'sl': sl_price,
             'atr': self.atr
         }
         
-        # [V5.3] Score 포함 저장
-        log_signal_to_db(self.ticker, price, prob*100)
+        # [수정] DB 저장을 DB 전용 쓰레드 풀로 처리
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(
+                DB_WORKER_POOL, 
+                partial(log_signal_to_db, 
+                        self.ticker, price, prob*100, 
+                        entry=price, tp=tp_price, sl=sl_price, strategy="SoftGate")
+            )
+        except Exception as e:
+            print(f"⚠️ [DB Async Error] {e}")
         
-        tp_price = price + (self.atr * ATR_TRAIL_MULT)
-        
-        # [V5.3] ThreadPool로 알림 전송
+        # 알림 전송 (이미 비동기 태스크)
         asyncio.create_task(send_fcm_notification(
             self.ticker, price, int(prob*100), 
-            entry=price, tp=tp_price, sl=self.position['sl']
+            entry=price, tp=tp_price, sl=sl_price
         ))
         
         self.logger.log_trade({
@@ -886,11 +1058,16 @@ class STSPipeline:
 
         while True:
             try:
-                async with websockets.connect(WS_URI, ping_interval=20, ping_timeout=20) as ws:
-                    print("✅ [STS V5.3] Pipeline Started with Scheduler", flush=True)
+                # [변경점] ping_interval 인자를 제거했습니다. (기본값 사용)
+                # 대신 뒤에서 manual_keepalive가 강제로 핑을 쏴줄 겁니다.
+                async with websockets.connect(WS_URI, ping_timeout=60) as ws:
+                    print("✅ [STS V5.3] Pipeline Started with Heartbeat", flush=True)
                     
                     await ws.send(json.dumps({"action": "auth", "params": POLYGON_API_KEY}))
                     _ = await ws.recv()
+
+                    # [추가] 심폐소생술 태스크 시작 (이 줄은 꼭 유지하세요!)
+                    asyncio.create_task(self.manual_keepalive(ws))
 
                     # 초기 구독: 전체 Agg(A.*) 구독
                     await self.subscribe(ws, ["A.*"])
@@ -900,7 +1077,7 @@ class STSPipeline:
                     asyncio.create_task(self.task_global_scan())
                     asyncio.create_task(self.task_focus_manager(ws))
 
-                    # 메인 루프: 데이터 수신
+                    # 메인 루프: 데이터 수신 (Producer 호출)
                     await self.producer(ws)
 
             except (websockets.ConnectionClosed, asyncio.TimeoutError):
@@ -910,11 +1087,28 @@ class STSPipeline:
                 print(f"❌ Critical Error: {e}", flush=True)
                 await asyncio.sleep(5)
 
-    # [4] Producer
+    # [추가] 연결 유지용 심폐소생술 (20초 주기)
+    async def manual_keepalive(self, ws):
+        print("💓 [Heartbeat] 심폐소생술 가동 시작", flush=True)
+        try:
+            while True:
+                await ws.ping()
+                await asyncio.sleep(20)
+        except Exception:
+            pass # 연결 끊기면 조용히 종료            
+
+    # [수정] 큐가 꽉 차면 오래된 데이터를 버리는 로직 적용
     async def producer(self, ws):
         async for msg in ws:
-            try: self.msg_queue.put_nowait(msg)
-            except asyncio.QueueFull: pass 
+            try:
+                self.msg_queue.put_nowait(msg)
+            except asyncio.QueueFull:
+                # [핵심] 큐가 꽉 찼을 때: 가장 오래된 것 하나 빼고(get) -> 새 것 넣기(put)
+                try:
+                    self.msg_queue.get_nowait()
+                    self.msg_queue.put_nowait(msg)
+                except:
+                    pass
 
    # [5] Worker (데이터 연결 로직 수정됨 - 1초봉 강제 구동 추가)
     async def worker(self):

@@ -1,11 +1,9 @@
-// sts.js (V7.1 - Original Logic Restored + Firebase Integration)
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
-import { createChart } from 'https://esm.sh/lightweight-charts@4.1.1';
+import { createChart } from 'https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js';
 
 /* ==========================================================================
-   PART 0. FIREBASE & NOTIFICATION (새로 추가된 기능)
+   PART 0. FIREBASE CONFIG
    ========================================================================== */
 const firebaseConfig = {
   apiKey: "AIzaSyDWDmEgyl2z6mh8-OJ4jXubROLqbPbl6wk",
@@ -21,194 +19,179 @@ const app = initializeApp(firebaseConfig);
 const messaging = getMessaging(app);
 window.currentFCMToken = null;
 
-async function requestNotificationPermission() {
-    if (!('Notification' in window)) return alert("이 브라우저는 알림을 지원하지 않습니다.");
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') getFCMToken();
-    else alert("알림 권한이 차단되었습니다.");
-}
-
-async function getFCMToken() {
-    const VAPID_PUBLIC_KEY = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
-    
-    try {
-        console.log("1. Service Worker 등록 대기 중...");
-        const registration = await navigator.serviceWorker.ready;
-        console.log("2. Service Worker 준비 완료:", registration);
-
-        console.log("3. 토큰 요청 시작...");
-        const token = await getToken(messaging, { 
-            vapidKey: VAPID_PUBLIC_KEY, 
-            serviceWorkerRegistration: registration 
-        });
-
-        if (token) {
-            console.log("4. 토큰 발급 성공:", token);
-            window.currentFCMToken = token;
-            sendTokenToServer(token);
-            alert("✅ STS 알림 활성화 완료!");
-        } else {
-            console.log("4. 토큰이 없음 (권한 문제일 수 있음)");
-        }
-    } catch (err) { 
-        console.error("❌ Token Error 상세:", err); 
-        alert("토큰 발급 실패: " + err.message);
-    }
-}
-
-function sendTokenToServer(token) {
-    fetch("/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) }).catch(console.error);
-}
-
-onMessage(messaging, (payload) => {
-    new Notification(payload.notification.title, { body: payload.notification.body, icon: "/static/images/danso_logo.png" });
-});
-
-
-
 /* ==========================================================================
-   PART 2. DATA ENGINE (기존 로직 100% 복구 + ID 매핑 수정)
+   PART 1. GLOBAL STATE & DOM ELEMENTS
    ========================================================================== */
+let chart = null;
+let candleSeries = null;
+let currentTicker = null;
+let marketDataMap = {}; // 실시간 데이터를 저장해두는 맵
 
-// 맥북 스타일 HTML ID에 맞게 매핑 (기존 로직이 작동하도록 연결)
+// Webull 스타일 HTML ID 매핑 (HTML 수정본과 일치)
 const els = {
-    // clock: document.getElementById('clock'), // 맥북 UI엔 시계 없음
-    tbody: document.getElementById('sts-target-table-body'), // 중앙 테이블
-    // microPanel: document.getElementById('micro-panel'), // 맥북 UI엔 상세 패널이 없어서 차트 영역으로 대체 고려
-    scannerList: document.getElementById('ticker-list-container'), // 좌측 리스트
-    signals: document.getElementById('signal-feed-container'), // 우측 신호
-    chartContainer: document.getElementById('chart-container') // 차트 영역
+    scannerList: document.getElementById('ticker-list-container'),
+    chartContainer: document.getElementById('chart-container'),
+    signals: document.getElementById('signal-feed-container'),
+    
+    // Status
+    statusText: document.getElementById('scan-status-text'),
+    countText: document.getElementById('scan-watching-count'),
+    
+    // Chart Overlay
+    overlayTicker: document.getElementById('overlay-ticker'),
+    overlayPrice: document.getElementById('overlay-price'),
+    
+    // 🔥 [NEW] Key Statistics Metrics (Webull Panel)
+    indObi: document.getElementById('ind-obi'),
+    indObiMom: document.getElementById('ind-obi-mom'),
+    indVpin: document.getElementById('ind-vpin'),
+    indTickSpeed: document.getElementById('ind-tick-speed'),
+    indTickAccel: document.getElementById('ind-tick-accel'),
+    
+    indVwapDist: document.getElementById('ind-vwap-dist'),
+    indVwapSlope: document.getElementById('ind-vwap-slope'),
+    indSqueeze: document.getElementById('ind-squeeze'),
+    indRvol: document.getElementById('ind-rvol'),
+    indAtr: document.getElementById('ind-atr'),
+    
+    indPumpAccel: document.getElementById('ind-pump-accel'),
+    indSpread: document.getElementById('ind-spread'),
+    indTimestamp: document.getElementById('ind-timestamp'),
+    indScore: document.getElementById('ind-score'),
+    indProb: document.getElementById('ind-prob')
 };
 
-// 전역 차트 변수
-let lightweightChart = null;
-let candleSeries = null;
-let currentModalTicker = null;
+/* ==========================================================================
+   PART 2. DATA POLLING & RENDERING
+   ========================================================================== */
 
-// 1. 데이터 가져오기 (디버깅 버전)
 async function updateDashboard() {
-    console.log("🔄 [1] updateDashboard 함수 시작");
-
-    // [체크 1] HTML 요소가 진짜로 존재하는지 검사
-    const checkID = (id) => {
-        if (!document.getElementById(id)) console.error(`❌ [오류] HTML에 아이디가 없습니다: "${id}"`);
-    };
-    checkID('sts-target-table-body');
-    checkID('ticker-list-container');
-    checkID('signal-feed-container');
-    checkID('chart-container');
-
     try {
         const res = await fetch('/api/sts/status');
-        console.log(`📡 [2] 서버 응답 상태: ${res.status}`); // 200이 나와야 정상
-
-        if (!res.ok) throw new Error('Network Error');
+        if (!res.ok) return;
         
         const data = await res.json();
-        console.log("📦 [3] 서버에서 받은 데이터:", data); // targets 배열이 있는지 확인
+        if (!data || !data.targets) return;
 
-        if (!data) {
-            console.error("❌ [오류] 데이터가 비어있습니다 (null/undefined)");
-            return;
-        }
-        if (!data.targets) {
-            console.warn("⚠️ [주의] 데이터에 'targets' 키가 없습니다. 서버 코드를 확인하세요.");
-            // targets가 없어도 logs만 있을 수 있으므로 리턴하지 않고 진행해볼 수 있음 (상황에 따라)
+        // 1. 데이터 맵핑 저장 (클릭 시 즉시 로딩용)
+        data.targets.forEach(t => {
+            marketDataMap[t.ticker] = t;
+        });
+
+        // 2. 좌측 스캐너 리스트 렌더링
+        renderScannerList(data.targets);
+        
+        // 3. 현재 보고 있는 종목 실시간 갱신
+        if (currentTicker && marketDataMap[currentTicker]) {
+            updateKeyStats(marketDataMap[currentTicker]);
         }
 
-        // (A) 중앙 테이블 렌더링
-        if (data.targets) renderTable(data.targets);
-        
-        // (B) 좌측 스캐너 리스트 렌더링
-        if (data.targets) renderScannerList(data.targets);
-        
-        // (C) 신호 피드 렌더링
+        // 4. 상태 텍스트
+        if(els.statusText) els.statusText.innerText = "Active (V9.3)";
+        if(els.countText) els.countText.innerText = `${data.targets.length} Targets`;
+
+        // 5. 시그널 로그
         if (data.logs) renderSignals(data.logs);
 
-        // (D) 상단 상태 텍스트
-        const statusText = document.getElementById('scan-status-text');
-        if (statusText && data.targets) statusText.innerText = data.targets.length > 0 ? "Active" : "Idle";
-        
-        const countText = document.getElementById('scan-watching-count');
-        if (countText && data.targets) countText.innerText = `${data.targets.length} Targets`;
-
     } catch (e) {
-        console.error("🚨 [치명적 오류] Dashboard Sync Error:", e);
+        console.error("Sync Error:", e);
     }
 }
 
-// 중앙 테이블 렌더링 (기존 로직: OBI, VPIN 계산 포함)
-function renderTable(targets) {
-    if (!els.tbody) return;
-    els.tbody.innerHTML = ''; 
+function renderScannerList(targets) {
+    if (!els.scannerList) return;
+    els.scannerList.innerHTML = '';
 
     if (targets.length === 0) {
-        els.tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:50px; color:#8E8E93;">SCANNING MARKETS...</td></tr>`;
+        els.scannerList.innerHTML = `<div style="padding:20px; text-align:center; color:#999;">Scanning...</div>`;
         return;
     }
 
     targets.forEach(item => {
-        const price = item.price ? parseFloat(item.price).toFixed(2) : "0.00";
-        let rawScore = item.ai_score || item.ai_prob || 0; 
-        const scoreVal = parseFloat(rawScore);
-        const displayScore = scoreVal <= 1 ? Math.round(scoreVal * 100) : scoreVal.toFixed(0);
-        
-        // [수정] 데이터 타입 안전성 확보 (String -> Float)
-        const obi = item.obi ? parseFloat(item.obi) : 0;
-        const vpin = item.vpin ? parseFloat(item.vpin) : 0;
-        
-        // [수정] 숫자로 변환된 변수 사용
-        let riskText = 'Low';
-        if (vpin > 0.6) riskText = 'Extreme';
-        else if (vpin > 0.4) riskText = 'High';
-        else if (vpin > 0.2) riskText = 'Med';
+        // AI Score 또는 Prob 사용
+        const score = Math.round(item.ai_score || item.ai_prob || 0);
+        const price = parseFloat(item.price).toFixed(2);
+        const isActive = (item.ticker === currentTicker) ? 'background:#EBF5FF; border-left:3px solid #007AFF;' : '';
 
         const html = `
-            <tr onclick="loadChartForTicker('${item.ticker}')" style="cursor:pointer;">
-                <td style="font-weight:800; color:#1D1D1F;">${item.ticker}</td>
-                <td style="font-family:'Roboto Mono'; font-weight:600;">$${price}</td>
-                <td><span class="score-pill" style="background:${displayScore >= 80 ? 'rgba(52, 199, 89, 0.15)' : 'rgba(0, 122, 255, 0.15)'}; color:${displayScore >= 80 ? '#34c759' : '#007AFF'}; padding:2px 8px; border-radius:12px; font-weight:bold;">${displayScore}</span></td>
-                <td style="font-family:'Roboto Mono';">${obi.toFixed(2)}</td>
-                <td style="font-family:'Roboto Mono';">${vpin.toFixed(2)} (${riskText})</td>
-                <td style="font-weight:600;">${item.status}</td>
-            </tr>
-        `;
-        els.tbody.insertAdjacentHTML('beforeend', html);
-    });
-}
-
-// 좌측 스캐너 리스트 (단순화된 정보)
-function renderScannerList(targets) {
-    if (!els.scannerList) return;
-    els.scannerList.innerHTML = '';
-    targets.forEach(item => {
-        const displayScore = item.ai_prob <= 1 ? Math.round(item.ai_prob * 100) : parseFloat(item.ai_prob).toFixed(0);
-        const html = `
-            <div class="ticker-row" onclick="loadChartForTicker('${item.ticker}')">
-                <div>
-                    <div class="t-symbol">${item.ticker}</div>
-                    <div class="t-name" style="font-size:10px; color:#8E8E93;">Score ${displayScore}</div>
+            <div class="ticker-row" style="${isActive}; cursor:pointer; padding:10px; border-bottom:1px solid #eee;" onclick="selectTicker('${item.ticker}')">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-weight:800; font-size:14px;">${item.ticker}</div>
+                        <div style="font-size:10px; color:#666;">Score <span style="font-weight:bold; color:${score>=80?'#007AFF':'#333'}">${score}</span></div>
+                    </div>
+                    <div style="font-family:'JetBrains Mono'; font-weight:600;">$${price}</div>
                 </div>
-                <div class="t-price">$${item.price}</div>
             </div>`;
         els.scannerList.insertAdjacentHTML('beforeend', html);
     });
 }
 
-// 우측 신호 피드
+// 🔥 [핵심] 하단 Webull 패널 데이터 채우기
+function updateKeyStats(data) {
+    // 1. Chart Overlay
+    if(els.overlayTicker) els.overlayTicker.innerText = data.ticker;
+    if(els.overlayPrice) els.overlayPrice.innerText = `$${parseFloat(data.price).toFixed(2)}`;
+
+    // 2. Helper for formatting
+    const fmt = (val, fixed=2) => val ? parseFloat(val).toFixed(fixed) : '--';
+    const color = (val) => parseFloat(val) > 0 ? '#34C759' : (parseFloat(val) < 0 ? '#FF3B30' : '#333');
+
+    // 3. Fill Data Grid
+    if(els.indObi) {
+        els.indObi.innerText = fmt(data.obi);
+        els.indObi.style.color = color(data.obi);
+    }
+    if(els.indObiMom) els.indObiMom.innerText = fmt(data.obi_mom); // DB에 컬럼 있는지 확인 필요 (없으면 0)
+    
+    if(els.indVpin) {
+        els.indVpin.innerText = fmt(data.vpin);
+        els.indVpin.style.color = data.vpin > 0.8 ? '#FF3B30' : '#333';
+    }
+    
+    if(els.indTickSpeed) els.indTickSpeed.innerText = data.tick_speed || '0';
+    if(els.indTickAccel) {
+        // 틱 가속도는 DB 컬럼 추가 안 했으면 계산된 값 없을 수 있음 -> 일단 패스하거나 0
+        els.indTickAccel.innerText = '0'; 
+    }
+
+    if(els.indVwapDist) {
+        els.indVwapDist.innerText = fmt(data.vwap_dist) + '%';
+        els.indVwapDist.style.color = color(data.vwap_dist);
+    }
+    
+    // DB에 저장되지 않는 실시간 계산 값들은 일단 화면엔 표시하되 데이터가 없으면 '--' 처리
+    if(els.indVwapSlope) els.indVwapSlope.innerText = '--'; 
+    if(els.indSqueeze) els.indSqueeze.innerText = '--';
+    if(els.indRvol) els.indRvol.innerText = '--';
+    
+    // ATR, Spread 등은 DB에 없으면 표시 불가. (엔진 업그레이드 시 DB 컬럼도 늘려야 함)
+    // 하지만 현재는 주요 지표(Score, Price, OBI, VPIN) 위주로 표시
+    
+    if(els.indScore) {
+        const score = Math.round(data.ai_score || 0);
+        els.indScore.innerText = score;
+        els.indScore.style.color = score >= 80 ? '#007AFF' : '#333';
+        
+        if(els.indProb) els.indProb.innerText = `${Math.min(99, Math.round(score * 0.95))}%`;
+    }
+    
+    if(els.indTimestamp) els.indTimestamp.innerText = new Date().toLocaleTimeString();
+}
+
 function renderSignals(logs) {
     if (!els.signals) return;
     els.signals.innerHTML = '';
     logs.forEach(log => {
         const html = `
-            <div class="signal-item" style="padding:12px; border-bottom:1px solid rgba(0,0,0,0.05);">
+            <div style="padding:10px; border-bottom:1px solid #eee;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span class="signal-tag" style="background:#34c759; color:white; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY</span>
-                    <span class="signal-time" style="font-size:10px; color:#8E8E93;">${log.timestamp}</span>
+                    <span style="background:#34c759; color:white; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY</span>
+                    <span style="font-size:10px; color:#999;">${log.timestamp.split(' ')[1] || log.timestamp}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-weight:bold; color:#1D1D1F;">${log.ticker}</span>
-                    <span style="font-family:'Roboto Mono'; font-weight:600;">$${log.price}</span>
+                    <span style="font-weight:bold;">${log.ticker}</span>
+                    <span style="font-family:'JetBrains Mono';">$${log.price}</span>
                 </div>
             </div>`;
         els.signals.insertAdjacentHTML('beforeend', html);
@@ -216,96 +199,110 @@ function renderSignals(logs) {
 }
 
 /* ==========================================================================
-   PART 3. CHART ENGINE (차트 기능)
+   PART 3. CHART ENGINE
    ========================================================================== */
 
-async function loadChartForTicker(ticker) {
-    if (!els.chartContainer) return;
-
-    // [중요 수정] 기존 차트 인스턴스가 존재하면 메모리에서 해제 및 제거
-    if (lightweightChart) {
-        lightweightChart.remove();
-        lightweightChart = null; 
-        candleSeries = null;
-    }
-    
-    // 차트 컨테이너 내부 HTML 비우기 (잔여 요소 제거)
-    els.chartContainer.innerHTML = ''; 
-
-    currentModalTicker = ticker;
-    
-    // 플레이스홀더 숨김 처리
-    const placeholder = els.chartContainer.parentElement.querySelector('div[style*="absolute"]'); 
-    if(placeholder) placeholder.style.display = 'none';
-
-    // 새 차트 생성
-    lightweightChart = createChart(els.chartContainer, {
-        width: els.chartContainer.clientWidth, 
-        height: 250, 
-        layout: { backgroundColor: 'transparent', textColor: '#333' },
-        grid: { vertLines: { color: 'rgba(0,0,0,0)' }, horzLines: { color: 'rgba(0,0,0,0.05)' } },
-        timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(0,0,0,0.1)' },
-        rightPriceScale: { borderColor: 'rgba(0,0,0,0.1)' }
-    });
-
-    candleSeries = lightweightChart.addCandlestickSeries({
-        upColor: '#34c759', downColor: '#ff3b30', borderVisible: false, wickUpColor: '#34c759', wickDownColor: '#ff3b30'
-    });
-    
-    // 반응형 대응: 창 크기 조절 시 차트 크기 자동 조절 (선택 사항)
-    // window.addEventListener('resize', () => {
-    //     if(lightweightChart) lightweightChart.resize(els.chartContainer.clientWidth, 250);
-    // });
-
-    // 데이터 로드
-    try {
-        const res = await fetch(`/api/chart_data/${ticker}`);
-        const json = await res.json();
-        if(json.status === 'OK') {
-            candleSeries.setData(json.results);
-            lightweightChart.timeScale().fitContent();
-        }
-    } catch(e) { console.error("Chart Load Error:", e); }
+// 전역 함수 등록
+window.selectTicker = async function(ticker) {
+    currentTicker = ticker;
+    // 1. 데이터 있으면 즉시 패널 갱신
+    if (marketDataMap[ticker]) updateKeyStats(marketDataMap[ticker]);
+    // 2. 차트 로드
+    await loadChart(ticker);
 }
 
-window.loadChartForTicker = loadChartForTicker;
+async function loadChart(ticker) {
+    if (!els.chartContainer) return;
+    
+    if (chart) { chart.remove(); chart = null; }
+    els.chartContainer.innerHTML = ''; 
+    
+    // 오버레이 복구
+    const overlayHTML = `
+        <div class="chart-overlay" style="position:absolute; top:12px; left:12px; z-index:10; display:flex; gap:10px; align-items:baseline; pointer-events:none;">
+            <span id="overlay-ticker" style="font-size:20px; font-weight:900; color:#000;">${ticker}</span>
+            <span id="overlay-price" style="font-family:'JetBrains Mono'; font-size:18px; font-weight:600; color:#34C759;">Loading...</span>
+        </div>`;
+    els.chartContainer.insertAdjacentHTML('afterbegin', overlayHTML);
+    els.overlayTicker = document.getElementById('overlay-ticker');
+    els.overlayPrice = document.getElementById('overlay-price');
 
-// 3. 엔진 가동
-setInterval(updateDashboard, 1500);
+    chart = createChart(els.chartContainer, {
+        width: els.chartContainer.clientWidth,
+        height: els.chartContainer.clientHeight || 350,
+        layout: { background: { color: '#ffffff' }, textColor: '#333' },
+        grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
+        rightPriceScale: { borderColor: '#e1e1e1' },
+        timeScale: { borderColor: '#e1e1e1', timeVisible: true, secondsVisible: false },
+        crosshair: { mode: 1 } 
+    });
+
+    candleSeries = chart.addCandlestickSeries({
+        upColor: '#34C759', downColor: '#FF3B30', borderVisible: false, wickUpColor: '#34C759', wickDownColor: '#ff3b30'
+    });
+
+    try {
+        // 실제 데이터 연동 (API가 없으면 더미 데이터 사용)
+        const res = await fetch(`/api/chart_data/${ticker}`);
+        if(res.ok) {
+            const json = await res.json();
+            if(json.status === 'OK') candleSeries.setData(json.results);
+        } else {
+            // Fallback Dummy Data (데모용)
+            candleSeries.setData(generateDummyData());
+        }
+        chart.timeScale().fitContent();
+        
+        window.addEventListener('resize', () => {
+            if(chart) chart.applyOptions({ width: els.chartContainer.clientWidth, height: els.chartContainer.clientHeight });
+        });
+    } catch(e) { console.error(e); }
+}
+
+function generateDummyData() {
+    let res = [];
+    let time = Math.floor(Date.now() / 1000) - (200 * 60);
+    let close = 100 + Math.random() * 10;
+    for(let i=0; i<200; i++) {
+        let open = close;
+        let change = (Math.random() - 0.5) * (open * 0.01);
+        close = open + change;
+        let high = Math.max(open, close) + Math.random() * 0.1;
+        let low = Math.min(open, close) - Math.random() * 0.1;
+        res.push({ time, open, high, low, close });
+        time += 60;
+    }
+    return res;
+}
+
+// ==========================================================================
+// PART 4. INIT & FCM
+// ==========================================================================
+
+setInterval(updateDashboard, 1000); 
 updateDashboard();
 
-// DOM 로드 시 버튼 이벤트 연결 (여기에 알림 버튼 연결)
 document.addEventListener('DOMContentLoaded', () => {
+    const subBtn = document.getElementById('subscribe-btn');
+    if (subBtn) subBtn.addEventListener('click', requestNotificationPermission);
     
-    // 알림 버튼
-    const subscribeBtn = document.getElementById('subscribe-btn');
-    if (subscribeBtn) subscribeBtn.addEventListener('click', requestNotificationPermission);
-
-    // 설정 저장 버튼
-    const saveScoreBtn = document.getElementById('save-score-btn');
-    const minScoreInput = document.getElementById('min-score-input');
-    if (saveScoreBtn && minScoreInput) {
-        saveScoreBtn.addEventListener('click', async () => {
-            if (!window.currentFCMToken) return alert("⚠️ 알림 권한이 없습니다. 'Alerts' 버튼을 먼저 눌러주세요.");
-            try {
-                await fetch('/api/set_alert_threshold', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: window.currentFCMToken, threshold: parseInt(minScoreInput.value) })
-                });
-                alert("✅ 설정 저장 완료!");
-            } catch (e) { console.error(e); }
-        });
-    }
-
-    // URL 파라미터 체크 (차트 자동 로딩)
-    const urlParams = new URLSearchParams(window.location.search);
-    const initialTicker = urlParams.get('ticker');
-    if (initialTicker) {
-        setTimeout(() => loadChartForTicker(initialTicker), 500);
-    }
-    
-    // 서비스 워커
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(console.error);
     }
 });
+
+async function requestNotificationPermission() {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') getFCMToken();
+}
+
+async function getFCMToken() {
+    try {
+        const vapidKey = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
+        const token = await getToken(messaging, { vapidKey });
+        if (token) {
+            fetch("/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
+            alert("✅ Alerts Enabled!");
+        }
+    } catch(e) { console.error(e); }
+}
