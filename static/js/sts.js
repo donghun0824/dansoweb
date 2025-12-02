@@ -85,32 +85,55 @@ let lightweightChart = null;
 let candleSeries = null;
 let currentModalTicker = null;
 
-// 1. 데이터 가져오기 (기존 1.5초 Polling 유지)
+// 1. 데이터 가져오기 (디버깅 버전)
 async function updateDashboard() {
+    console.log("🔄 [1] updateDashboard 함수 시작");
+
+    // [체크 1] HTML 요소가 진짜로 존재하는지 검사
+    const checkID = (id) => {
+        if (!document.getElementById(id)) console.error(`❌ [오류] HTML에 아이디가 없습니다: "${id}"`);
+    };
+    checkID('sts-target-table-body');
+    checkID('ticker-list-container');
+    checkID('signal-feed-container');
+    checkID('chart-container');
+
     try {
         const res = await fetch('/api/sts/status');
+        console.log(`📡 [2] 서버 응답 상태: ${res.status}`); // 200이 나와야 정상
+
         if (!res.ok) throw new Error('Network Error');
         
         const data = await res.json();
-        if (!data || !data.targets) return;
+        console.log("📦 [3] 서버에서 받은 데이터:", data); // targets 배열이 있는지 확인
 
-        // (A) 중앙 테이블 렌더링 (기존 로직 사용)
-        renderTable(data.targets);
+        if (!data) {
+            console.error("❌ [오류] 데이터가 비어있습니다 (null/undefined)");
+            return;
+        }
+        if (!data.targets) {
+            console.warn("⚠️ [주의] 데이터에 'targets' 키가 없습니다. 서버 코드를 확인하세요.");
+            // targets가 없어도 logs만 있을 수 있으므로 리턴하지 않고 진행해볼 수 있음 (상황에 따라)
+        }
+
+        // (A) 중앙 테이블 렌더링
+        if (data.targets) renderTable(data.targets);
         
-        // (B) 좌측 스캐너 리스트 렌더링 (추가됨)
-        renderScannerList(data.targets);
+        // (B) 좌측 스캐너 리스트 렌더링
+        if (data.targets) renderScannerList(data.targets);
         
-        // (C) 신호 피드 렌더링 (추가됨)
+        // (C) 신호 피드 렌더링
         if (data.logs) renderSignals(data.logs);
 
         // (D) 상단 상태 텍스트
         const statusText = document.getElementById('scan-status-text');
-        if (statusText) statusText.innerText = data.targets.length > 0 ? "Active" : "Idle";
+        if (statusText && data.targets) statusText.innerText = data.targets.length > 0 ? "Active" : "Idle";
+        
         const countText = document.getElementById('scan-watching-count');
-        if (countText) countText.innerText = `${data.targets.length} Targets`;
+        if (countText && data.targets) countText.innerText = `${data.targets.length} Targets`;
 
     } catch (e) {
-        console.error("Dashboard Sync Error:", e);
+        console.error("🚨 [치명적 오류] Dashboard Sync Error:", e);
     }
 }
 
