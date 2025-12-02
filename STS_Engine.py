@@ -246,7 +246,7 @@ def update_dashboard_db(ticker, metrics, score, status):
         conn.commit()
         cursor.close()
     except Exception as e:
-        # print(f"❌ DB Update Error: {e}")
+        print(f"❌ DB Update Error: {e}")
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)

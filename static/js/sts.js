@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging.js";
-import { createChart } from 'https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js';
+import { createChart } from 'https://esm.sh/lightweight-charts@4.1.1';
 
 /* ==========================================================================
    PART 0. FIREBASE CONFIG
@@ -62,44 +62,59 @@ const els = {
 };
 
 /* ==========================================================================
-   PART 2. DATA POLLING & RENDERING
+   PART 2. DATA POLLING & RENDERING (수정됨: V9.3 UI + V7.1 방어 로직)
    ========================================================================== */
 
 async function updateDashboard() {
+    // 디버깅을 위한 로그 (나중에 주석 처리 가능)
+    // console.log("🔄 Fetching STS Status..."); 
+
     try {
         const res = await fetch('/api/sts/status');
-        if (!res.ok) return;
+        
+        // [수정 1] 응답 실패 시 로그 출력
+        if (!res.ok) {
+            console.error(`📡 API Error: ${res.status}`);
+            return;
+        }
         
         const data = await res.json();
-        if (!data || !data.targets) return;
+        
+        // [수정 2] 데이터 구조 확인 로그
+        if (!data || !data.targets) {
+            console.warn("⚠️ API 응답에 'targets'가 없습니다:", data);
+            // 데이터가 없어도 UI 초기화를 위해 빈 배열로 진행
+            if (!data) data = { targets: [], logs: [] };
+            if (!data.targets) data.targets = [];
+        }
 
-        // 1. Store data mapping for instant access on click
+        // 1. Store data mapping
         data.targets.forEach(t => {
             marketDataMap[t.ticker] = t;
         });
 
-        // 2. Render Left Scanner List
+        // 2. Render Scanner List (안전한 렌더링)
         renderScannerList(data.targets);
         
-        // 3. Auto-select first ticker if none selected
+        // 3. Auto-select logic
         if (!currentTicker && data.targets.length > 0) {
             selectTicker(data.targets[0].ticker);
         }
         
-        // 4. Update Bottom Panel for current ticker
+        // 4. Update Bottom Panel (데이터가 있을 때만)
         if (currentTicker && marketDataMap[currentTicker]) {
             updateKeyStats(marketDataMap[currentTicker]);
         }
 
         // 5. Update Status Text
-        if(els.statusText) els.statusText.innerText = "Active (V9.3)";
+        if(els.statusText) els.statusText.innerText = "Active (STS Engine)";
         if(els.countText) els.countText.innerText = `${data.targets.length} Targets`;
 
         // 6. Render Signals Log
         if (data.logs) renderSignals(data.logs);
 
     } catch (e) {
-        console.error("Sync Error:", e);
+        console.error("🚨 Dashboard Sync Error:", e);
     }
 }
 
@@ -107,42 +122,73 @@ function renderScannerList(targets) {
     if (!els.scannerList) return;
     els.scannerList.innerHTML = '';
 
+    // 타겟이 0개일 때 'Waiting...' 텍스트를 지우고 'Scanning...'으로 변경
     if (targets.length === 0) {
-        els.scannerList.innerHTML = `<div style="padding:20px; text-align:center; color:#999;">Scanning...</div>`;
+        els.scannerList.innerHTML = `
+            <div style="padding:40px 20px; text-align:center; color:#86868B;">
+                <div style="margin-bottom:10px; font-size:18px;">📡</div>
+                <div>Scanning Markets...</div>
+                <div style="font-size:11px; margin-top:5px; opacity:0.6;">Engine is running</div>
+            </div>`;
         return;
     }
 
     targets.forEach(item => {
-        const score = Math.round(item.ai_score || 0);
-        const price = parseFloat(item.price).toFixed(2);
+        // [수정 3] V7.1의 유연한 점수/가격 로직 적용
+        // ai_score가 없으면 ai_prob를 사용하고, ai_prob가 1 이하(소수점)면 100을 곱함
+        let rawScore = item.ai_score !== undefined ? item.ai_score : (item.ai_prob || 0);
+        if (rawScore <= 1 && rawScore > 0) rawScore *= 100; // 확률값 보정
+        const score = Math.round(rawScore);
+
+        // 가격이 null일 경우 방어
+        const priceVal = item.price ? parseFloat(item.price) : 0;
+        const priceStr = priceVal.toFixed(2);
+
         // Highlight active ticker
-        const isActive = (item.ticker === currentTicker) ? 'background:rgba(0,122,255,0.1); border-left:3px solid #007AFF;' : '';
+        const isActive = (item.ticker === currentTicker) ? 'background:rgba(0,122,255,0.08); border-left:3px solid #007AFF;' : 'border-left:3px solid transparent;';
 
         const html = `
-            <div class="ticker-row" style="${isActive}; cursor:pointer; padding:10px 12px; border-bottom:1px solid #eee; transition: background 0.2s;" onclick="selectTicker('${item.ticker}')">
+            <div class="ticker-row" style="${isActive} cursor:pointer; padding:12px 12px; border-bottom:1px solid rgba(0,0,0,0.05); transition: background 0.1s;" onclick="selectTicker('${item.ticker}')">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
-                        <div class="t-sym" style="font-weight:800; font-size:14px; color:#1D1D1F;">${item.ticker}</div>
-                        <div class="t-sub" style="font-size:10px; color:#86868B;">Score <span style="font-weight:bold; color:${score>=80?'#007AFF':'#333'}">${score}</span></div>
+                        <div class="t-sym" style="font-weight:700; font-size:15px; color:#1D1D1F; letter-spacing:-0.3px;">${item.ticker}</div>
+                        <div class="t-sub" style="font-size:11px; color:#86868B; margin-top:2px;">
+                            Score <span style="font-weight:600; color:${score >= 80 ? '#007AFF' : (score >= 50 ? '#FF9500' : '#86868B')}">${score}</span>
+                        </div>
                     </div>
-                    <div class="t-price" style="font-family:'JetBrains Mono'; font-weight:600; font-size:13px; color:#1D1D1F;">$${price}</div>
+                    <div style="text-align:right;">
+                        <div class="t-price" style="font-family:'JetBrains Mono'; font-weight:600; font-size:14px; color:#1D1D1F;">$${priceStr}</div>
+                        ${renderMiniChange(item)}
+                    </div>
                 </div>
             </div>`;
         els.scannerList.insertAdjacentHTML('beforeend', html);
     });
 }
 
-// 🔥 [CORE] Populate Webull-style Bottom Panel
+// [추가] 등락률 표시 헬퍼 (데이터에 change가 있다면 표시)
+function renderMiniChange(item) {
+    if (!item.change && !item.day_change) return '';
+    const chg = item.change || item.day_change;
+    const color = chg > 0 ? '#34C759' : (chg < 0 ? '#FF3B30' : '#86868B');
+    return `<div style="font-size:10px; font-weight:500; color:${color};">${chg > 0 ? '+' : ''}${parseFloat(chg).toFixed(2)}%</div>`;
+}
+
+// [수정 4] Bottom Panel 업데이트 시에도 방어 로직 적용
 function updateKeyStats(data) {
-    // 1. Update Chart Overlay
+    // Helper formatters with safety checks
+    const fmt = (val, fixed=2) => (val !== undefined && val !== null && !isNaN(parseFloat(val))) ? parseFloat(val).toFixed(fixed) : '--';
+    const color = (val) => {
+        const v = parseFloat(val);
+        if (isNaN(v)) return '#333';
+        return v > 0 ? '#34C759' : (v < 0 ? '#FF3B30' : '#333');
+    };
+
     if(els.overlayTicker) els.overlayTicker.innerText = data.ticker;
-    if(els.overlayPrice) els.overlayPrice.innerText = `$${parseFloat(data.price).toFixed(2)}`;
+    if(els.overlayPrice) els.overlayPrice.innerText = `$${fmt(data.price)}`;
 
-    // 2. Helper formatters
-    const fmt = (val, fixed=2) => val !== undefined && val !== null ? parseFloat(val).toFixed(fixed) : '--';
-    const color = (val) => parseFloat(val) > 0 ? '#34C759' : (parseFloat(val) < 0 ? '#FF3B30' : '#333');
-
-    // 3. Inject Data into Grid Cells
+    // Inject Data into Grid Cells (Webull Style)
+    // 값이 없어도 에러가 나지 않도록 처리됨
     if(els.indObi) { els.indObi.innerText = fmt(data.obi); els.indObi.style.color = color(data.obi); }
     if(els.indObiMom) { els.indObiMom.innerText = fmt(data.obi_mom); els.indObiMom.style.color = color(data.obi_mom); }
     
@@ -157,9 +203,11 @@ function updateKeyStats(data) {
     if(els.indVwapDist) { els.indVwapDist.innerText = fmt(data.vwap_dist) + '%'; els.indVwapDist.style.color = color(data.vwap_dist); }
     if(els.indVwapSlope) { els.indVwapSlope.innerText = fmt(data.vwap_slope, 1); els.indVwapSlope.style.color = color(data.vwap_slope); }
     if(els.indSqueeze) els.indSqueeze.innerText = fmt(data.squeeze_ratio);
+    
     if(els.indRvol) { 
         els.indRvol.innerText = fmt(data.rvol, 1) + 'x'; 
         els.indRvol.style.fontWeight = parseFloat(data.rvol) > 3 ? '800' : '400'; 
+        els.indRvol.style.color = parseFloat(data.rvol) > 5 ? '#007AFF' : '#333';
     }
     if(els.indAtr) els.indAtr.innerText = fmt(data.atr, 3);
     
@@ -167,34 +215,17 @@ function updateKeyStats(data) {
     if(els.indSpread) els.indSpread.innerText = fmt(data.spread) + '%';
     
     if(els.indScore) {
-        const s = Math.round(data.ai_score || 0);
-        els.indScore.innerText = s;
-        els.indScore.style.color = s >= 80 ? '#007AFF' : '#333'; // Blue for Elite
+        let rawScore = data.ai_score !== undefined ? data.ai_score : (data.ai_prob || 0);
+        if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
+        const s = Math.round(rawScore);
         
-        // Calculate Win Probability based on score
+        els.indScore.innerText = s;
+        els.indScore.style.color = s >= 80 ? '#007AFF' : '#333';
+        
         if(els.indProb) els.indProb.innerText = s >= 60 ? `${Math.min(99, Math.round(s*0.95))}%` : '--';
     }
     
     if(els.indTimestamp) els.indTimestamp.innerText = new Date().toLocaleTimeString();
-}
-
-function renderSignals(logs) {
-    if (!els.signals) return;
-    els.signals.innerHTML = '';
-    logs.forEach(log => {
-        const html = `
-            <div style="padding:10px; border-bottom:1px solid #eee; transition: background 0.2s;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="background:rgba(52, 199, 89, 0.15); color:#34C759; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY</span>
-                    <span style="font-size:10px; color:#999;">${log.timestamp.split(' ')[1] || log.timestamp}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-weight:bold; color:#1D1D1F;">${log.ticker}</span>
-                    <span style="font-family:'JetBrains Mono'; font-size:13px;">$${parseFloat(log.price).toFixed(2)}</span>
-                </div>
-            </div>`;
-        els.signals.insertAdjacentHTML('beforeend', html);
-    });
 }
 
 /* ==========================================================================
