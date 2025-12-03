@@ -1,3 +1,4 @@
+import copy 
 import asyncio
 import websockets
 import json
@@ -796,7 +797,7 @@ class SniperBot:
 
         return score, reasons
 
-    def on_data(self, tick_data, quote_data, agg_data):
+    def update_dashboard_db(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
         
         if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
@@ -849,20 +850,30 @@ class SniperBot:
                 prob = sum(self.prob_history) / len(self.prob_history)
             except Exception: pass
 
-        # 하이브리드 점수
+        # [FIX] 하이브리드 점수 및 Warm-up 보정 로직
         quant_score, reasons = self.calculate_soft_gate(m)
         ai_score = prob * 100
-        final_score = (ai_score * 0.6) + (quant_score * 0.4)
+        
+        # 데이터가 충분하지 않은 경우 (60틱 미만 = 약 1분 미만 데이터)
+        # 정량 지표가 0이라서 점수가 깎이는 것을 방지하기 위해 AI 점수만 사용
+        if len(self.analyzer.raw_ticks) < 60:
+            final_score = ai_score
+            # 대시보드에서 상태를 알 수 있게 로그나 reasons에 표시하고 싶다면 추가
+            if "Warm Up" not in reasons: reasons.append("Warm Up")
+        else:
+            # 데이터가 충분하면 정량 점수(40%) 반영
+            final_score = (ai_score * 0.6) + (quant_score * 0.4)
 
-        # [SniperBot.on_data 내부]
-        # DB 업데이트 (대시보드)
+        # [SniperBot.update_dashboard_db 내부]
         now = time.time()
         if (self.state != self.last_logged_state) or (now - self.last_db_update > 1.5):
             try:
-                # [수정] DB_WORKER_POOL 사용
+                # [FIX] m(metrics) 딕셔너리를 deepcopy하여 스레드 충돌 방지
+                metrics_copy = copy.deepcopy(m) 
+                
                 asyncio.get_running_loop().run_in_executor(
                     DB_WORKER_POOL, 
-                    partial(update_dashboard_db, self.ticker, m, final_score, self.state)
+                    partial(update_dashboard_db, self.ticker, metrics_copy, final_score, self.state)
                 )
             except Exception as e:
                 print(f"⚠️ [DB Async Error] {e}")
@@ -1170,7 +1181,7 @@ class STSPipeline:
                                 't': item['e']       # 시간
                             }
                             # 봇에게 강제 주입 -> 이러면 Pulse 로그가 무조건 찍힙니다!
-                            self.snipers[t].on_data(
+                            self.snipers[t].update_dashboard_db(
                                 pseudo_tick, 
                                 self.last_quotes.get(t, {'bids':[],'asks':[]}), 
                                 item
@@ -1185,7 +1196,7 @@ class STSPipeline:
                     # Top 3 종목 정밀 타격 로직 (원래 로직 유지)
                     elif ev == 'T' and t in self.snipers:
                         current_agg = self.last_agg.get(t)
-                        self.snipers[t].on_data(
+                        self.snipers[t].update_dashboard_db(
                             item, 
                             self.last_quotes.get(t, {'bids':[],'asks':[]}), 
                             current_agg 

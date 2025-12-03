@@ -64,6 +64,13 @@ const els = {
 /* ==========================================================================
    PART 2. DATA POLLING & RENDERING (수정됨: V9.3 UI + V7.1 방어 로직)
    ========================================================================== */
+// [FIX] 값이 0이어도 숫자를 표시하고, 진짜 없을 때만 '--' 표시하는 함수
+function formatMetric(value, decimals = 2) {
+    if (value === null || value === undefined || isNaN(value)) {
+        return '<span style="color:#ccc;">--</span>'; // 값 없으면 회색 --
+    }
+    return Number(value).toFixed(decimals); // 0.00 등 숫자 정상 표시
+}
 
 async function updateDashboard() {
     // console.log("🔄 Fetching STS Status..."); 
@@ -208,58 +215,61 @@ function renderMiniChange(item) {
 }
 
 // [수정 4] Bottom Panel 업데이트 시에도 방어 로직 적용
+// [수정 4] Bottom Panel 업데이트 (새로운 지표 매핑 + 0값 처리 적용)
 function updateKeyStats(data) {
-    // Helper formatters with safety checks
-    const fmt = (val, fixed=2) => (val !== undefined && val !== null && !isNaN(parseFloat(val))) ? parseFloat(val).toFixed(fixed) : '--';
-    const color = (val) => {
-        const v = parseFloat(val);
-        if (isNaN(v)) return '#333';
-        return v > 0 ? '#34C759' : (v < 0 ? '#FF3B30' : '#333');
-    };
-
-    if(els.overlayTicker) els.overlayTicker.innerText = data.ticker;
-    if(els.overlayPrice) els.overlayPrice.innerText = `$${fmt(data.price)}`;
-
-    // Inject Data into Grid Cells (Webull Style)
-    // 값이 없어도 에러가 나지 않도록 처리됨
-    if(els.indObi) { els.indObi.innerText = fmt(data.obi); els.indObi.style.color = color(data.obi); }
-    if(els.indObiMom) { els.indObiMom.innerText = fmt(data.obi_mom); els.indObiMom.style.color = color(data.obi_mom); }
+    // 위에서 만든 formatMetric 함수를 사용하여 안전하게 표시
     
+    // 1. 상단 오버레이
+    if(els.overlayTicker) els.overlayTicker.innerText = data.ticker;
+    if(els.overlayPrice) els.overlayPrice.innerText = `$${parseFloat(data.price).toFixed(2)}`;
+
+    // 2. [FIX] 핵심 지표 연결 (0값이어도 표시되도록 formatMetric 사용)
+    // innerText 대신 innerHTML을 써야 span 태그 색상이 먹힘
+    
+    if(els.indObi) els.indObi.innerHTML = formatMetric(data.obi, 2);
+    if(els.indObiMom) els.indObiMom.innerHTML = formatMetric(data.obi_mom, 2);
+    
+    // VPIN (0.8 이상이면 빨간색 경고)
     if(els.indVpin) { 
-        els.indVpin.innerText = fmt(data.vpin); 
+        els.indVpin.innerHTML = formatMetric(data.vpin, 2); 
         els.indVpin.style.color = parseFloat(data.vpin) > 0.8 ? '#FF3B30' : '#333'; 
     }
     
-    if(els.indTickSpeed) els.indTickSpeed.innerText = data.tick_speed || '0';
-    if(els.indTickAccel) { els.indTickAccel.innerText = fmt(data.tick_accel, 1); els.indTickAccel.style.color = color(data.tick_accel); }
+    if(els.indTickSpeed) els.indTickSpeed.innerHTML = data.tick_speed || '0';
     
-    if(els.indVwapDist) { els.indVwapDist.innerText = fmt(data.vwap_dist) + '%'; els.indVwapDist.style.color = color(data.vwap_dist); }
-    if(els.indVwapSlope) { els.indVwapSlope.innerText = fmt(data.vwap_slope, 1); els.indVwapSlope.style.color = color(data.vwap_slope); }
-    if(els.indSqueeze) els.indSqueeze.innerText = fmt(data.squeeze_ratio);
+    // [NEW] 새로 추가된 지표들 (백엔드에서 오는 값 연결)
+    if(els.indTickAccel) els.indTickAccel.innerHTML = formatMetric(data.tick_accel, 1);
+    if(els.indVwapDist) els.indVwapDist.innerHTML = formatMetric(data.vwap_dist, 2) + '%';
+    if(els.indVwapSlope) els.indVwapSlope.innerHTML = formatMetric(data.vwap_slope, 2);
+    if(els.indSqueeze) els.indSqueeze.innerHTML = formatMetric(data.squeeze_ratio, 2);
     
+    // RVOL (3배 이상 굵게, 5배 이상 파란색)
     if(els.indRvol) { 
-        els.indRvol.innerText = fmt(data.rvol, 1) + 'x'; 
-        els.indRvol.style.fontWeight = parseFloat(data.rvol) > 3 ? '800' : '400'; 
-        els.indRvol.style.color = parseFloat(data.rvol) > 5 ? '#007AFF' : '#333';
+        els.indRvol.innerHTML = formatMetric(data.rvol, 1) + 'x'; 
+        const rvolVal = parseFloat(data.rvol);
+        els.indRvol.style.fontWeight = rvolVal > 3 ? '800' : '400'; 
+        els.indRvol.style.color = rvolVal > 5 ? '#007AFF' : '#333';
     }
-    if(els.indAtr) els.indAtr.innerText = fmt(data.atr, 3);
     
-    if(els.indPumpAccel) { els.indPumpAccel.innerText = fmt(data.pump_accel) + '%'; els.indPumpAccel.style.color = color(data.pump_accel); }
-    if(els.indSpread) els.indSpread.innerText = fmt(data.spread) + '%';
+    if(els.indAtr) els.indAtr.innerHTML = formatMetric(data.atr, 3);
+    if(els.indPumpAccel) els.indPumpAccel.innerHTML = formatMetric(data.pump_accel, 2) + '%';
+    if(els.indSpread) els.indSpread.innerHTML = formatMetric(data.spread, 2) + '%';
     
+    // 3. 점수 및 확률
     if(els.indScore) {
         let rawScore = data.ai_score !== undefined ? data.ai_score : (data.ai_prob || 0);
         if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
         const s = Math.round(rawScore);
         
         els.indScore.innerText = s;
-        els.indScore.style.color = s >= 80 ? '#007AFF' : '#333';
+        els.indScore.style.color = s >= 80 ? '#007AFF' : '#333'; // 80점 이상 파란색
         
-        if(els.indProb) els.indProb.innerText = s >= 60 ? `${Math.min(99, Math.round(s*0.95))}%` : '--';
+        if(els.indProb) els.indProb.innerText = s + '%';
     }
     
     if(els.indTimestamp) els.indTimestamp.innerText = new Date().toLocaleTimeString();
 }
+
 // [추가] 신호(Signals) 피드를 그리는 함수
 function renderSignals(logs) {
     if (!els.signals) return;

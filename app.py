@@ -97,11 +97,14 @@ def get_sts_status():
         # 딕셔너리 형태로 데이터를 받기 위해 RealDictCursor 사용
         cursor = conn.cursor(cursor_factory=RealDictCursor) 
         
-        # [핵심 수정] 
-        # 1. FIRED(격발) > AIMING(조준) > 점수 높은 순 정렬
-        # 2. 상위 3개만 조회 (LIMIT 3) -> 화면이 깔끔해짐
+        # [Step 1 수정 완료] 
+        # 기존 쿼리에 누락되었던 핵심 지표 컬럼들(rvol, tick_accel 등)을 모두 추가했습니다.
         query = """
-            SELECT ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status 
+            SELECT 
+                ticker, price, ai_score, status, last_updated,
+                obi, vpin, tick_speed, vwap_dist,
+                -- [NEW] 새로 추가된 지표들
+                obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread
             FROM sts_live_targets
             WHERE last_updated > NOW() - INTERVAL '1 minute'
             ORDER BY 
@@ -121,18 +124,32 @@ def get_sts_status():
             # DB에 점수가 없으면(None) 0으로 처리
             raw_score = r.get('ai_score') or 0
             
+            # [Step 1 수정 완료] JSON 응답에 새로운 지표들을 매핑합니다.
+            # (DB에 값이 없거나 None이면 0으로 처리하여 '--' 표시 방지)
             targets.append({
                 'ticker': r['ticker'],
                 'price': r['price'],
-                'ai_prob': raw_score / 100.0, # 100점 만점 -> 0.xx 확률로 변환
-                'obi': r['obi'],
-                'vpin': r['vpin'],
-                'tick_speed': r['tick_speed'],
-                'vwap_dist': r['vwap_dist'],
-                'status': r['status']
+                'ai_prob': raw_score / 100.0,
+                'status': r['status'],
+                
+                # 기존 지표
+                'obi': r.get('obi') or 0,
+                'vpin': r.get('vpin') or 0,
+                'tick_speed': r.get('tick_speed') or 0,
+                'vwap_dist': r.get('vwap_dist') or 0,
+
+                # [NEW] 신규 지표 추가
+                'obi_mom': r.get('obi_mom') or 0,
+                'tick_accel': r.get('tick_accel') or 0,
+                'vwap_slope': r.get('vwap_slope') or 0,
+                'squeeze_ratio': r.get('squeeze_ratio') or 0,
+                'rvol': r.get('rvol') or 0,
+                'atr': r.get('atr') or 0,
+                'pump_accel': r.get('pump_accel') or 0,
+                'spread': r.get('spread') or 0
             })
             
-        # 2. 최근 신호 로그 (필요 시 활성화, 없으면 빈 리스트)
+        # 2. 최근 신호 로그 (기존 로직 유지)
         try:
             cursor.execute("""
                 SELECT time, ticker, price, score 
