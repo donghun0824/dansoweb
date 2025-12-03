@@ -134,6 +134,7 @@ def init_db():
             cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN atr REAL DEFAULT 0")
             cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN pump_accel REAL DEFAULT 0")
             cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN spread REAL DEFAULT 0")
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN day_change REAL DEFAULT 0")
             conn.commit()
             print("✅ [DB] sts_live_targets 테이블 확장 완료 (모든 지표 저장 가능)")
         except psycopg2.Error:
@@ -508,7 +509,7 @@ class MicrostructureAnalyzer:
             # 1. VWAP 계산
             v = df['volume'].values
             p = df['close'].values
-            df['vwap'] = (p * v).cumsum() / v.cumsum()
+            df['vwap'] = (p * v).cumsum() / (v.cumsum() + 1e-9)
             df['vwap'] = df['vwap'].ffill() 
             
             # 2. VWAP 기울기
@@ -663,6 +664,7 @@ class TargetSelector:
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price,
                     ai_score = EXCLUDED.ai_score,
+                    day_change = EXCLUDED.day_change, -- [중요] 등락률 갱신
                     last_updated = NOW()
                 WHERE sts_live_targets.status != 'FIRED'; -- 이미 발사된 건 건드리지 않음
                 """
@@ -850,19 +852,48 @@ class SniperBot:
                 prob = sum(self.prob_history) / len(self.prob_history)
             except Exception: pass
 
-        # [FIX] 하이브리드 점수 및 Warm-up 보정 로직
-        quant_score, reasons = self.calculate_soft_gate(m)
-        ai_score = prob * 100
+       # --- [VRAX 방지 및 정밀 타격 로직 적용] -----------------------
+
+        # 1. [Critical] Ghost Signal Filter (유령 신호 즉시 차단)
+        # 틱 속도가 2 미만이면 분석 가치가 없으므로 즉시 0점 처리하고 리턴
+        if m['tick_speed'] < 2:
+            self.state = "WATCHING"
+            # 대시보드 0점 갱신 (상태: DEAD_ZONE)
+            asyncio.get_running_loop().run_in_executor(
+                DB_WORKER_POOL, 
+                partial(update_dashboard_db, self.ticker, copy.deepcopy(m), 0, "DEAD_ZONE")
+            )
+            return
+
+        # 2. [Advanced] VPIN Confidence Factor (신뢰도 계수 적용)
+        # 거래가 활발할수록(Tick Speed >= 5) VPIN을 100% 신뢰, 그 미만이면 신뢰도 깎음
+        vpin_confidence = min(1.0, m['tick_speed'] / 5.0)
         
-        # 데이터가 충분하지 않은 경우 (60틱 미만 = 약 1분 미만 데이터)
-        # 정량 지표가 0이라서 점수가 깎이는 것을 방지하기 위해 AI 점수만 사용
-        if len(self.analyzer.raw_ticks) < 60:
-            final_score = ai_score
-            # 대시보드에서 상태를 알 수 있게 로그나 reasons에 표시하고 싶다면 추가
-            if "Warm Up" not in reasons: reasons.append("Warm Up")
+        # 3. 정량 점수 계산 (Confidence 반영)
+        quant_score, reasons = self.calculate_soft_gate(m)
+        quant_score *= vpin_confidence # 거래량 적으면 정량 점수도 낮춤
+
+        ai_score = prob * 100
+        final_score = 0
+        
+        # 4. [Core] Event-Driven Warm-up (데이터 개수 기반)
+        # 3분치 데이터를 가져왔어도 실제 틱이 50개 미만이면 "데이터 부족"으로 판단
+        data_count = len(self.analyzer.raw_ticks)
+        
+        if data_count < 50:
+            final_score = 0 # 원칙적으로 0점
+            
+            # 예외: RVOL이 5배 이상 폭발하는 극초반 펌프는 AI 점수 절반 인정
+            if m['rvol'] > 5.0:
+                final_score = ai_score * 0.5
+            else:
+                if "Insufficient Data" not in reasons: reasons.append("Insufficient Data")
+                self.state = "WARM_UP"
         else:
-            # 데이터가 충분하면 정량 점수(40%) 반영
+            # 데이터 충분 시: 정상적인 하이브리드 점수 산출
             final_score = (ai_score * 0.6) + (quant_score * 0.4)
+            
+        # ----------------------------------------------------------- 
 
         # [SniperBot.update_dashboard_db 내부]
         now = time.time()

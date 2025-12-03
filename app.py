@@ -102,6 +102,7 @@ def get_sts_status():
         query = """
             SELECT 
                 ticker, price, ai_score, status, last_updated,
+                day_change, -- [NEW] 여기서 등락률을 DB에서 꺼내옵니다!
                 obi, vpin, tick_speed, vwap_dist,
                 -- [NEW] 새로 추가된 지표들
                 obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread
@@ -131,6 +132,9 @@ def get_sts_status():
                 'price': r['price'],
                 'ai_prob': raw_score / 100.0,
                 'status': r['status'],
+
+                # [FIX] 프론트엔드로 등락률 전달 (없으면 0)
+                'change': r.get('day_change') or 0,
                 
                 # 기존 지표
                 'obi': r.get('obi') or 0,

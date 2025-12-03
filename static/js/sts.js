@@ -161,30 +161,37 @@ function renderScannerList(targets) {
         return;
     }
 
+    // 4. 타겟 목록 렌더링 루프
     targets.forEach(item => {
-        // 1. 점수 계산 (1 이하면 100 곱하기)
+        // --- [A] 점수 계산 및 포맷팅 ---
+        // 0.xx 확률값이면 100을 곱해서 점수로 변환
         let rawScore = item.ai_score !== undefined ? item.ai_score : (item.ai_prob || 0);
         if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
         const score = Math.round(rawScore);
 
-        // 2. 가격 포맷
+        // --- [B] 가격 포맷팅 ---
         const priceVal = item.price ? parseFloat(item.price) : 0;
         const priceStr = priceVal.toFixed(2);
 
-        // 3. 등락률 계산 및 색상 결정
+        // --- [C] 등락률 계산 및 색상 결정 (핵심 수정 사항) ---
+        // 백엔드에서 'day_change' 혹은 'change'로 들어오는 값을 받음
         const chgVal = parseFloat(item.change || item.day_change || 0);
-        const chgStr = (chgVal > 0 ? '+' : '') + chgVal.toFixed(2) + '%';
         
+        // 부호 처리 (+ 기호 붙이기)
+        const sign = chgVal > 0 ? '+' : '';
+        const chgStr = `${sign}${chgVal.toFixed(2)}%`;
+        
+        // CSS 클래스 결정 (CSS에 정의된 .up, .down, .flat 사용)
         let chgClass = 'flat';
-        if (chgVal > 0) chgClass = 'up';
-        if (chgVal < 0) chgClass = 'down';
+        if (chgVal > 0) chgClass = 'up';     // 양수: 초록
+        if (chgVal < 0) chgClass = 'down';   // 음수: 빨강
 
-        // 4. 고득점(80점 이상) 여부 확인 -> 클래스 추가
+        // --- [D] 상태 클래스 (고득점, 선택됨) ---
         const isHighScore = score >= 80;
         const activeClass = (item.ticker === currentTicker) ? 'active' : '';
         const highScoreClass = isHighScore ? 'high-score' : '';
 
-        // 5. [디자인 변경 핵심] 새로운 HTML 구조 생성 (좌우 분리 + 배지 적용)
+        // --- [E] HTML 조립 (배지 적용됨) ---
         const html = `
             <div class="ticker-row ${highScoreClass} ${activeClass}" onclick="selectTicker('${item.ticker}')">
                 
@@ -205,7 +212,6 @@ function renderScannerList(targets) {
         els.scannerList.insertAdjacentHTML('beforeend', html);
     });
 }
-
 // [추가] 등락률 표시 헬퍼 (데이터에 change가 있다면 표시)
 function renderMiniChange(item) {
     if (!item.change && !item.day_change) return '';

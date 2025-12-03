@@ -167,10 +167,15 @@
             background: rgba(0, 122, 255, 0.15); color: #007AFF;
         }
 
-        /* 등락률 배지 */
+        /* [Scanner Feed] 등락률 배지 디자인 */
         .t-change-badge {
-             display: inline-flex; padding: 3px 8px; border-radius: 8px;
-             font-size: 11px; font-weight: 700; min-width: 50px; justify-content: center;
+             display: inline-flex; 
+             align-items: center; justify-content: center;
+             padding: 4px 8px; 
+             border-radius: 6px; /* 약간 각진 둥근모서리 */
+             font-size: 12px; font-weight: 700; 
+             min-width: 60px;
+             font-family: "JetBrains Mono", monospace;
         }
         /* 등락률 색상 클래스 */
         .t-change-badge.up { background: rgba(52, 199, 89, 0.15); color: #34C759; }
@@ -250,6 +255,12 @@
             height: auto;      /* 내용만큼 늘어나게 */
             flex: none;        /* 강제 비율 무시 */
         }
+    
+    /* [NEW] Webull 스타일 색상 유틸리티 */
+        .text-up { color: #00C076 !important; font-weight: 700; } /* 상승: 초록 */
+        .text-down { color: #FF3B30 !important; font-weight: 700; } /* 하락: 빨강 */
+        .text-flat { color: #333333 !important; font-weight: 600; } /* 보합: 검정 */
+        .text-blue { color: #007AFF !important; font-weight: 800; } /* 강조: 파랑 */
     }
     </style>   
 </head>
