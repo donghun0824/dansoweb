@@ -143,7 +143,7 @@ function renderScannerList(targets) {
     if (!els.scannerList) return;
     els.scannerList.innerHTML = '';
 
-    // 타겟이 0개일 때 'Waiting...' 텍스트를 지우고 'Scanning...'으로 변경
+    // 타겟이 0개일 때 대기 화면 표시
     if (targets.length === 0) {
         els.scannerList.innerHTML = `
             <div style="padding:40px 20px; text-align:center; color:#86868B;">
@@ -155,34 +155,46 @@ function renderScannerList(targets) {
     }
 
     targets.forEach(item => {
-        // [수정 3] V7.1의 유연한 점수/가격 로직 적용
-        // ai_score가 없으면 ai_prob를 사용하고, ai_prob가 1 이하(소수점)면 100을 곱함
+        // 1. 점수 계산 (1 이하면 100 곱하기)
         let rawScore = item.ai_score !== undefined ? item.ai_score : (item.ai_prob || 0);
-        if (rawScore <= 1 && rawScore > 0) rawScore *= 100; // 확률값 보정
+        if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
         const score = Math.round(rawScore);
 
-        // 가격이 null일 경우 방어
+        // 2. 가격 포맷
         const priceVal = item.price ? parseFloat(item.price) : 0;
         const priceStr = priceVal.toFixed(2);
 
-        // Highlight active ticker
-        const isActive = (item.ticker === currentTicker) ? 'background:rgba(0,122,255,0.08); border-left:3px solid #007AFF;' : 'border-left:3px solid transparent;';
+        // 3. 등락률 계산 및 색상 결정
+        const chgVal = parseFloat(item.change || item.day_change || 0);
+        const chgStr = (chgVal > 0 ? '+' : '') + chgVal.toFixed(2) + '%';
+        
+        let chgClass = 'flat';
+        if (chgVal > 0) chgClass = 'up';
+        if (chgVal < 0) chgClass = 'down';
 
+        // 4. 고득점(80점 이상) 여부 확인 -> 클래스 추가
+        const isHighScore = score >= 80;
+        const activeClass = (item.ticker === currentTicker) ? 'active' : '';
+        const highScoreClass = isHighScore ? 'high-score' : '';
+
+        // 5. [디자인 변경 핵심] 새로운 HTML 구조 생성 (좌우 분리 + 배지 적용)
         const html = `
-            <div class="ticker-row" style="${isActive} cursor:pointer; padding:12px 12px; border-bottom:1px solid rgba(0,0,0,0.05); transition: background 0.1s;" onclick="selectTicker('${item.ticker}')">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <div class="t-sym" style="font-weight:700; font-size:15px; color:#1D1D1F; letter-spacing:-0.3px;">${item.ticker}</div>
-                        <div class="t-sub" style="font-size:11px; color:#86868B; margin-top:2px;">
-                            Score <span style="font-weight:600; color:${score >= 80 ? '#007AFF' : (score >= 50 ? '#FF9500' : '#86868B')}">${score}</span>
-                        </div>
-                    </div>
-                    <div style="text-align:right;">
-                        <div class="t-price" style="font-family:'JetBrains Mono'; font-weight:600; font-size:14px; color:#1D1D1F;">$${priceStr}</div>
-                        ${renderMiniChange(item)}
+            <div class="ticker-row ${highScoreClass} ${activeClass}" onclick="selectTicker('${item.ticker}')">
+                
+                <div class="ticker-left">
+                    <div class="t-symbol">${item.ticker}</div>
+                    <div class="t-score-badge">Score ${score}</div>
+                </div>
+
+                <div class="ticker-right">
+                    <div class="t-price">$${priceStr}</div>
+                    <div class="t-change-badge ${chgClass}">
+                        ${chgStr}
                     </div>
                 </div>
+
             </div>`;
+            
         els.scannerList.insertAdjacentHTML('beforeend', html);
     });
 }
