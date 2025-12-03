@@ -175,11 +175,32 @@
         /* Utility */
         .live-indicator { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 8px var(--accent-green); display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        
+        /* 기존 코드의 약 215라인 쯤에 있는 미디어 쿼리 수정 */
         @media (max-width: 1024px) {
-            .layout-container { display: flex; flex-direction: column; height: auto; overflow-y: visible; }
-            .center-col { min-height: 500px; }
+        /* [핵심 수정] 모바일에서는 body의 고정을 풀어야 스크롤이 됨 */
+        body {
+           height: auto !important;       /* 고정 높이 해제 */
+           overflow-y: auto !important;   /* 세로 스크롤 허용 */
+           -webkit-overflow-scrolling: touch; /* 아이폰 등에서 부드러운 스크롤 */
         }
+
+        .layout-container { 
+            display: flex; 
+            flex-direction: column; 
+            height: auto; 
+            overflow-y: visible; 
+            padding-bottom: 40px; /* 맨 아래 여백 확보 */
+        }
+    
+        .center-col { min-height: 500px; }
+    
+        /* [추가 팁] 모바일에서 패널들 간격 조정 */
+        .panel, .right-sub-panel {
+            overflow: visible; /* 내부 스크롤 대신 전체 스크롤 사용 */
+            height: auto;      /* 내용만큼 늘어나게 */
+            flex: none;        /* 강제 비율 무시 */
+        }
+    }
     </style>   
 </head>
 <body>

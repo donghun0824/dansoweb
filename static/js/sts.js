@@ -66,34 +66,28 @@ const els = {
    ========================================================================== */
 
 async function updateDashboard() {
-    // 디버깅을 위한 로그 (나중에 주석 처리 가능)
     // console.log("🔄 Fetching STS Status..."); 
 
     try {
         const res = await fetch('/api/sts/status');
         
-        // [수정 1] 응답 실패 시 로그 출력
         if (!res.ok) {
             console.error(`📡 API Error: ${res.status}`);
             return;
         }
         
-        const data = await res.json();
+        let data = await res.json();
         
-        // [수정 2] 데이터 구조 확인 로그
-        if (!data || !data.targets) {
-            console.warn("⚠️ API 응답에 'targets'가 없습니다:", data);
-            // 데이터가 없어도 UI 초기화를 위해 빈 배열로 진행
-            if (!data) data = { targets: [], logs: [] };
-            if (!data.targets) data.targets = [];
-        }
+        // 데이터 구조 방어 로직
+        if (!data) data = { targets: [], logs: [] };
+        if (!data.targets) data.targets = [];
 
         // 1. Store data mapping
         data.targets.forEach(t => {
             marketDataMap[t.ticker] = t;
         });
 
-        // 2. Render Scanner List (안전한 렌더링)
+        // 2. Render Scanner List
         renderScannerList(data.targets);
         
         // 3. Auto-select logic
@@ -101,7 +95,7 @@ async function updateDashboard() {
             selectTicker(data.targets[0].ticker);
         }
         
-        // 4. Update Bottom Panel (데이터가 있을 때만)
+        // 4. Update Bottom Panel
         if (currentTicker && marketDataMap[currentTicker]) {
             updateKeyStats(marketDataMap[currentTicker]);
         }
@@ -110,8 +104,35 @@ async function updateDashboard() {
         if(els.statusText) els.statusText.innerText = "Active (STS Engine)";
         if(els.countText) els.countText.innerText = `${data.targets.length} Targets`;
 
+        // ============================================================
+        // [수정된 부분] 85점 이상 타겟 자동 시그널 피드 등록 로직
+        // ============================================================
+        
+        // A. 85점 이상인 종목 추출
+        const highScorers = data.targets.filter(item => {
+            // 점수/확률 정규화 (1 이하면 100 곱하기)
+            let rawScore = item.ai_score !== undefined ? item.ai_score : (item.ai_prob || 0);
+            if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
+            
+            return Math.round(rawScore) >= 85; // 85점 이상만 통과
+        });
+
+        // B. 시그널 포맷으로 변환
+        const autoSignals = highScorers.map(item => ({
+            ticker: item.ticker,
+            price: item.price,
+            timestamp: new Date().toLocaleTimeString(), // 현재 시간 찍기
+            type: 'AI_SNIPER'
+        }));
+
+        // C. 기존 서버 로그와 합치기 (서버 로그가 없으면 자동 시그널만 표시)
+        const finalLogs = [...(data.logs || []), ...autoSignals];
+
         // 6. Render Signals Log
-        if (data.logs) renderSignals(data.logs);
+        // 데이터가 있거나, 자동 생성된 시그널이 있으면 렌더링
+        if (finalLogs.length > 0) {
+            renderSignals(finalLogs);
+        }
 
     } catch (e) {
         console.error("🚨 Dashboard Sync Error:", e);
@@ -347,11 +368,75 @@ setInterval(updateDashboard, 1000); // 1-second polling
 updateDashboard();
 
 document.addEventListener('DOMContentLoaded', () => {
+    // ------------------------------------------------------------
+    // 1. 기존 로직: 알림 구독 버튼 및 서비스 워커 등록
+    // ------------------------------------------------------------
     const subBtn = document.getElementById('subscribe-btn');
     if (subBtn) subBtn.addEventListener('click', requestNotificationPermission);
     
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(console.error);
+    }
+
+    // ------------------------------------------------------------
+    // 2. [수정됨] 채팅 기능 활성화 (HTML ID/Class 정밀 매칭)
+    // ------------------------------------------------------------
+    
+    // HTML의 <input class="chat-input"> 찾기
+    const chatInput = document.querySelector('.chat-input'); 
+
+    // HTML의 <button id="post-submit-btn"> 찾기
+    const chatBtn = document.getElementById('post-submit-btn');
+
+    // HTML의 <div id="community-feed-container"> 찾기
+    const chatBody = document.getElementById('community-feed-container');
+
+    // 메시지 전송 처리 함수
+    function sendMsg() {
+        if (!chatInput || !chatInput.value.trim()) return;
+        
+        const msg = chatInput.value.trim();
+        const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+        // 내 말풍선 HTML 생성 (우측 정렬 + 파란색 배경)
+        const html = `
+            <div style="display:flex; justify-content:flex-end; margin: 8px 0; padding-right:10px;">
+                <div style="max-width:85%; text-align:right;">
+                    <div style="background:#007AFF; color:white; padding:8px 12px; border-radius:12px 12px 0 12px; font-size:13px; display:inline-block; text-align:left;">
+                        ${msg}
+                    </div>
+                    <div style="font-size:10px; color:#ccc; margin-top:2px; margin-right:2px;">${time}</div>
+                </div>
+            </div>`;
+        
+        // 화면에 추가
+        if (chatBody) {
+            chatBody.insertAdjacentHTML('beforeend', html);
+            chatBody.scrollTop = chatBody.scrollHeight; // 스크롤을 맨 아래로 이동
+        }
+        
+        chatInput.value = ''; // 입력창 초기화
+        
+        // (선택 사항) 서버로 메시지 전송이 필요하면 여기에 fetch 코드 추가
+        // console.log("Message sent:", msg);
+    }
+
+    // 클릭 이벤트 연결 (버튼)
+    if (chatBtn) {
+        chatBtn.addEventListener('click', (e) => {
+            e.preventDefault(); // 폼 제출로 인한 새로고침 방지
+            sendMsg();
+        });
+    }
+
+    // 엔터키 이벤트 연결 (입력창)
+    if (chatInput) {
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault(); // 엔터키로 인한 폼 제출 방지
+                sendMsg();
+            }
+        });
     }
 });
 
@@ -360,13 +445,33 @@ async function requestNotificationPermission() {
     if (permission === 'granted') getFCMToken();
 }
 
+// Service Worker 대기 로직이 포함된 안전한 토큰 발급 함수
 async function getFCMToken() {
     try {
+        // [수정] Service Worker가 완전히 준비될 때까지 대기
+        const registration = await navigator.serviceWorker.ready;
+
         const vapidKey = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
-        const token = await getToken(messaging, { vapidKey });
+        
+        // [수정] getToken 호출 시 registration 객체를 명시적으로 전달
+        const token = await getToken(messaging, { 
+            vapidKey: vapidKey,
+            serviceWorkerRegistration: registration 
+        });
+
         if (token) {
-            fetch("/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
+            // 토큰 획득 성공 시 서버로 전송
+            await fetch("/subscribe", { 
+                method: "POST", 
+                headers: { "Content-Type": "application/json" }, 
+                body: JSON.stringify({ token }) 
+            });
             alert("✅ Alerts Enabled!");
+            console.log("FCM Token registered:", token);
+        } else {
+            console.warn("No registration token available. Request permission to generate one.");
         }
-    } catch(e) { console.error(e); }
+    } catch(e) { 
+        console.error("🚨 FCM Token Error:", e);
+    }
 }
