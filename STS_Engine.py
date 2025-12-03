@@ -134,11 +134,17 @@ def init_db():
             cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN atr REAL DEFAULT 0")
             cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN pump_accel REAL DEFAULT 0")
             cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN spread REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN day_change REAL DEFAULT 0")
             conn.commit()
             print("✅ [DB] sts_live_targets 테이블 확장 완료 (모든 지표 저장 가능)")
         except psycopg2.Error:
-            conn.rollback() # 이미 있으면 패스
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN day_change REAL DEFAULT 0")
+            conn.commit()
+            print("✅ [DB] 'day_change' column added successfully.")
+        except psycopg2.Error:
+            conn.rollback() # 이미 있으면 패스   
             
         cursor.close()
         db_pool.putconn(conn)
