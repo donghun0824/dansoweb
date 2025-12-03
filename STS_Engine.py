@@ -72,7 +72,7 @@ db_pool = None
 # 2. DATABASE & FIREBASE SETUP
 # ==============================================================================
 def init_db():
-    """DB 커넥션 풀 및 테이블 초기화"""
+    """DB 커넥션 풀 및 테이블 초기화 (안전한 컬럼 추가 로직 적용)"""
     global db_pool
     if not DATABASE_URL: return
     try:
@@ -84,6 +84,9 @@ def init_db():
         conn = db_pool.getconn()
         cursor = conn.cursor()
         
+        # ---------------------------------------------------------
+        # 1. 테이블 생성 (기존 코드 유지)
+        # ---------------------------------------------------------
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS sts_live_targets (
             ticker TEXT PRIMARY KEY,
@@ -97,7 +100,7 @@ def init_db():
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
-        # [V5.3] score 컬럼 추가
+        
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id SERIAL PRIMARY KEY, 
@@ -107,6 +110,7 @@ def init_db():
             time TIMESTAMP NOT NULL
         );
         """)
+        
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS fcm_tokens (
             id SERIAL PRIMARY KEY, 
@@ -116,38 +120,54 @@ def init_db():
         );
         """)
         conn.commit()
-        
-        # 컬럼 추가 마이그레이션 (기존 테이블 대응)
+
+        # ---------------------------------------------------------
+        # 2. 컬럼 마이그레이션 (기존 코드 유지)
+        # ---------------------------------------------------------
         try:
             cursor.execute("ALTER TABLE signals ADD COLUMN score REAL")
             conn.commit()
         except psycopg2.Error:
             conn.rollback()
-        # [Phase 9.5] 대시보드용 테이블 확장 (누락된 컬럼 추가)
-        try:
-            # 기존 컬럼 외에 Webull 패널에 필요한 데이터 추가
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN obi_mom REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN tick_accel REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN vwap_slope REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN squeeze_ratio REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN rvol REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN atr REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN pump_accel REAL DEFAULT 0")
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN spread REAL DEFAULT 0")
-            conn.commit()
-            print("✅ [DB] sts_live_targets 테이블 확장 완료 (모든 지표 저장 가능)")
-        except psycopg2.Error:
-            conn.rollback()
 
-        try:
-            cursor.execute("ALTER TABLE sts_live_targets ADD COLUMN day_change REAL DEFAULT 0")
-            conn.commit()
-            print("✅ [DB] 'day_change' column added successfully.")
-        except psycopg2.Error:
-            conn.rollback() # 이미 있으면 패스   
+        # ---------------------------------------------------------
+        # 3. [수정됨] sts_live_targets 테이블 확장 (리스트 & 반복문 적용)
+        # 기존: 하나라도 실패하면 전체 취소됨
+        # 수정: 하나씩 시도하여 실패한 것(이미 있는 것)만 건너뜀
+        # ---------------------------------------------------------
+        
+        # 추가할 컬럼 목록 정의 (obi_mom부터 day_change까지 포함)
+        target_columns = [
+            "obi_mom REAL DEFAULT 0",
+            "tick_accel REAL DEFAULT 0",
+            "vwap_slope REAL DEFAULT 0",
+            "squeeze_ratio REAL DEFAULT 0",
+            "rvol REAL DEFAULT 0",
+            "atr REAL DEFAULT 0",
+            "pump_accel REAL DEFAULT 0",
+            "spread REAL DEFAULT 0",
+            "day_change REAL DEFAULT 0"  # 기존 맨 아래 있던 day_change도 포함
+        ]
+
+        print("🔄 [DB] Checking and adding columns...")
+        
+        for col_def in target_columns:
+            try:
+                # 구문 실행: ALTER TABLE ... ADD COLUMN ...
+                cursor.execute(f"ALTER TABLE sts_live_targets ADD COLUMN {col_def}")
+                conn.commit()
+                # 컬럼명만 추출해서 로그 출력 (예: "rvol REAL..." -> "rvol")
+                col_name = col_def.split()[0]
+                print(f"🆕 [DB] Added column: {col_name}")
+            except psycopg2.Error:
+                # 이미 컬럼이 존재하면 에러가 나므로, 그 건만 롤백하고 다음으로 넘어감
+                conn.rollback()
+        
+        print("✅ [DB] Table Schema Verified & Updated.")
             
         cursor.close()
         db_pool.putconn(conn)
+        
     except Exception as e:
         print(f"❌ [DB Init Error] {e}")
 
@@ -284,9 +304,12 @@ def log_signal_to_db(ticker, price, score, entry=0, tp=0, sl=0, strategy=""):
     finally:
         if conn: db_pool.putconn(conn)
 
-# [수정] 알림 디자인 고도화 (이모지 & 손익비 표시)
+# [수정된 알림 전송 함수] 로그 기능 강화 (기존 로직 유지)
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
-    if not firebase_admin._apps: return
+    # 1. Firebase 초기화 체크
+    if not firebase_admin._apps:
+        print(f"⚠️ [FCM] Firebase not initialized. Skipping alert for {ticker}.", flush=True)
+        return
 
     conn = None
     try:
@@ -296,28 +319,23 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         subscribers = cursor.fetchall()
         cursor.close()
         
+        # 구독자가 없으면 로그 남기고 종료
         if not subscribers:
+            print(f"⚠️ [FCM] No subscribers found. Skipping alert for {ticker}.", flush=True)
             db_pool.putconn(conn)
             return
 
-        # 1. 점수별 티어 이모지 설정
-        if probability_score >= 90:
-            icon = "💎 ELITE"
-        elif probability_score >= 80:
-            icon = "🔥 HOT"
-        else:
-            icon = "✅ VALID"
+        # 2. 알림 내용 구성 (기존 디자인 유지)
+        if probability_score >= 90: icon = "💎 ELITE"
+        elif probability_score >= 80: icon = "🔥 HOT"
+        else: icon = "✅ VALID"
 
-        # 2. 알림 제목 구성
         noti_title = f"{icon} {ticker} 포착! (점수: {probability_score})"
-
-        # 3. 알림 본문 구성 (전략 유무에 따라 다르게)
+        
         if entry and tp and sl:
-            # 손익비 계산
             risk = entry - sl
             reward = tp - entry
             rr = reward / risk if risk > 0 else 0
-            
             noti_body = (
                 f"Entry: ${entry:.3f}\n"
                 f"🎯 TP: ${tp:.3f} | 🛡️ SL: ${sl:.3f}\n"
@@ -326,18 +344,24 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         else:
             noti_body = f"현재가: ${price:.4f} | AI 확신도: {probability_score}%"
 
-        # 4. 데이터 페이로드
         data_payload = {
             'type': 'signal', 'ticker': ticker, 
             'price': str(price), 'score': str(probability_score), 
             'title': noti_title, 'body': noti_body
         }
         
-        # 5. 전송 로직 (기존과 동일하지만 안정성 강화)
+        # 3. [로그 추가] 전송 시작 알림 (몇 명에게 보내는지 확인)
+        print(f"🔔 [FCM] Sending alert for {ticker} to {len(subscribers)} devices...", flush=True)
+
+        success_count = 0
         failed_tokens = []
+        
+        # 4. 전송 루프
         for row in subscribers:
             token = row[0]
             user_min_score = row[1] if row[1] is not None else 0 
+            
+            # 사용자 설정 점수 미달 시 스킵 (로그는 너무 많아질 수 있으니 생략)
             if probability_score < user_min_score: continue
 
             try:
@@ -359,19 +383,32 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                     )
                 )
                 messaging.send(message)
+                success_count += 1
             except Exception as e:
+                # [로그 추가] 전송 실패 시 구체적 에러 출력
+                print(f"❌ [FCM Fail] Token: {token[:10]}... Error: {e}", flush=True)
+                
                 # 토큰 만료 에러 등은 삭제 대상에 추가
                 if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e): 
                     failed_tokens.append(token)
         
+        # 5. [로그 추가] 최종 결과 리포트
+        if success_count > 0:
+            print(f"✅ [FCM] Successfully sent to {success_count} devices.", flush=True)
+        else:
+            # 보낼 대상이 있었는데 성공이 0이면 문제 상황
+            print(f"⚠️ [FCM] Zero success. Check tokens, network, or user min_score filters.", flush=True)
+
+        # 만료된 토큰 DB 삭제 처리
         if failed_tokens:
             c = conn.cursor()
             c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
             conn.commit()
             c.close()
+            print(f"🗑️ [FCM] Cleaned up {len(failed_tokens)} invalid tokens.", flush=True)
 
     except Exception as e:
-        print(f"❌ [FCM Error] {e}", flush=True)
+        print(f"❌ [FCM Critical Error] {e}", flush=True)
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)
@@ -918,8 +955,25 @@ class SniperBot:
             self.last_db_update = now
             self.last_logged_state = self.state
 
+        # [수정 후 코드] 점수는 높은데 필터에 걸린 경우, 이유를 로그로 출력
         if self.state != "FIRED":
-            if is_bad_spread or is_low_vol or m['vpin'] > STS_MAX_VPIN: return 
+            # 1. VPIN(독성) 필터
+            if m['vpin'] > STS_MAX_VPIN:
+                # 점수가 80점 이상인데 안 샀다면 이유를 출력 (로그 스팸 방지 위해 고득점만 표시)
+                if final_score >= 80:
+                    print(f"🛡️ [FILTER] {self.ticker} Score:{final_score:.0f} but VPIN:{m['vpin']:.2f} (Too Toxic) -> Skipped", flush=True)
+                return
+
+            # 2. Spread(호가 공백) 필터
+            if is_bad_spread:
+                if final_score >= 80:
+                    print(f"🛡️ [FILTER] {self.ticker} Score:{final_score:.0f} but Spread:{m['spread']:.2f}% (Too Wide) -> Skipped", flush=True)
+                return
+
+            # 3. RVOL(거래량) 필터
+            if is_low_vol:
+                # 거래량 부족은 흔하므로 로그 생략하거나 필요하면 추가
+                return
 
         self.logger.log_replay({
             'timestamp': m['timestamp'], 'ticker': self.ticker, 'price': m['last_price'], 
