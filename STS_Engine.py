@@ -721,27 +721,29 @@ class TargetSelector:
         finally:
             if conn: db_pool.putconn(conn)
 
-    # [핵심 수정] 3분 주기: RVOL 및 Liquidity 기반 Top 10 선정
+    # [핵심 수정] 3분 주기: Scanner가 쓰레기 종목을 DB에 넣지 않도록 수정
     def get_top_gainers_candidates(self, limit=10):
         scored = []
         now = time.time()
         
         # 1. 전체 스캔
         for t, d in self.snapshots.items():
-            if now - d['last_updated'] > 600: continue # 죽은 데이터 제외
+            # 죽은 데이터(1분 이상 갱신 없는 놈) 가차 없이 제외
+            if now - d['last_updated'] > 60: continue 
             
             # [Filter 1] Price Cap: $50 이하
             if d['c'] > STS_MAX_PRICE: continue
             
-            # [Filter 2] Liquidity Floor: 거래대금 필터
+            # [Filter 2] Liquidity Floor: 거래대금 필터 (빡세게 수정)
+            # 기존 STS_MIN_DOLLAR_VOL 변수 대신 30,000달러(약 4천만원)로 고정
             dollar_vol = d['c'] * d['v']
-            if dollar_vol < STS_MIN_DOLLAR_VOL: continue
+            if dollar_vol < 30000: continue 
 
-            # [Score Logic] 등락률 + 거래대금 가중치
+            # [Score Logic] 등락률 확인
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
-            
-            if change_pct < 1.0: continue
+            if change_pct < 1.0: continue # 1%도 안 오른 놈은 취급 안 함
 
+            # 점수 산정
             score = change_pct * np.log1p(dollar_vol)
             scored.append((t, score, change_pct, dollar_vol))
         
@@ -751,11 +753,12 @@ class TargetSelector:
         # Top 10 추출
         top_list = scored[:limit]
 
-        # 로그 출력
+        # 🔥 [핵심 수정] 여기서 DB 저장을 하지 않습니다!
+        # self.save_candidates_to_db(top_list)  <-- 이 줄을 삭제했습니다.
+        # 이유: 여기서 저장하면 데이터(Tick)가 없는 놈도 화면에 떠서 0.00으로 도배됨.
+        
         if top_list:
-            # 🔥 [핵심] 찾은 놈들을 DB에 저장해라! (그래야 UI에 뜸)
-            self.save_candidates_to_db(top_list)
-            print(f"🔎 [Scanner] Top Candidate: {top_list[0][0]} (Chg:{top_list[0][2]:.1f}%) -> Saved to DB", flush=True)
+            print(f"🔎 [Scanner] Candidates Found: {len(top_list)} items (DB Save Skipped)", flush=True)
 
         return [x[0] for x in top_list]
 
@@ -850,12 +853,18 @@ class SniperBot:
 
         m = self.analyzer.get_metrics()
         
-        if not m:
-            now = time.time()
-            if now - self.last_db_update > 2.0:
-                dummy = {'last_price': tick_data['p'], 'obi': 0, 'vpin': 0, 'tick_speed': 0, 'vwap_dist': 0}
-                update_dashboard_db(self.ticker, dummy, 0, "WARM_UP")
-                self.last_db_update = now
+        # ==========================================================
+        # 🔥 [여기부터 수정] 입구컷 필터 적용 (쓰레기 데이터 차단)
+        # ==========================================================
+        
+        # 1. 데이터가 없거나(None), 거래가 아예 없는(tick_speed=0) 시체는 즉시 리턴
+        # -> 이러면 Warm-up 중이거나 거래량 없는 종목은 화면(DB)에 절대 안 뜸
+        if not m or m['tick_speed'] == 0:
+            return 
+
+        # 2. VPIN(독성)이 0.8 넘는 설거지 종목도 즉시 리턴
+        # -> 화면에 띄워봤자 어차피 안 살 거니까 리소스 낭비 방지
+        if m['vpin'] > 0.8:
             return
         
         # ATR 정밀 업데이트
@@ -1198,7 +1207,14 @@ class STSPipeline:
             try:
                 # [변경점] ping_interval 인자를 제거했습니다. (기본값 사용)
                 # 대신 뒤에서 manual_keepalive가 강제로 핑을 쏴줄 겁니다.
-                async with websockets.connect(WS_URI, ping_timeout=60) as ws:
+                    # [수정됨] 고성능 데이터 수신을 위한 웹소켓 설정
+                async with websockets.connect(
+                    WS_URI,
+                    ping_interval=None,   # 1. 자동 Ping 비활성화 (가장 중요!)
+                    ping_timeout=180,     # 2. 서버가 침묵해도 기다리는 시간 늘림
+                    max_queue=None,       # 3. 수신 버퍼 크기 제한 해제
+                    close_timeout=10      # 4. 종료 시 대기 시간
+                ) as ws:                  
                     print("✅ [STS V5.3] Pipeline Started with Heartbeat", flush=True)
                     
                     await ws.send(json.dumps({"action": "auth", "params": POLYGON_API_KEY}))
