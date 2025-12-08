@@ -291,8 +291,12 @@ nav {
 }
 
 .chart-overlay {
-    background: rgba(255, 255, 255, 0.8);
-    backdrop-filter: blur(8px);
+    /* 1. 배경을 좀 더 불투명하게 변경 (0.8 -> 0.95 또는 #fff) */
+    background: rgba(255, 255, 255, 0.95);
+
+    /* 2. 블러 효과는 과감하게 삭제 또는 주석 처리 */
+    /* backdrop-filter: blur(8px); */ 
+    
     padding: 8px 16px;
     border-radius: 12px;
     border: 1px solid rgba(0,0,0,0.05);
@@ -326,8 +330,12 @@ nav {
 }
 
 .metric-cell {
-    background: rgba(255, 255, 255, 0.85) !important;
-    backdrop-filter: blur(10px);
+    /* 1. 배경을 투명도 없는 완전 흰색으로 변경 (가장 빠름) */
+    background: #ffffff !important; 
+    
+    /* 2. 블러 효과 삭제 (필수!) */
+    /* backdrop-filter: blur(10px); */ 
+
     box-shadow: none !important;
     transition: background 0.2s ease !important;
     padding: 12px 6px !important;
