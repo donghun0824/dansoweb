@@ -327,8 +327,8 @@ function updateKeyStats(data) {
 
     // 2. Stochastic
     if(els.indStoch) {
-        els.indStoch.innerText = fmt(data.stoch_k, 1);
-        els.indStoch.style.color = data.stoch_k <= 20 ? '#00C076' : '#333';
+        els.indStoch.innerText = fmt(data.stoch, 1);
+        els.indStoch.style.color = data.stoch <= 20 ? '#00C076' : '#333';
     }
 
     // 3. Fibonacci

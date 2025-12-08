@@ -833,366 +833,214 @@ class SniperBot:
         self.prob_history = deque(maxlen=5)
         self.last_db_update = 0
         self.last_logged_state = "WATCHING"
-        # [추가] Ready 알림 쿨타임용 변수
         self.last_ready_alert = 0
-        # [추가] Phase 2-2: 마이크로 테스트용 타이머
         self.aiming_start_time = 0
         self.aiming_start_price = 0
 
-        # [추가] Phase 2: SoftGate 스코어링 (전략적 판단 로직)
-    def calculate_soft_gate(self, m):
-        score = 0
-        reasons = []
-        
-        # [Phase 9] 뉴욕 시간(US/Eastern) 기준 개장 초반 체크 (서버 위치 무관)
-        try:
-            ny_tz = pytz.timezone('US/Eastern')
-            ny_now = datetime.now(ny_tz).time()
-            # 09:30 ~ 10:00 사이를 개장 초반(Volatility Zone)으로 정의
-            is_market_open = (9 <= ny_now.hour < 10) and (ny_now.minute >= 30 or ny_now.hour > 9)
-        except:
-            # 시간대 라이브러리 에러 시 보수적으로 False 처리
-            is_market_open = False
-        
-        # 1. 💥 Squeeze (에너지 응축)
-        # [수정] 분석관 제안: < 0.8(30점), < 1.0(20점) 으로 단계화
-        if m['squeeze_ratio'] <= 0.8:
-            score += 30; reasons.append("Super Squeeze")
-        elif m['squeeze_ratio'] <= 1.0:
-            score += 20; reasons.append("Squeeze Ready")
-        elif m['squeeze_ratio'] > 2.0:
-            score -= 20; reasons.append("Over Extended")
-
-        # 2. 🌊 RVOL (거래량의 질) - [수정] 개장 초반 완화 로직
-        rvol_threshold = 2.0 if is_market_open else 3.0
-        
-        if m['rvol'] > rvol_threshold:
-            score += 20; reasons.append("Volume Spike")
-        elif m['rvol'] < 1.0:
-            score -= 10; reasons.append("Low Volume")
-
-        # 3. 🎯 VWAP Support (지지력)
-        if 0 < m['vwap_dist'] < 3.0 and m['vwap_slope'] > 0:
-            score += 25; reasons.append("Healthy Trend")
-        elif m['vwap_dist'] < -1.0:
-            score -= 10; reasons.append("Below VWAP")
-
-        # 4. 🚀 Acceleration (가속도)
-        if m['pump_accel'] > 0:
-            score += 15
-        elif m['pump_accel'] < 0:
-            score -= 15
-
-        return score, reasons
+    # ==============================================================================
+    # [Module 1] Scoring Engines (스코어링 엔진 분리)
+    # ==============================================================================
     
-    # [NEW] 거래량 정밀 분석 (RVOL & Spike)
-    def check_volume_analysis(self, m):
-        score = 0
-        reasons = []
-        rvol = m.get('rvol', 0)
-        
-        # 1. RVOL 구간별 신호 강도
-        if rvol < 1.0:
-            pass  
-        elif 1.5 <= rvol < 2.0:
-            score += 10; reasons.append(f"Vol Spike (1.5x)")
-        elif 2.0 <= rvol < 3.0:
-            score += 20; reasons.append(f"Strong Vol (2.0x+)")
-        elif 3.0 <= rvol < 4.0:
-            score += 30; reasons.append(f"Super Vol (3.0x+)")
-        elif rvol >= 4.0:
-            # 바닥권 폭발은 호재, 고점 폭발은 위험
-            if m.get('rsi', 50) < 30:
-                score += 40; reasons.append("Selling Climax (Vol 4.0x+)")
-            else:
-                score -= 10; reasons.append("Overheated Vol (Risk)")
-
-        # 2. 거래량 다이버전스 (눌림목 반등 시그널)
-        if m['vwap_dist'] < -0.5: 
-            if m['tick_accel'] > 0 and rvol > 1.5:
-                score += 15; reasons.append("Healthy Dip Reversal")
-
-        return score, reasons
-    
-    def check_rebound_setup(self, m):
-        """[Strict] 4대 반등 조건 (과매도/다이버전스/스퀴즈/주문장) 검증"""
+    # 전략 A: 줍줍 (Rebound) - 과매도, 밴드 수축, 하락 추세
+    def _calc_rebound_score(self, m):
         score = 0
         reasons = []
         
-        # get_metrics에서 계산한 신규 지표들 가져오기
+        # 1. RSI 과매도 (30 이하)
         rsi = m.get('rsi', 50)
-        stoch = m.get('stoch_k', 50)
-        fibo = m.get('fibo_pos', 0.5)
-        rvol = m.get('rvol', 0)
-        
-        # -----------------------------------------------------------
-        # [Filter 1] 주문장 확인 (Gatekeeper) - 이거 통과 못하면 시그널 무효화
-        # -----------------------------------------------------------
-        # 조건: VPIN < 0.8 (독성 없음) AND (OBI 양전 OR 스프레드 축소)
-        is_order_flow_valid = False
-        
-        if m['vpin'] < 0.8:
-            # OBI 양수 전환 (매도->매수 우위)
-            if m.get('obi_reversal_flag', 0) == 1:
-                is_order_flow_valid = True
-                score += 10; reasons.append("Order Flow Reversal")
-            # 또는 이미 OBI가 양수이고 스프레드가 좁음 (안정적)
-            elif m['obi'] > 0 and m['spread'] < 0.1:
-                is_order_flow_valid = True
-        
-        # 주문장 조건 불만족 시 즉시 탈락 (0점 리턴)
-        if not is_order_flow_valid:
-            return 0, ["Order Flow Fail"]
-
-        # -----------------------------------------------------------
-        # [Condition 1] 과매도 + 거래량 증가
-        # -----------------------------------------------------------
-        # RSI<30 OR Stoch<20, Fibo 38.2-61.8%, RVOL>=1.5 (LuxAlgo)
-        is_oversold = (rsi < 30) or (stoch < 20)
-        is_fibo_zone = (0.35 <= fibo <= 0.65) # 0.382 ~ 0.618 근처
-        is_vol_spike = (rvol >= 1.5)
-        
-        if is_oversold and is_fibo_zone and is_vol_spike:
-            score += 40
-            reasons.append(f"Oversold Bounce (RSI{rsi:.0f}/Vol{rvol:.1f})")
-
-        # -----------------------------------------------------------
-        # [Condition 2] RSI 다이버전스 (잠재적 반전)
-        # -----------------------------------------------------------
-        # RVOL이 1~2.5 사이에서 증가하며 다이버전스 발생
-        if m.get('rsi_div_flag', 0) == 1 and (1.0 <= rvol <= 2.5):
-            score += 30
-            reasons.append("RSI Divergence Setup")
-
-        # -----------------------------------------------------------
-        # [Condition 3] 볼린저 스퀴즈 + 돌파
-        # -----------------------------------------------------------
-        # 밴드폭 좁음(1.0이하) + 하단 터치 + 양봉(accel>0) + RVOL>2
+        if rsi < 30:
+            score += 40; reasons.append(f"Oversold(RSI{rsi:.0f})")
+        elif rsi < 40:
+            score += 20
+            
+        # 2. Squeeze (밴드 수축)
         if m['squeeze_ratio'] <= 1.0:
-            if m.get('lower_touch', 0) == 1: # 하단 밴드 터치 (새로 만든 지표)
-                if m['tick_accel'] > 0:      # 양봉 발생 (속도 증가)
-                    if rvol > 2.0:           # 거래량 실림
-                        score += 50          # 가장 강력한 신호
-                        reasons.append("Squeeze Breakout")
+            score += 30; reasons.append("Squeeze Ready")
+            
+        # 3. VWAP 하회 (저평가)
+        if m['vwap_dist'] < -1.0:
+            score += 20; reasons.append("Cheap Zone")
+            
+        # 4. 거래량 다이버전스
+        if m['vwap_dist'] < -0.5 and m['rvol'] > 1.5 and m['tick_accel'] > 0:
+            score += 10; reasons.append("Dip Reversal")
 
-        # 점수가 너무 낮으면(조건 불만족) 무효화
-        if score < 30:
-            return 0, ["Weak Signal"]
+        return max(score, 0), reasons
 
-        return score, reasons
-    
-    def update_dashboard_db(self, tick_data, quote_data, agg_data):
-        now = time.time()
-        self.analyzer.update_tick(tick_data, quote_data)
+    # 전략 B: 불타기 (Momentum) - 밴드 확장, VWAP 돌파, 거래량 폭발
+    def _calc_momentum_score(self, m):
+        score = 0
+        reasons = []
         
+        # 1. RSI 상승 가속 구간 (50~80)
+        rsi = m.get('rsi', 50)
+        if 50 <= rsi <= 80:
+            score += 30; reasons.append("Momentum Zone")
+        elif rsi > 85:
+            score -= 10; reasons.append("RSI Overheated") 
+            
+        # 2. Expansion (밴드 확장) & 양봉 -> 변동성 돌파
+        if m['squeeze_ratio'] > 2.0:
+            if m['tick_accel'] > 0 and m['rvol'] > 2.0:
+                score += 40; reasons.append("Vol Breakout 🚀")
+            else:
+                score -= 10 # 거래량 없는 확장은 위험
+                
+        # 3. VWAP 상회 (정배열)
+        if m['last_price'] > m['vwap']:
+            score += 20; reasons.append("Trend Up")
+            
+        # 4. RVOL 폭발 (핵심 트리거)
+        if m['rvol'] > 3.0:
+            score += 30; reasons.append("Volume Spike 🔥")
+        elif m['rvol'] > 2.0:
+            score += 15
+
+        return max(score, 0), reasons
+
+    # ==============================================================================
+    # [Module 2] Adaptive Filtering (적응형 필터 - VPIN 역설 해결)
+    # ==============================================================================
+    def _check_filters(self, m, strategy, final_score):
+        # 1. 공통 필터
+        if m['spread'] > 1.2:
+            return False, f"High Spread({m['spread']:.2f}%)"
+        if m['tick_speed'] < 2:
+            return False, "Dead Zone"
+
+        # 2. 전략별 가변 필터
+        if strategy == "REBOUND":
+            # 줍줍: 안전 제일 (VPIN 0.8 미만)
+            if m['vpin'] > 0.8: return False, f"High VPIN({m['vpin']:.2f})"
+            if m['rvol'] < 1.0: return False, "Low Volume"
+            
+        elif strategy in ["MOMENTUM", "DIP_AND_RIP"]:
+            # 불타기: 독성 허용 (VPIN 1.5까지 완화)
+            if m['vpin'] > 1.5: 
+                return False, f"Extreme Toxic({m['vpin']:.2f})"
+            # 대신 거래량 필수
+            if m['rvol'] < 2.5: 
+                return False, f"Weak Pump Vol({m['rvol']:.1f})"
+                
+        return True, "PASS"
+
+    # ==============================================================================
+    # [Module 3] Main Logic (통합 및 실행)
+    # ==============================================================================
+    def update_dashboard_db(self, tick_data, quote_data, agg_data):
+        self.analyzer.update_tick(tick_data, quote_data)
         if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
         if self.vwap == 0: self.vwap = tick_data['p']
-
         m = self.analyzer.get_metrics()
         
-        # ==========================================================
-        # 🔥 [여기부터 수정] 입구컷 필터 적용 (쓰레기 데이터 차단)
-        # ==========================================================
-        
-        # 1. 데이터가 없거나(None), 거래가 아예 없는(tick_speed=0) 시체는 즉시 리턴
-        # -> 이러면 Warm-up 중이거나 거래량 없는 종목은 화면(DB)에 절대 안 뜸
-        if not m or m['tick_speed'] == 0:
-            return 
+        if not m or m['tick_speed'] == 0: return 
 
-        # 2. VPIN(독성)이 0.8 넘는 설거지 종목도 즉시 리턴
-        # -> 화면에 띄워봤자 어차피 안 살 거니까 리소스 낭비 방지
-        if m['vpin'] > 0.8:
-            return
-        
-        # ATR 정밀 업데이트
-        if m.get('atr') and m['atr'] > 0:
-            self.atr = m['atr']
-        else:
-            self.atr = max(self.selector.get_atr(self.ticker), tick_data['p'] * 0.01)
+        if m.get('atr') and m['atr'] > 0: self.atr = m['atr']
+        else: self.atr = max(self.selector.get_atr(self.ticker), tick_data['p'] * 0.01)
 
-        # 기본 필터
-        is_bad_spread = m['spread'] > STS_MAX_SPREAD_ENTRY 
-        is_low_vol = m['rvol'] < 1.0 
-
-        # AI 예측 (예외처리 포함)
-        prob = 0.0
+        # 1. AI Score 계산
+        ai_prob = 0.0
         if self.model:
             try:
-                features = [
-                    m['obi'], 
-                    m['obi_mom'], 
-                    m['tick_accel'], # 이제 0 아님
-                    m['vpin'], 
-                    m['vwap_dist'],
-                    m['fibo_pos'],   # 이제 0 아님 (계산됨)
-                    abs(m['fibo_pos'] - 0.382), # fibo_dist_382 (즉석 계산)
-                    m['bb_width_norm'],         # squeeze_ratio와 동일값
-                    1 if m['squeeze_ratio'] < 0.7 else 0, # squeeze_flag
-                    m['rv_60'],      # 이제 0 아님 (계산됨)
-                    m['rvol']        # vol_ratio_60 대체
-                ]
+                features = [m['obi'], m['obi_mom'], m['tick_accel'], m['vpin'], m['vwap_dist'],
+                            m['fibo_pos'], abs(m['fibo_pos'] - 0.382), m['bb_width_norm'],
+                            1 if m['squeeze_ratio'] < 0.7 else 0, m['rv_60'], m['rvol']]
                 features = [0 if (np.isnan(x) or np.isinf(x)) else x for x in features]
-                dtest = xgb.DMatrix(np.array([features]), feature_names=[
-                    'obi', 'obi_mom', 'tick_accel', 'vpin', 'vwap_dist',
-                    'fibo_pos', 'fibo_dist_382', 'bb_width_norm', 'squeeze_flag', 'rv_60', 'vol_ratio_60'
-                ])
-                raw_prob = self.model.predict(dtest)[0]
-                self.prob_history.append(raw_prob)
-                prob = sum(self.prob_history) / len(self.prob_history)
-            except Exception: pass
+                dtest = xgb.DMatrix(np.array([features]), feature_names=['obi', 'obi_mom', 'tick_accel', 'vpin', 'vwap_dist','fibo_pos', 'fibo_dist_382', 'bb_width_norm', 'squeeze_flag', 'rv_60', 'vol_ratio_60'])
+                ai_prob = self.model.predict(dtest)[0]
+                self.prob_history.append(ai_prob)
+                ai_prob = sum(self.prob_history) / len(self.prob_history)
+            except: pass
 
-       # --- [VRAX 방지 및 정밀 타격 로직 적용] -----------------------
+        # 2. Dual Scoring & Strategy Selection
+        score_rebound, reasons_reb = self._calc_rebound_score(m)
+        score_momentum, reasons_mom = self._calc_momentum_score(m)
+        
+        strategy = "WATCHING"
+        quant_score = 0
+        active_reasons = []
 
-        # 1. [Critical] Ghost Signal Filter (유령 신호 즉시 차단)
-        # 틱 속도가 2 미만이면 분석 가치가 없으므로 즉시 0점 처리하고 리턴
-        if m['tick_speed'] < 2:
-            self.state = "WATCHING"
-            # 대시보드 0점 갱신 (상태: DEAD_ZONE)
-            asyncio.get_running_loop().run_in_executor(
-                DB_WORKER_POOL, 
-                partial(update_dashboard_db, self.ticker, copy.deepcopy(m), 0, "DEAD_ZONE")
-            )
-            return
-
-        # 2. [Advanced] VPIN Confidence Factor (신뢰도 계수 적용)
-        # 거래가 활발할수록(Tick Speed >= 5) VPIN을 100% 신뢰, 그 미만이면 신뢰도 깎음
-        vpin_confidence = min(1.0, m['tick_speed'] / 5.0)
+        # [Confluence Logic] 합의된 공식: (A + B) * 0.7
+        quant_score = (score_rebound + score_momentum) * 0.7
         
-        # 3. 정량 점수 계산 (Confidence 반영)
-        quant_score, reasons = self.calculate_soft_gate(m)
-        quant_score *= vpin_confidence
-        
-        # 🔥 [NEW] 반등(Rebound) 전략 점수 계산
-        rebound_score, rebound_reasons = self.check_rebound_setup(m)
-        
-        # 전략 선택: 돌파(Momentum) vs 반등(Rebound) 중 더 높은 점수 채택
-        final_strategy = "MOMENTUM"
-        if rebound_score > quant_score:
-            quant_score = rebound_score # 반등 점수가 더 높으면 이걸 씀
-            reasons = rebound_reasons   # 이유도 반등 관련으로 교체
-            final_strategy = "REBOUND"
-
-        ai_score = prob * 100
-        final_score = 0
-        
-        # 4. [Core] Event-Driven Warm-up (데이터 개수 기반)
-        # 3분치 데이터를 가져왔어도 실제 틱이 50개 미만이면 "데이터 부족"으로 판단
-        data_count = len(self.analyzer.raw_ticks)
-        
-        if data_count < 50:
-            final_score = 0 # 원칙적으로 0점
-            
-            # 예외: RVOL이 5배 이상 폭발하는 극초반 펌프는 AI 점수 절반 인정
-            if m['rvol'] > 5.0:
-                final_score = ai_score * 0.5
-            else:
-                if "Insufficient Data" not in reasons: reasons.append("Insufficient Data")
-                self.state = "WARM_UP"
+        if score_rebound > 50 and score_momentum > 50:
+            strategy = "DIP_AND_RIP"
+            active_reasons = list(set(reasons_reb + reasons_mom)) + ["Confluence Boost"]
+        elif score_rebound > score_momentum:
+            strategy = "REBOUND"
+            active_reasons = reasons_reb
         else:
-            # 데이터 충분 시: 정상적인 하이브리드 점수 산출
-            final_score = (ai_score * 0.6) + (quant_score * 0.4)
+            strategy = "MOMENTUM"
+            active_reasons = reasons_mom
 
-         # ==========================================================
-        # 🔥 [NEW] 65점 이상 Ready 알림 (스팸 방지: 3분 쿨타임)
-        # ==========================================================
-        if final_score >= 65 and self.state != "FIRED":
-            # 마지막 알림 후 180초(3분) 지났는지 확인
-            if (now - self.last_ready_alert) > 180:
-                self.last_ready_alert = now # 시간 갱신
-                
-                # 비동기로 알림 발송 (기존 함수 재활용)
-                # entry=None으로 보내면 "현재가: $... | 점수: 65%" 형태로 날아감
-                print(f"🔔 [READY] {self.ticker} Score:{final_score:.1f} -> Notification Sent", flush=True)
+        # 🔥 [WEIGHT FIX] AI 40% : Quant 60% 적용
+        final_score = (ai_prob * 100 * 0.4) + (quant_score * 0.6)
+
+        # 3. Adaptive Filtering
+        is_pass, filter_msg = self._check_filters(m, strategy, final_score)
+        
+        # [Warm-up 예외 처리]
+        if len(self.analyzer.raw_ticks) < 50:
+            # RVOL 5.0 이상 급등은 데이터 부족해도 강제 통과
+            if m['rvol'] > 5.0:
+                final_score = max(final_score, 80)
+                is_pass = True
+                if "Early Pump" not in active_reasons: active_reasons.append("Early Pump Bypass")
+            else:
+                final_score = 0
+                is_pass = False
+                self.state = "WARM_UP"
+
+        display_score = final_score if is_pass else 0
+
+        # 4. Ready 알림
+        if final_score >= 65 and is_pass and self.state != "FIRED":
+            if (time.time() - self.last_ready_alert) > 180:
+                self.last_ready_alert = time.time()
                 asyncio.create_task(send_fcm_notification(
                     self.ticker, m['last_price'], int(final_score)
-                ))   
-        # ----------------------------------------------------------- 
+                ))
 
-        # [SniperBot.update_dashboard_db 내부]
+        # 5. DB 업데이트
         now = time.time()
         if (self.state != self.last_logged_state) or (now - self.last_db_update > 1.5):
             try:
-                # [FIX] m(metrics) 딕셔너리를 deepcopy하여 스레드 충돌 방지
                 metrics_copy = copy.deepcopy(m) 
-                
                 asyncio.get_running_loop().run_in_executor(
                     DB_WORKER_POOL, 
-                    partial(update_dashboard_db, self.ticker, metrics_copy, final_score, self.state)
+                    partial(update_dashboard_db, self.ticker, metrics_copy, display_score, self.state)
                 )
-            except Exception as e:
-                print(f"⚠️ [DB Async Error] {e}")
-            
+            except: pass
             self.last_db_update = now
             self.last_logged_state = self.state
-
-        # [수정 후 코드] 점수는 높은데 필터에 걸린 경우, 이유를 로그로 출력
-        if self.state != "FIRED":
-            # 1. VPIN(독성) 필터
-            if m['vpin'] > STS_MAX_VPIN:
-                # 점수가 80점 이상인데 안 샀다면 이유를 출력 (로그 스팸 방지 위해 고득점만 표시)
-                if final_score >= 70:
-                    print(f"🛡️ [FILTER] {self.ticker} Score:{final_score:.0f} but VPIN:{m['vpin']:.2f} (Too Toxic) -> Skipped", flush=True)
-                return
-
-            # 2. Spread(호가 공백) 필터
-            if is_bad_spread:
-                if final_score >= 70:
-                    print(f"🛡️ [FILTER] {self.ticker} Score:{final_score:.0f} but Spread:{m['spread']:.2f}% (Too Wide) -> Skipped", flush=True)
-                return
-
-            # 3. RVOL(거래량) 필터
-            if is_low_vol:
-                # 거래량 부족은 흔하므로 로그 생략하거나 필요하면 추가
-                return
 
         self.logger.log_replay({
             'timestamp': m['timestamp'], 'ticker': self.ticker, 'price': m['last_price'], 
             'vwap': self.vwap, 'atr': self.atr, 'obi': m['obi'], 
-            'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': prob
+            'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': ai_prob
         })
 
-        # ==================================================================
-        # [Phase 6] Fast-Track 안전장치 및 진입 로직
-        # ==================================================================
-        
+        # 6. 진입 실행
         if self.state == "WATCHING":
-            if final_score >= 60 and m['tick_accel'] > 0:
+            if final_score >= 60 and is_pass and m['tick_accel'] > 0:
                 self.state = "AIMING"
 
         elif self.state == "AIMING":
-            # 1. [수정된 Fast-Track] "거래량 폭발 + 안전장치" 
-            # - RVOL > 5.0 (기존)
-            # - 점수 80 이상 (기존)
-            # - [NEW] 현재가가 VWAP보다 1% 이상 위 (확실한 상승 추세)
-            # - [NEW] 스프레드가 0.5% 미만 (호가 공백 없음)
-            is_safe_pump = (m['last_price'] > m['vwap'] * 1.01) and (m['spread'] < 0.5)
-            
-            if m['rvol'] > 5.0 and final_score >= 70 and is_safe_pump:
-                print(f"⚡ [FAST-TRACK] {self.ticker} RVOL:{m['rvol']:.1f} / SafePump:OK -> 즉시 진입!")
-                self.fire(m['last_price'], prob, m)
-                return
+            if final_score >= 80 and is_pass:
+                 print(f"⚡ [FAST-TRACK] {self.ticker} ({strategy}) Score:{final_score:.1f}")
+                 self.fire(m['last_price'], ai_prob, m, strategy=strategy)
+                 return
 
-            # 2. 마이크로 테스트
             if self.aiming_start_time == 0:
                 self.aiming_start_time = time.time()
                 self.aiming_start_price = m['last_price']
                 return 
 
-            # 3. 검증: 가격 밀리면 탈락
-            price_change = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
-            if price_change < -0.2:
-                self.state = "WATCHING"
-                self.aiming_start_time = 0
-                return
-
-            # sts.py -> SniperBot 클래스 -> update_dashboard_db 함수 마지막 부분
-
-            # 4. 0.5초 대기 후 진입
             elapsed = time.time() - self.aiming_start_time
             if elapsed >= 0.5:
-                if final_score >= 70: 
-                    # 🔥 [수정] 결정된 전략(final_strategy)을 넘겨줌
-                    self.fire(m['last_price'], prob, m, strategy=final_strategy)
+                price_drop = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
+                if final_score >= 70 and is_pass and price_drop > -0.2: 
+                    self.fire(m['last_price'], ai_prob, m, strategy=strategy)
                 else:
                     self.state = "WATCHING"
                     self.aiming_start_time = 0
@@ -1201,87 +1049,59 @@ class SniperBot:
             self.manage_position(m['last_price'])
     
     async def warmup(self):
-        """최근 3분간의 1초 봉 데이터를 가져와서 분석기를 예열함"""
         print(f"🔥 [Warmup] Fetching history for {self.ticker}...", flush=True)
         try:
-            # 현재 시간 기준 3분 전부터 조회
             to_ts = int(time.time() * 1000)
             from_ts = to_ts - (180 * 1000) 
-            
             url = f"https://api.polygon.io/v2/aggs/ticker/{self.ticker}/range/1/second/{from_ts}/{to_ts}"
-            params = {
-                "adjusted": "true",
-                "sort": "asc",
-                "limit": 500,
-                "apiKey": POLYGON_API_KEY
-            }
-            
-            # [수정] 여기서부터 들여쓰기가 try 안쪽으로 들어와야 합니다.
+            params = {"adjusted": "true", "sort": "asc", "limit": 500, "apiKey": POLYGON_API_KEY}
             async with httpx.AsyncClient() as client:
                 resp = await client.get(url, params=params, timeout=5.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     if 'results' in data and data['results']:
-                        # 분석기에 주입
                         self.analyzer.inject_history(data['results'])
-                        print(f"✅ [Warmup] {self.ticker} Ready! ({len(data['results'])} bars loaded)", flush=True)
-                    else:
-                        print(f"⚠️ [Warmup] No history data for {self.ticker}", flush=True)
-                else:
-                    print(f"❌ [Warmup] API Error: {resp.status_code}", flush=True)
-                    
-        except Exception as e:
-            print(f"❌ [Warmup] Failed: {e}", flush=True)
+                        print(f"✅ [Warmup] {self.ticker} Ready! ({len(data['results'])} bars)", flush=True)
+                    else: print(f"⚠️ [Warmup] No data for {self.ticker}", flush=True)
+                else: print(f"❌ [Warmup] API Error: {resp.status_code}", flush=True)
+        except Exception as e: print(f"❌ [Warmup] Failed: {e}", flush=True)
 
-    # [수정] strategy 인자 추가 (기본값 "MOMENTUM")
+    # ==============================================================================
+    # [Module 4] Dynamic Execution (동적 청산)
+    # ==============================================================================
     def fire(self, price, prob, metrics, strategy="MOMENTUM"):
-        print(f"🔫 [FIRE] {self.ticker} ({strategy}) AI_Prob:{prob:.4f} Price:${price:.4f}", flush=True)
+        print(f"🔫 [FIRE] {self.ticker} ({strategy}) AI:{prob:.2f} Price:${price:.4f}", flush=True)
         self.state = "FIRED"
         
-        # ==========================================================
-        # 🔥 [NEW] 전략별 ATR 기반 목표가/손절가 설정 (Risk Management)
-        # ==========================================================
-        
         if strategy == "REBOUND":
-            # [반등 전략] StockCharts 제안: TP 1.5배 / SL 0.5배
-            # 역추세 매매(바닥 잡기)는 손절은 짧게, 먹을 땐 적당히 먹고 빠짐
-            tp_mult = 1.5
-            sl_mult = 0.5
-            
-        else: 
-            # [돌파 전략] 기존 로직 유지 (추세를 길게 먹음)
-            # Squeeze가 극도로 심한 경우(0.7 미만) 크게 먹기 시도
-            is_super_setup = (metrics.get('squeeze_ratio', 1.0) < 0.7) and \
-                             (metrics.get('pump_accel', 0) > 0.3)
-            
-            tp_mult = 2.5 if is_super_setup else ATR_TRAIL_MULT # 기본 1.5
-            sl_mult = 0.5 # 스캘핑은 손절이 생명
-        
-        # 진입가/익절가/손절가 계산
-        tp_price = price + (self.atr * tp_mult)
-        sl_price = price - (self.atr * sl_mult)
+            tp_mult = 1.0; sl_mult = 0.8; desc = "Tight Stop"
+        elif strategy == "MOMENTUM":
+            tp_mult = 3.0; sl_mult = 1.5; desc = "Trend Follow"
+        elif strategy == "DIP_AND_RIP":
+            tp_mult = 2.0; sl_mult = 1.2; desc = "Hybrid"
+        else:
+            tp_mult = 1.5; sl_mult = 1.0; desc = "Default"
+
+        volatility = max(self.atr, price * 0.005)
+        tp_price = price + (volatility * tp_mult)
+        sl_price = price - (volatility * sl_mult)
 
         self.position = {
             'entry': price, 'high': price,
-            'sl': sl_price,
-            'tp': tp_price,   # [추가] 고정 익절가도 포지션에 저장
-            'atr': self.atr,
-            'strategy': strategy # 현재 전략 저장
+            'sl': sl_price, 'tp': tp_price,
+            'atr': self.atr, 'strategy': strategy
         }
         
-        # [수정] DB 저장을 DB 전용 쓰레드 풀로 처리
         try:
             loop = asyncio.get_running_loop()
             loop.run_in_executor(
                 DB_WORKER_POOL, 
                 partial(log_signal_to_db, 
                         self.ticker, price, prob*100, 
-                        entry=price, tp=tp_price, sl=sl_price, strategy=strategy)
+                        entry=price, tp=tp_price, sl=sl_price, strategy=f"{strategy} ({desc})")
             )
-        except Exception as e:
-            print(f"⚠️ [DB Async Error] {e}")
+        except Exception as e: print(f"⚠️ [DB Async Error] {e}")
         
-        # 알림 전송 (이미 비동기 태스크)
         asyncio.create_task(send_fcm_notification(
             self.ticker, price, int(prob*100), 
             entry=price, tp=tp_price, sl=sl_price
@@ -1298,11 +1118,18 @@ class SniperBot:
         pos = self.position
         if curr_price > pos['high']: pos['high'] = curr_price
             
-        exit_price = pos['high'] - (pos['atr'] * ATR_TRAIL_MULT)
-        profit_pct = (curr_price - pos['entry']) / pos['entry'] * 100
-
-        if curr_price < max(exit_price, pos['sl']):
-            print(f"💰 [청산] {self.ticker} Profit: {profit_pct:.2f}%", flush=True)
+        trail_mult = ATR_TRAIL_MULT
+        if pos.get('strategy') == "MOMENTUM":
+            trail_mult = 2.0 
+            
+        exit_price = pos['high'] - (pos['atr'] * trail_mult)
+        
+        is_tp_hit = (curr_price >= pos['tp']) and (pos.get('strategy') == "REBOUND")
+        is_stop_hit = (curr_price < max(exit_price, pos['sl']))
+        
+        if is_tp_hit or is_stop_hit:
+            profit_pct = (curr_price - pos['entry']) / pos['entry'] * 100
+            print(f"💰 [청산] {self.ticker} ({pos.get('strategy')}) Profit: {profit_pct:.2f}%", flush=True)
             self.state = "WATCHING"
             self.position = {}
             self.logger.log_trade({

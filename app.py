@@ -148,7 +148,7 @@ def get_sts_status():
 
                 # ▼▼▼ [중요] 프론트엔드로 보내는 데이터에도 추가 ▼▼▼
                 'rsi': r.get('rsi') or 0,
-                'stoch': r.get('stoch') or 0,
+                'stoch': r.get('stoch_k') or 0,
                 'fibo_pos': r.get('fibo_pos') or 0,
                 'obi_rev': r.get('obi_rev') or 0
             })
@@ -492,13 +492,13 @@ def init_db():
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # 1. 기본 테이블 생성 (기존 코드 유지)
         cursor.execute("""CREATE TABLE IF NOT EXISTS status (key TEXT PRIMARY KEY, value TEXT NOT NULL, last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
         cursor.execute("""CREATE TABLE IF NOT EXISTS signals (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL, price REAL NOT NULL, time TIMESTAMP NOT NULL)""")
         cursor.execute("""CREATE TABLE IF NOT EXISTS recommendations (id SERIAL PRIMARY KEY, ticker TEXT NOT NULL UNIQUE, price REAL NOT NULL, time TIMESTAMP NOT NULL, probability_score INTEGER)""")
         cursor.execute("""CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, author TEXT NOT NULL, content TEXT NOT NULL, time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
         cursor.execute("""CREATE TABLE IF NOT EXISTS fcm_tokens (id SERIAL PRIMARY KEY, token TEXT NOT NULL UNIQUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
         
-        # Users 테이블
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -510,23 +510,41 @@ def init_db():
         """)
         conn.commit()
         
-        # 기존 테이블 컬럼 추가 (마이그레이션 대응)
+        # 2. 마이그레이션: 기존 테이블 컬럼 추가 (기존 코드 유지)
         try:
             cursor.execute("ALTER TABLE recommendations ADD COLUMN probability_score INTEGER")
             conn.commit()
         except psycopg2.Error as e:
             conn.rollback()
-            if e.pgcode == '42701': pass # duplicate_column 에러 무시
+            if e.pgcode == '42701': pass 
             else: print(f"❌ [DB] ALTER TABLE recommendations error: {e}")
 
-        # (NEW) fcm_tokens 테이블에 min_score 컬럼 추가
         try:
             cursor.execute("ALTER TABLE fcm_tokens ADD COLUMN min_score INTEGER DEFAULT 0")
             conn.commit()
         except psycopg2.Error as e:
             conn.rollback()
-            if e.pgcode == '42701': pass # duplicate_column 에러 무시
+            if e.pgcode == '42701': pass 
             else: print(f"❌ [DB] ALTER TABLE fcm_tokens error: {e}")
+
+        # ▼▼▼▼▼ [여기] 이 부분을 추가하세요! (V5.3 업데이트용) ▼▼▼▼▼
+        # signals 테이블에 전략, 진입가, 익절가, 손절가 컬럼 추가
+        new_columns = [
+            "ALTER TABLE signals ADD COLUMN strategy TEXT",
+            "ALTER TABLE signals ADD COLUMN entry REAL",
+            "ALTER TABLE signals ADD COLUMN tp REAL",
+            "ALTER TABLE signals ADD COLUMN sl REAL"
+        ]
+        
+        for col_cmd in new_columns:
+            try:
+                cursor.execute(col_cmd)
+                conn.commit()
+                # 이미 있으면 에러나서 rollback 되므로 로그는 성공했을 때만
+                print(f"✅ [DB] Added column to signals.") 
+            except psycopg2.Error:
+                conn.rollback() # 컬럼이 이미 존재하면 패스
+        # ▲▲▲▲▲ [여기까지 추가] ▲▲▲▲▲
 
         cursor.close()
         conn.close()
@@ -536,7 +554,6 @@ def init_db():
             conn.rollback()
             conn.close()
         print(f"❌ [DB] Init failed: {e}")
-
 # ▼▼▼▼▼ [여기] 아래 코드를 붙여넣으세요 ▼▼▼▼
 @app.route('/admin/secret/count')
 def check_user_count():
