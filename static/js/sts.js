@@ -316,6 +316,8 @@ function updateKeyStats(data) {
     // 🔥 [NEW] 신규 반등 지표 업데이트 (여기 추가!)
     // -------------------------------------------------------
 
+    
+
     // 1. RSI
     if(els.indRsi) {
         els.indRsi.innerText = fmt(data.rsi, 1);
@@ -342,9 +344,12 @@ function updateKeyStats(data) {
         }
     }
 
-    // 4. OBI Reversal
+    // 4. OBI Reversal 연결 (이름 불일치 해결 로직 포함)
     if(els.indObiRev) {
-        if (data.obi_reversal_flag === 1) {
+        // DB 컬럼명(obi_rev)과 JS 변수명(obi_reversal_flag) 둘 다 체크
+        const isRev = (data.obi_rev === 1) || (data.obi_reversal_flag === 1);
+        
+        if (isRev) {
             els.indObiRev.innerHTML = '<span style="background:#00C076; color:white; padding:2px 4px; border-radius:4px; font-size:10px;">TURN</span>';
         } else {
             els.indObiRev.innerText = '-';
