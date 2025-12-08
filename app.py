@@ -97,15 +97,15 @@ def get_sts_status():
         # 딕셔너리 형태로 데이터를 받기 위해 RealDictCursor 사용
         cursor = conn.cursor(cursor_factory=RealDictCursor) 
         
-        # [Step 1 수정 완료] 
-        # 기존 쿼리에 누락되었던 핵심 지표 컬럼들(rvol, tick_accel 등)을 모두 추가했습니다.
+        # [수정됨] 쿼리문 맨 끝에 rsi, stoch, fibo_pos, obi_rev 추가
         query = """
             SELECT 
                 ticker, price, ai_score, status, last_updated,
-                day_change, -- [NEW] 여기서 등락률을 DB에서 꺼내옵니다!
+                day_change, 
                 obi, vpin, tick_speed, vwap_dist,
-                -- [NEW] 새로 추가된 지표들
-                obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread
+                obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread,
+                -- ▼▼▼ 여기 4개 컬럼을 추가했습니다 ▼▼▼
+                rsi, stoch, fibo_pos, obi_rev
             FROM sts_live_targets
             WHERE last_updated > NOW() - INTERVAL '1 minute'
             ORDER BY 
@@ -125,15 +125,11 @@ def get_sts_status():
             # DB에 점수가 없으면(None) 0으로 처리
             raw_score = r.get('ai_score') or 0
             
-            # [Step 1 수정 완료] JSON 응답에 새로운 지표들을 매핑합니다.
-            # (DB에 값이 없거나 None이면 0으로 처리하여 '--' 표시 방지)
             targets.append({
                 'ticker': r['ticker'],
                 'price': r['price'],
                 'ai_prob': raw_score / 100.0,
                 'status': r['status'],
-
-                # [FIX] 프론트엔드로 등락률 전달 (없으면 0)
                 'change': r.get('day_change') or 0,
                 
                 # 기존 지표
@@ -141,8 +137,6 @@ def get_sts_status():
                 'vpin': r.get('vpin') or 0,
                 'tick_speed': r.get('tick_speed') or 0,
                 'vwap_dist': r.get('vwap_dist') or 0,
-
-                # [NEW] 신규 지표 추가
                 'obi_mom': r.get('obi_mom') or 0,
                 'tick_accel': r.get('tick_accel') or 0,
                 'vwap_slope': r.get('vwap_slope') or 0,
@@ -150,7 +144,13 @@ def get_sts_status():
                 'rvol': r.get('rvol') or 0,
                 'atr': r.get('atr') or 0,
                 'pump_accel': r.get('pump_accel') or 0,
-                'spread': r.get('spread') or 0
+                'spread': r.get('spread') or 0,
+
+                # ▼▼▼ [중요] 프론트엔드로 보내는 데이터에도 추가 ▼▼▼
+                'rsi': r.get('rsi') or 0,
+                'stoch': r.get('stoch') or 0,
+                'fibo_pos': r.get('fibo_pos') or 0,
+                'obi_rev': r.get('obi_rev') or 0
             })
             
         # 2. 최근 신호 로그 (기존 로직 유지)
