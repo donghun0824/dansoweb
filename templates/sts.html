@@ -187,14 +187,7 @@
         /* --- Center Column: Chart & Stats --- */
         .center-col { grid-column: 2; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
         
-        .chart-section { 
-            flex: 65; 
-            background: #fff; 
-            box-shadow: var(--shadow-depth-2);
-            display: flex;
-            flex-direction: column;
-            min-height: 400px;
-        }
+        .chart-section { flex: 65; background: #fff; /* 차트는 흰 배경 */ box-shadow: var(--shadow-depth-2); }
         .chart-overlay {
             position: absolute; top: 20px; left: 20px; z-index: 10;
             background: rgba(255,255,255,0.8); backdrop-filter: blur(8px);
@@ -349,9 +342,7 @@
 
     <div class="metric-cell" style="background:#F2F8FF;"><span class="metric-label" style="font-size:10px; color:#007AFF;">Hybrid Score</span><span class="metric-value" id="ind-score" style="color:#007AFF; font-size:18px; font-weight:bold;">--</span></div>
     <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Win Prob</span><span class="metric-value" id="ind-prob">--%</span></div>
-</div>
-
-        <aside class="right-panel" style="display:flex; flex-direction:column; gap:12px;">
+</div> </div> </div> <aside class="right-panel" style="display:flex; flex-direction:column; gap:12px;">
             <div class="right-sub-panel" style="flex:1;">
                 <div class="panel-header" style="padding:12px 16px; font-size:11px; font-weight:700; color:#6E6E73; border-bottom:1px solid rgba(0,0,0,0.08); display:flex; justify-content:space-between;">
                     <span>Sniper Signals</span>
