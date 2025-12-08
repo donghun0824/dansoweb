@@ -187,7 +187,14 @@
         /* --- Center Column: Chart & Stats --- */
         .center-col { grid-column: 2; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
         
-        .chart-section { flex: 65; background: #fff; /* 차트는 흰 배경 */ box-shadow: var(--shadow-depth-2); }
+        .chart-section { 
+            flex: 65; 
+            background: #fff; 
+            box-shadow: var(--shadow-depth-2);
+            display: flex;
+            flex-direction: column;
+            min-height: 400px;
+        }
         .chart-overlay {
             position: absolute; top: 20px; left: 20px; z-index: 10;
             background: rgba(255,255,255,0.8); backdrop-filter: blur(8px);

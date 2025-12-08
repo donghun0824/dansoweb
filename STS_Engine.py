@@ -147,6 +147,11 @@ def init_db():
             "pump_accel REAL DEFAULT 0",
             "spread REAL DEFAULT 0",
             "day_change REAL DEFAULT 0"  # 기존 맨 아래 있던 day_change도 포함
+            # 🔥 [NEW] 여기에 새 컬럼 추가! (이 부분 복사해서 넣으세요)
+            "rsi REAL DEFAULT 50",
+            "stoch_k REAL DEFAULT 50",
+            "fibo_pos REAL DEFAULT 0.5",
+            "obi_rev INTEGER DEFAULT 0"
         ]
 
         print("🔄 [DB] Checking and adding columns...")
@@ -223,13 +228,15 @@ def update_dashboard_db(ticker, metrics, score, status):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # [수정] 모든 지표를 저장하도록 쿼리 확장
+        # [수정] 쿼리에 rsi, stoch_k, fibo_pos, obi_rev 컬럼 추가
         query = """
         INSERT INTO sts_live_targets 
         (ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status, 
-         obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread, last_updated)
+         obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread, 
+         rsi, stoch_k, fibo_pos, obi_rev, last_updated)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                %s, %s, %s, %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s, NOW())
         ON CONFLICT (ticker) DO UPDATE SET
             price = EXCLUDED.price,
             ai_score = EXCLUDED.ai_score,
@@ -248,10 +255,14 @@ def update_dashboard_db(ticker, metrics, score, status):
             pump_accel = EXCLUDED.pump_accel,
             spread = EXCLUDED.spread,
             
+            rsi = EXCLUDED.rsi,
+            stoch_k = EXCLUDED.stoch_k,
+            fibo_pos = EXCLUDED.fibo_pos,
+            obi_rev = EXCLUDED.obi_rev,
+            
             last_updated = NOW();
         """
         
-        # metrics 딕셔너리에서 안전하게 값 추출 (없으면 0)
         cursor.execute(query, (
             ticker, 
             float(metrics.get('last_price', 0)), 
@@ -261,7 +272,7 @@ def update_dashboard_db(ticker, metrics, score, status):
             int(metrics.get('tick_speed', 0)), 
             float(metrics.get('vwap_dist', 0)), 
             status,
-            # [추가된 데이터 매핑]
+            # [기존 매핑]
             float(metrics.get('obi_mom', 0)),
             float(metrics.get('tick_accel', 0)),
             float(metrics.get('vwap_slope', 0)),
@@ -269,7 +280,13 @@ def update_dashboard_db(ticker, metrics, score, status):
             float(metrics.get('rvol', 0)),
             float(metrics.get('atr', 0)),
             float(metrics.get('pump_accel', 0)),
-            float(metrics.get('spread', 0))
+            float(metrics.get('spread', 0)),
+            
+            # 🔥 [NEW] 신규 지표 매핑 추가 (순서 중요!)
+            float(metrics.get('rsi', 50)),
+            float(metrics.get('stoch_k', 50)),
+            float(metrics.get('fibo_pos', 0.5)),
+            int(metrics.get('obi_reversal_flag', 0))
         ))
         conn.commit()
         cursor.close()
