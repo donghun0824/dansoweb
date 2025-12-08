@@ -982,6 +982,7 @@ class SniperBot:
         return score, reasons
     
     def update_dashboard_db(self, tick_data, quote_data, agg_data):
+        now = time.time()
         self.analyzer.update_tick(tick_data, quote_data)
         
         if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
