@@ -5,6 +5,25 @@ import pandas as pd
 # PART 1. Standard Indicators (공통 지표 - Series 반환)
 # =============================================================================
 
+# indicators_sts.py
+
+def compute_rsi_series(series, period=14):
+    """
+    [NEW] RSI(상대강도지수) 계산 함수
+    - Schwab 가이드: 30 이하 과매도, 70 이상 과매수
+    - 추세장에서는 50~55가 지지선 역할
+    """
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).fillna(0)
+    loss = (-delta.where(delta < 0, 0)).fillna(0)
+
+    avg_gain = gain.rolling(window=period, min_periods=1).mean()
+    avg_loss = loss.rolling(window=period, min_periods=1).mean()
+
+    rs = avg_gain / (avg_loss + 1e-9)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50) # 데이터 부족 시 50(중립) 반환
+
 def compute_intraday_vwap_series(df, price_col='close', volume_col='volume'):
     """1년치 데이터를 넣어도 한방에 VWAP 라인을 그려주는 함수"""
     p = df[price_col].values
@@ -96,6 +115,37 @@ def compute_vol_ratio_60(volumes):
     vol_600_mean = volumes.rolling(600).mean()
     ratio = vol_60 / (vol_600_mean * 60)
     return ratio.fillna(1.0).replace([np.inf, -np.inf], 1.0)
+
+# indicators_sts.py 의 PART 1 영역 맨 아래에 추가
+
+def compute_bb_bandwidth(closes, window=20):
+    """
+    [NEW] 볼린저 밴드 폭 (Squeeze 탐지용 - 단일 값 반환)
+    - sts.py의 get_metrics에서 사용됨
+    - 밴드폭이 과거 60초 평균 대비 얼마나 좁은지(Ratio) 반환
+    """
+    sma = closes.rolling(window=window).mean()
+    std = closes.rolling(window=window).std()
+    
+    # 밴드폭 (Upper - Lower)
+    width = (std * 4)
+    
+    # 스퀴즈 비율 (현재폭 / 60초 평균폭)
+    # 1.0 이하면 최근 평균보다 폭이 좁아짐 (압축)
+    avg_width = width.rolling(window=60, min_periods=1).mean()
+    squeeze_ratio = width / (avg_width + 1e-9)
+    
+    return squeeze_ratio.fillna(1.0)
+
+# indicators_sts.py (PART 1 맨 아래에 추가)
+
+def compute_stochastic_series(highs, lows, closes, k_period=14):
+    """[NEW] 스토캐스틱 Fast %K 계산"""
+    low_min = lows.rolling(window=k_period).min()
+    high_max = highs.rolling(window=k_period).max()
+    
+    k = 100 * ((closes - low_min) / (high_max - low_min + 1e-9))
+    return k.fillna(50)
 
 
 # =============================================================================

@@ -519,11 +519,12 @@ class MicrostructureAnalyzer:
         df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
         df_res = df_res.ffill().fillna(0)
         return df_res.dropna()
+    
     def get_metrics(self):
         # 1. 데이터 검증 (최소 5개 틱 필요)
         if len(self.raw_ticks) < 5: return None
         
-        # 2. DataFrame 생성 (여기서 df가 처음 만들어짐)
+        # 2. DataFrame 생성
         df = pd.DataFrame(self.raw_ticks).set_index('t')
         
         # 1초봉 리샘플링
@@ -535,38 +536,42 @@ class MicrostructureAnalyzer:
         df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
         df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
         
-        # 결측치 채우기 (ffill -> fillna)
+        # 결측치 채우기
         df = df_res.ffill().fillna(0)
         
         # 다시 한번 검증
         if len(df) < 5: return None 
         
         try:
-            # --- [Phase 5] 윈도우 사이즈 설정 ---
+            # --- 윈도우 사이즈 설정 ---
             WIN_MAIN = 60      # 1분
             WIN_SQZ = 30       # 30초
             WIN_SLOPE = 5      # 5초
 
             # --- [지표 계산 시작] ---
             
-            # 1. VWAP 계산
+            # 1. VWAP 및 기울기
             v = df['volume'].values
             p = df['close'].values
             df['vwap'] = (p * v).cumsum() / (v.cumsum() + 1e-9)
             df['vwap'] = df['vwap'].ffill() 
-            
-            # 2. VWAP 기울기
             df['vwap_slope'] = (df['vwap'].diff(WIN_SLOPE) / (df['vwap'].shift(WIN_SLOPE) + 1e-9)) * 10000
             
-            # 3. RVOL (상대 거래량)
+            # 2. RVOL (상대 거래량)
             df['vol_ma'] = df['volume'].rolling(WIN_MAIN).mean()
             df['rvol'] = df['volume'] / (df['vol_ma'] + 1e-9)
             
-            # 4. Squeeze (볼린저 밴드)
-            rolling_mean = df['close'].rolling(WIN_SQZ).mean()
-            rolling_std = df['close'].rolling(WIN_SQZ).std()
-            df['bb_width'] = (rolling_std * 4) / df['close']
-            df['squeeze_ratio'] = df['bb_width'] / (df['bb_width'].rolling(WIN_SQZ).mean() + 1e-9)
+            # 3. [볼린저 밴드 하단 터치 확인용] 직접 계산
+            # Squeeze 전략에서 '하단 터치 후 반등'을 잡기 위함
+            df['ma_sqz'] = df['close'].rolling(WIN_SQZ).mean()
+            df['std_sqz'] = df['close'].rolling(WIN_SQZ).std()
+            df['lower_band'] = df['ma_sqz'] - (df['std_sqz'] * 2.0)
+            
+            # 하단 터치 여부 (저가가 하단 밴드보다 낮거나 같음 -> 1)
+            is_lower_touch = 1 if df['low'].iloc[-1] <= df['lower_band'].iloc[-1] else 0
+
+            # 4. Squeeze Ratio (indicator 모듈 사용)
+            df['squeeze_ratio'] = ind.compute_bb_bandwidth(df['close'], window=20)
             
             # 5. Pump Accel (가속도)
             df['pump_5m'] = df['close'].pct_change(300)
@@ -583,18 +588,22 @@ class MicrostructureAnalyzer:
             df['tr'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             df['atr'] = df['tr'].rolling(WIN_MAIN).mean()
             
-            # --- [Phase 8: AI용 추가 지표 복구] ---
-            
             # 8. RV_60 (실현 변동성)
             log_ret = np.log(df['close'] / df['close'].shift(1))
             df['rv_60'] = log_ret.rolling(60).std() * np.sqrt(60) * 100
 
             # 9. Fibo Pos (위치값)
-            rolling_high = df['high'].rolling(600).max()
-            rolling_low = df['low'].rolling(600).min()
-            rng = rolling_high - rolling_low
-            df['fibo_pos'] = (df['close'] - rolling_low) / (rng + 1e-9)
+            df['fibo_pos'] = ind.compute_fibo_pos(df['high'], df['low'], df['close'], lookback=300)
+
+            # ==========================================================
+            # 🔥 [NEW] 반등 전략용 추가 지표 (RSI, Stoch)
+            # ==========================================================
+            # 10. RSI
+            df['rsi'] = ind.compute_rsi_series(df['close'], period=14)
             
+            # 11. Stochastic (Fast %K) - 과매도 추가 확인용
+            df['stoch_k'] = ind.compute_stochastic_series(df['high'], df['low'], df['close'])
+
             # NaN 제거 및 마지막 값 추출
             df = df.fillna(0)
             last = df.iloc[-1]
@@ -607,7 +616,13 @@ class MicrostructureAnalyzer:
             obi = (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0
             
             obi_mom = obi - self.prev_obi
-            self.prev_obi = obi
+            
+            # 🔥 [NEW] OBI Reversal 탐지 (음수 -> 양수 전환)
+            # 현재는 양수인데, 직전 값(현재-변화량)이 음수였으면 '골든크로스'
+            prev_obi_val = obi - obi_mom
+            obi_reversal_flag = 1 if (obi > 0 and prev_obi_val < 0) else 0
+
+            self.prev_obi = obi # 상태 업데이트
             
             # VPIN (100틱 샘플링)
             raw_df = pd.DataFrame(list(self.raw_ticks)[-100:])
@@ -647,14 +662,20 @@ class MicrostructureAnalyzer:
                 # AI용 추가 지표
                 'rv_60': last['rv_60'],
                 'fibo_pos': last['fibo_pos'],
-                'bb_width_norm': last['squeeze_ratio']
+                'bb_width_norm': last['squeeze_ratio'],
+                
+                # 🔥 [NEW] 반등 전략 필수 지표들
+                'rsi': last['rsi'],
+                'stoch_k': last['stoch_k'],    # 스토캐스틱
+                'lower_touch': is_lower_touch, # 밴드 하단 터치 여부
+                'obi_reversal_flag': obi_reversal_flag
             }
             
         except Exception as e:
             import traceback
-            # print(f"❌ [Metric Calc Error] {e}", flush=True) # 너무 시끄러우면 주석 처리
+            # print(f"❌ [Metric Calc Error] {e}", flush=True) 
             return None
-    
+            
 class TargetSelector:
     def __init__(self):
         self.snapshots = {} 
@@ -844,7 +865,103 @@ class SniperBot:
             score -= 15
 
         return score, reasons
+    
+    # [NEW] 거래량 정밀 분석 (RVOL & Spike)
+    def check_volume_analysis(self, m):
+        score = 0
+        reasons = []
+        rvol = m.get('rvol', 0)
+        
+        # 1. RVOL 구간별 신호 강도
+        if rvol < 1.0:
+            pass  
+        elif 1.5 <= rvol < 2.0:
+            score += 10; reasons.append(f"Vol Spike (1.5x)")
+        elif 2.0 <= rvol < 3.0:
+            score += 20; reasons.append(f"Strong Vol (2.0x+)")
+        elif 3.0 <= rvol < 4.0:
+            score += 30; reasons.append(f"Super Vol (3.0x+)")
+        elif rvol >= 4.0:
+            # 바닥권 폭발은 호재, 고점 폭발은 위험
+            if m.get('rsi', 50) < 30:
+                score += 40; reasons.append("Selling Climax (Vol 4.0x+)")
+            else:
+                score -= 10; reasons.append("Overheated Vol (Risk)")
 
+        # 2. 거래량 다이버전스 (눌림목 반등 시그널)
+        if m['vwap_dist'] < -0.5: 
+            if m['tick_accel'] > 0 and rvol > 1.5:
+                score += 15; reasons.append("Healthy Dip Reversal")
+
+        return score, reasons
+    
+    def check_rebound_setup(self, m):
+        """[Strict] 4대 반등 조건 (과매도/다이버전스/스퀴즈/주문장) 검증"""
+        score = 0
+        reasons = []
+        
+        # get_metrics에서 계산한 신규 지표들 가져오기
+        rsi = m.get('rsi', 50)
+        stoch = m.get('stoch_k', 50)
+        fibo = m.get('fibo_pos', 0.5)
+        rvol = m.get('rvol', 0)
+        
+        # -----------------------------------------------------------
+        # [Filter 1] 주문장 확인 (Gatekeeper) - 이거 통과 못하면 시그널 무효화
+        # -----------------------------------------------------------
+        # 조건: VPIN < 0.8 (독성 없음) AND (OBI 양전 OR 스프레드 축소)
+        is_order_flow_valid = False
+        
+        if m['vpin'] < 0.8:
+            # OBI 양수 전환 (매도->매수 우위)
+            if m.get('obi_reversal_flag', 0) == 1:
+                is_order_flow_valid = True
+                score += 10; reasons.append("Order Flow Reversal")
+            # 또는 이미 OBI가 양수이고 스프레드가 좁음 (안정적)
+            elif m['obi'] > 0 and m['spread'] < 0.1:
+                is_order_flow_valid = True
+        
+        # 주문장 조건 불만족 시 즉시 탈락 (0점 리턴)
+        if not is_order_flow_valid:
+            return 0, ["Order Flow Fail"]
+
+        # -----------------------------------------------------------
+        # [Condition 1] 과매도 + 거래량 증가
+        # -----------------------------------------------------------
+        # RSI<30 OR Stoch<20, Fibo 38.2-61.8%, RVOL>=1.5 (LuxAlgo)
+        is_oversold = (rsi < 30) or (stoch < 20)
+        is_fibo_zone = (0.35 <= fibo <= 0.65) # 0.382 ~ 0.618 근처
+        is_vol_spike = (rvol >= 1.5)
+        
+        if is_oversold and is_fibo_zone and is_vol_spike:
+            score += 40
+            reasons.append(f"Oversold Bounce (RSI{rsi:.0f}/Vol{rvol:.1f})")
+
+        # -----------------------------------------------------------
+        # [Condition 2] RSI 다이버전스 (잠재적 반전)
+        # -----------------------------------------------------------
+        # RVOL이 1~2.5 사이에서 증가하며 다이버전스 발생
+        if m.get('rsi_div_flag', 0) == 1 and (1.0 <= rvol <= 2.5):
+            score += 30
+            reasons.append("RSI Divergence Setup")
+
+        # -----------------------------------------------------------
+        # [Condition 3] 볼린저 스퀴즈 + 돌파
+        # -----------------------------------------------------------
+        # 밴드폭 좁음(1.0이하) + 하단 터치 + 양봉(accel>0) + RVOL>2
+        if m['squeeze_ratio'] <= 1.0:
+            if m.get('lower_touch', 0) == 1: # 하단 밴드 터치 (새로 만든 지표)
+                if m['tick_accel'] > 0:      # 양봉 발생 (속도 증가)
+                    if rvol > 2.0:           # 거래량 실림
+                        score += 50          # 가장 강력한 신호
+                        reasons.append("Squeeze Breakout")
+
+        # 점수가 너무 낮으면(조건 불만족) 무효화
+        if score < 30:
+            return 0, ["Weak Signal"]
+
+        return score, reasons
+    
     def update_dashboard_db(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
         
@@ -923,7 +1040,17 @@ class SniperBot:
         
         # 3. 정량 점수 계산 (Confidence 반영)
         quant_score, reasons = self.calculate_soft_gate(m)
-        quant_score *= vpin_confidence # 거래량 적으면 정량 점수도 낮춤
+        quant_score *= vpin_confidence
+        
+        # 🔥 [NEW] 반등(Rebound) 전략 점수 계산
+        rebound_score, rebound_reasons = self.check_rebound_setup(m)
+        
+        # 전략 선택: 돌파(Momentum) vs 반등(Rebound) 중 더 높은 점수 채택
+        final_strategy = "MOMENTUM"
+        if rebound_score > quant_score:
+            quant_score = rebound_score # 반등 점수가 더 높으면 이걸 씀
+            reasons = rebound_reasons   # 이유도 반등 관련으로 교체
+            final_strategy = "REBOUND"
 
         ai_score = prob * 100
         final_score = 0
@@ -1024,11 +1151,14 @@ class SniperBot:
                 self.aiming_start_time = 0
                 return
 
+            # sts.py -> SniperBot 클래스 -> update_dashboard_db 함수 마지막 부분
+
             # 4. 0.5초 대기 후 진입
             elapsed = time.time() - self.aiming_start_time
             if elapsed >= 0.5:
                 if final_score >= 80: 
-                    self.fire(m['last_price'], prob, m)
+                    # 🔥 [수정] 결정된 전략(final_strategy)을 넘겨줌
+                    self.fire(m['last_price'], prob, m, strategy=final_strategy)
                 else:
                     self.state = "WATCHING"
                     self.aiming_start_time = 0
@@ -1069,18 +1199,29 @@ class SniperBot:
         except Exception as e:
             print(f"❌ [Warmup] Failed: {e}", flush=True)
 
-    # [수정] 동적 TP/SL 계산 로직 적용
-    def fire(self, price, prob, metrics):
-        print(f"🔫 [FIRE] {self.ticker} AI_Prob:{prob:.4f} Price:${price:.4f}", flush=True)
+    # [수정] strategy 인자 추가 (기본값 "MOMENTUM")
+    def fire(self, price, prob, metrics, strategy="MOMENTUM"):
+        print(f"🔫 [FIRE] {self.ticker} ({strategy}) AI_Prob:{prob:.4f} Price:${price:.4f}", flush=True)
         self.state = "FIRED"
         
-        # [Phase 2-2] 상황별 목표가 보정 (Dynamic Targeting)
-        # Squeeze가 0.6 미만(초압축)이고 가속도가 붙었으면 '대박'을 노림 -> 익절폭 2.0배
-        is_super_setup = (metrics.get('squeeze_ratio', 1.0) < 0.7) and \
-                         (metrics.get('pump_accel', 0) > 0.3)
+        # ==========================================================
+        # 🔥 [NEW] 전략별 ATR 기반 목표가/손절가 설정 (Risk Management)
+        # ==========================================================
         
-        tp_mult = 2.5 if is_super_setup else ATR_TRAIL_MULT
-        sl_mult = 0.5                             # 손절은 0.5배 (타이트하게)
+        if strategy == "REBOUND":
+            # [반등 전략] StockCharts 제안: TP 1.5배 / SL 0.5배
+            # 역추세 매매(바닥 잡기)는 손절은 짧게, 먹을 땐 적당히 먹고 빠짐
+            tp_mult = 1.5
+            sl_mult = 0.5
+            
+        else: 
+            # [돌파 전략] 기존 로직 유지 (추세를 길게 먹음)
+            # Squeeze가 극도로 심한 경우(0.7 미만) 크게 먹기 시도
+            is_super_setup = (metrics.get('squeeze_ratio', 1.0) < 0.7) and \
+                             (metrics.get('pump_accel', 0) > 0.3)
+            
+            tp_mult = 2.5 if is_super_setup else ATR_TRAIL_MULT # 기본 1.5
+            sl_mult = 0.5 # 스캘핑은 손절이 생명
         
         # 진입가/익절가/손절가 계산
         tp_price = price + (self.atr * tp_mult)
@@ -1089,7 +1230,9 @@ class SniperBot:
         self.position = {
             'entry': price, 'high': price,
             'sl': sl_price,
-            'atr': self.atr
+            'tp': tp_price,   # [추가] 고정 익절가도 포지션에 저장
+            'atr': self.atr,
+            'strategy': strategy # 현재 전략 저장
         }
         
         # [수정] DB 저장을 DB 전용 쓰레드 풀로 처리
@@ -1099,7 +1242,7 @@ class SniperBot:
                 DB_WORKER_POOL, 
                 partial(log_signal_to_db, 
                         self.ticker, price, prob*100, 
-                        entry=price, tp=tp_price, sl=sl_price, strategy="SoftGate")
+                        entry=price, tp=tp_price, sl=sl_price, strategy=strategy)
             )
         except Exception as e:
             print(f"⚠️ [DB Async Error] {e}")
