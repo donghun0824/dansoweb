@@ -58,7 +58,12 @@ const els = {
     indSpread: document.getElementById('ind-spread'),
     indTimestamp: document.getElementById('ind-timestamp'),
     indScore: document.getElementById('ind-score'),
-    indProb: document.getElementById('ind-prob')
+    indProb: document.getElementById('ind-prob'),
+    // 🔥 [NEW] 여기에 새로 만든 지표 ID 추가
+    indRsi: document.getElementById('ind-rsi'),
+    indStoch: document.getElementById('ind-stoch'),
+    indFibo: document.getElementById('ind-fibo'),
+    indObiRev: document.getElementById('ind-obi-rev'),
 };
 
 /* ==========================================================================
@@ -221,12 +226,9 @@ function renderMiniChange(item) {
 }
 
 function updateKeyStats(data) {
-    // 🔍 디버깅: 데이터가 잘 들어오는지 콘솔에서 확인 (필요시 주석 해제)
-    // console.log(`📊 Stats Update for ${data.ticker}:`, data);
-
     if (!data) return;
 
-    // [Helper 1] 값 포맷터 (0일 때도 0.00으로 표시, 없으면 --)
+    // [Helper 1] 값 포맷터
     const fmt = (val, fixed=2) => {
         if (val === undefined || val === null || val === '') return '--';
         const num = parseFloat(val);
@@ -235,11 +237,17 @@ function updateKeyStats(data) {
     };
 
     // [Helper 2] 색상 처리 (양수:초록, 음수:빨강, 0:검정)
-    // Webull 스타일: 상승(#00C076), 하락(#FF3B30)
     const color = (val) => {
         const v = parseFloat(val);
         if (isNaN(v)) return '#333';
         return v > 0 ? '#00C076' : (v < 0 ? '#FF3B30' : '#333');
+    };
+
+    // [Helper 3] RSI용 색상 (낮을수록 좋음 = 초록색 / 높으면 과열 = 빨강)
+    const getRsiColor = (val) => {
+        if (val <= 30) return '#00C076'; // 과매도(매수 기회)
+        if (val >= 70) return '#FF3B30'; // 과매수(과열)
+        return '#333';
     };
 
     // -------------------------------------------------------
@@ -248,7 +256,6 @@ function updateKeyStats(data) {
     if(els.overlayTicker) els.overlayTicker.innerText = data.ticker || "WAITING";
     if(els.overlayPrice) {
         els.overlayPrice.innerText = `$${fmt(data.price)}`;
-        // 가격 변동에 따라 색상 변경 (전일비가 있다면)
         if(data.day_change) els.overlayPrice.style.color = color(data.day_change);
     }
 
@@ -256,35 +263,29 @@ function updateKeyStats(data) {
     // 2. 핵심 지표 매핑 (백엔드 키 -> 화면)
     // -------------------------------------------------------
 
-    // OBI (Order Book Imbalance)
+    // OBI
     if(els.indObi) { 
         els.indObi.innerText = fmt(data.obi); 
         els.indObi.style.color = color(data.obi); 
     }
-    // OBI MOM (Momentum)
+    // OBI MOM
     if(els.indObiMom) { 
-        // 백엔드 키 호환성 (obi_mom 우선)
         const val = data.obi_mom ?? data.obi_momentum ?? 0;
         els.indObiMom.innerText = fmt(val); 
         els.indObiMom.style.color = color(val); 
     }
-    
-    // VPIN (Toxic Flow)
+    // VPIN
     if(els.indVpin) { 
         els.indVpin.innerText = fmt(data.vpin); 
-        // 0.8 이상이면 빨간색 경고
         els.indVpin.style.color = parseFloat(data.vpin) > 0.8 ? '#FF3B30' : '#333'; 
         els.indVpin.style.fontWeight = parseFloat(data.vpin) > 0.8 ? '800' : '400';
     }
-    
     // Tick Speed & Accel
     if(els.indTickSpeed) els.indTickSpeed.innerText = data.tick_speed || '0';
-    
     if(els.indTickAccel) { 
         els.indTickAccel.innerText = fmt(data.tick_accel, 1); 
         els.indTickAccel.style.color = color(data.tick_accel); 
     }
-    
     // VWAP Dist & Slope
     if(els.indVwapDist) { 
         els.indVwapDist.innerText = fmt(data.vwap_dist) + '%'; 
@@ -294,36 +295,62 @@ function updateKeyStats(data) {
         els.indVwapSlope.innerText = fmt(data.vwap_slope, 2); 
         els.indVwapSlope.style.color = color(data.vwap_slope); 
     }
-    
-    // Squeeze (백엔드 키: squeeze_ratio)
+    // Squeeze
     if(els.indSqueeze) {
         const sqz = data.squeeze_ratio ?? data.squeeze ?? 0;
         els.indSqueeze.innerText = fmt(sqz);
-        // 0.8 이하면 폭발 임박 (빨강 강조)
         els.indSqueeze.style.color = parseFloat(sqz) < 0.8 ? '#FF3B30' : '#333';
         els.indSqueeze.style.fontWeight = parseFloat(sqz) < 0.8 ? '800' : '400';
     }
-    
-    // RVOL (Relative Volume)
+    // RVOL
     if(els.indRvol) { 
         els.indRvol.innerText = fmt(data.rvol, 1) + 'x'; 
-        // 3배 이상이면 파란색 강조
         const rvolVal = parseFloat(data.rvol);
         els.indRvol.style.color = rvolVal > 3.0 ? '#007AFF' : '#333';
         els.indRvol.style.fontWeight = rvolVal > 3.0 ? '800' : '400';
     }
-    
     // ATR
     if(els.indAtr) els.indAtr.innerText = fmt(data.atr, 3);
     
-    // Pump Accel
-    if(els.indPumpAccel) { 
-        els.indPumpAccel.innerText = fmt(data.pump_accel) + '%'; 
-        els.indPumpAccel.style.color = color(data.pump_accel); 
+    // -------------------------------------------------------
+    // 🔥 [NEW] 신규 반등 지표 업데이트 (여기 추가!)
+    // -------------------------------------------------------
+
+    // 1. RSI
+    if(els.indRsi) {
+        els.indRsi.innerText = fmt(data.rsi, 1);
+        els.indRsi.style.color = getRsiColor(data.rsi);
+        els.indRsi.style.fontWeight = data.rsi <= 30 ? '800' : '600';
     }
-    // Spread
-    if(els.indSpread) els.indSpread.innerText = fmt(data.spread) + '%';
-    
+
+    // 2. Stochastic
+    if(els.indStoch) {
+        els.indStoch.innerText = fmt(data.stoch_k, 1);
+        els.indStoch.style.color = data.stoch_k <= 20 ? '#00C076' : '#333';
+    }
+
+    // 3. Fibonacci
+    if(els.indFibo) {
+        els.indFibo.innerText = fmt(data.fibo_pos, 2);
+        const f = parseFloat(data.fibo_pos);
+        if (f >= 0.38 && f <= 0.62) {
+            els.indFibo.style.color = '#007AFF';
+            els.indFibo.style.fontWeight = '800';
+        } else {
+            els.indFibo.style.color = '#333';
+            els.indFibo.style.fontWeight = '400';
+        }
+    }
+
+    // 4. OBI Reversal
+    if(els.indObiRev) {
+        if (data.obi_reversal_flag === 1) {
+            els.indObiRev.innerHTML = '<span style="background:#00C076; color:white; padding:2px 4px; border-radius:4px; font-size:10px;">TURN</span>';
+        } else {
+            els.indObiRev.innerText = '-';
+        }
+    }
+
     // -------------------------------------------------------
     // 3. 점수 (Hybrid Score)
     // -------------------------------------------------------
@@ -333,10 +360,8 @@ function updateKeyStats(data) {
         const s = Math.round(rawScore);
         
         els.indScore.innerText = s;
-        // 80점 이상 파란색, 50점 이상 주황색
         els.indScore.style.color = s >= 80 ? '#007AFF' : (s >= 50 ? '#FF9500' : '#333');
         
-        // 승률 (단순 시뮬레이션)
         if(els.indProb) {
             els.indProb.innerText = s >= 1 ? `${Math.min(99, Math.round(s * 0.95))}%` : '--';
         }

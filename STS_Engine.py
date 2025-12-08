@@ -327,7 +327,7 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
 
         # 2. 알림 내용 구성 (기존 디자인 유지)
         if probability_score >= 90: icon = "💎 ELITE"
-        elif probability_score >= 80: icon = "🔥 HOT"
+        elif probability_score >= 70: icon = "🔥 HOT"
         else: icon = "✅ VALID"
 
         noti_title = f"{icon} {ticker} 포착! (점수: {probability_score})"
@@ -816,6 +816,8 @@ class SniperBot:
         self.prob_history = deque(maxlen=5)
         self.last_db_update = 0
         self.last_logged_state = "WATCHING"
+        # [추가] Ready 알림 쿨타임용 변수
+        self.last_ready_alert = 0
         # [추가] Phase 2-2: 마이크로 테스트용 타이머
         self.aiming_start_time = 0
         self.aiming_start_price = 0
@@ -1071,7 +1073,21 @@ class SniperBot:
         else:
             # 데이터 충분 시: 정상적인 하이브리드 점수 산출
             final_score = (ai_score * 0.6) + (quant_score * 0.4)
-            
+
+         # ==========================================================
+        # 🔥 [NEW] 65점 이상 Ready 알림 (스팸 방지: 3분 쿨타임)
+        # ==========================================================
+        if final_score >= 65 and self.state != "FIRED":
+            # 마지막 알림 후 180초(3분) 지났는지 확인
+            if (now - self.last_ready_alert) > 180:
+                self.last_ready_alert = now # 시간 갱신
+                
+                # 비동기로 알림 발송 (기존 함수 재활용)
+                # entry=None으로 보내면 "현재가: $... | 점수: 65%" 형태로 날아감
+                print(f"🔔 [READY] {self.ticker} Score:{final_score:.1f} -> Notification Sent", flush=True)
+                asyncio.create_task(send_fcm_notification(
+                    self.ticker, m['last_price'], int(final_score)
+                ))   
         # ----------------------------------------------------------- 
 
         # [SniperBot.update_dashboard_db 내부]
@@ -1096,13 +1112,13 @@ class SniperBot:
             # 1. VPIN(독성) 필터
             if m['vpin'] > STS_MAX_VPIN:
                 # 점수가 80점 이상인데 안 샀다면 이유를 출력 (로그 스팸 방지 위해 고득점만 표시)
-                if final_score >= 80:
+                if final_score >= 70:
                     print(f"🛡️ [FILTER] {self.ticker} Score:{final_score:.0f} but VPIN:{m['vpin']:.2f} (Too Toxic) -> Skipped", flush=True)
                 return
 
             # 2. Spread(호가 공백) 필터
             if is_bad_spread:
-                if final_score >= 80:
+                if final_score >= 70:
                     print(f"🛡️ [FILTER] {self.ticker} Score:{final_score:.0f} but Spread:{m['spread']:.2f}% (Too Wide) -> Skipped", flush=True)
                 return
 
@@ -1122,7 +1138,7 @@ class SniperBot:
         # ==================================================================
         
         if self.state == "WATCHING":
-            if final_score >= 65 and m['tick_accel'] > 0:
+            if final_score >= 60 and m['tick_accel'] > 0:
                 self.state = "AIMING"
 
         elif self.state == "AIMING":
@@ -1133,7 +1149,7 @@ class SniperBot:
             # - [NEW] 스프레드가 0.5% 미만 (호가 공백 없음)
             is_safe_pump = (m['last_price'] > m['vwap'] * 1.01) and (m['spread'] < 0.5)
             
-            if m['rvol'] > 5.0 and final_score >= 80 and is_safe_pump:
+            if m['rvol'] > 5.0 and final_score >= 70 and is_safe_pump:
                 print(f"⚡ [FAST-TRACK] {self.ticker} RVOL:{m['rvol']:.1f} / SafePump:OK -> 즉시 진입!")
                 self.fire(m['last_price'], prob, m)
                 return
@@ -1156,7 +1172,7 @@ class SniperBot:
             # 4. 0.5초 대기 후 진입
             elapsed = time.time() - self.aiming_start_time
             if elapsed >= 0.5:
-                if final_score >= 80: 
+                if final_score >= 70: 
                     # 🔥 [수정] 결정된 전략(final_strategy)을 넘겨줌
                     self.fire(m['last_price'], prob, m, strategy=final_strategy)
                 else:
