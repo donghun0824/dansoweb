@@ -116,40 +116,21 @@ async function updateDashboard() {
         if(els.statusText) els.statusText.innerText = "Active (STS Engine)";
         if(els.countText) els.countText.innerText = `${data.targets.length} Targets`;
 
-        // ============================================================
-        // [수정된 부분] 85점 이상 타겟 자동 시그널 피드 등록 로직
-        // ============================================================
-        
-        // A. 85점 이상인 종목 추출
-        const highScorers = data.targets.filter(item => {
-            // 점수/확률 정규화 (1 이하면 100 곱하기)
-            let rawScore = item.ai_score !== undefined ? item.ai_score : (item.ai_prob || 0);
-            if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
-            
-            return Math.round(rawScore) >= 85; // 85점 이상만 통과
-        });
-
-        // B. 시그널 포맷으로 변환
-        const autoSignals = highScorers.map(item => ({
-            ticker: item.ticker,
-            price: item.price,
-            timestamp: new Date().toLocaleTimeString(), // 현재 시간 찍기
-            type: 'AI_SNIPER'
-        }));
-
-        // C. 기존 서버 로그와 합치기 (서버 로그가 없으면 자동 시그널만 표시)
-        const finalLogs = [...(data.logs || []), ...autoSignals];
+        // [수정 완료] '가짜 자동 생성' 로직 삭제함. 
+        // 오직 서버 DB(signals 테이블)에 저장된 '진짜 매수 체결' 내역만 가져옵니다.
+        const finalLogs = data.logs || [];
 
         // 6. Render Signals Log
-        // 데이터가 있거나, 자동 생성된 시그널이 있으면 렌더링
-        if (finalLogs.length > 0) {
-            renderSignals(finalLogs);
-        }
+        renderSignals(finalLogs);
+        
+        // ▲▲▲ [여기까지] ▲▲▲
 
     } catch (e) {
         console.error("🚨 Dashboard Sync Error:", e);
     }
 }
+
+    
 
 function renderScannerList(targets) {
     if (!els.scannerList) return;

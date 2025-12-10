@@ -321,7 +321,7 @@ def log_signal_to_db(ticker, price, score, entry=0, tp=0, sl=0, strategy=""):
     finally:
         if conn: db_pool.putconn(conn)
 
-# [수정된 알림 전송 함수] 로그 기능 강화 (기존 로직 유지)
+# [수정된 알림 전송 함수] - 심플 버전 (SCAN / BUY)
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
     # 1. Firebase 초기화 체크
     if not firebase_admin._apps:
@@ -336,30 +336,31 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         subscribers = cursor.fetchall()
         cursor.close()
         
-        # 구독자가 없으면 로그 남기고 종료
         if not subscribers:
-            print(f"⚠️ [FCM] No subscribers found. Skipping alert for {ticker}.", flush=True)
-            db_pool.putconn(conn)
             return
 
-        # 2. 알림 내용 구성 (기존 디자인 유지)
-        if probability_score >= 90: icon = "💎 ELITE"
-        elif probability_score >= 70: icon = "🔥 HOT"
-        else: icon = "✅ VALID"
-
-        noti_title = f"{icon} {ticker} 포착! (점수: {probability_score})"
+        # =========================================================
+        # 🔥 [UI 수정] 알림 메시지 포맷 단순화
+        # =========================================================
         
-        if entry and tp and sl:
-            risk = entry - sl
-            reward = tp - entry
-            rr = reward / risk if risk > 0 else 0
+        # Case 2: 매수 진입 (BUY) - Entry, TP 정보 포함
+        if entry and tp:
+            # 제목: BUY 티커 (점수)
+            noti_title = f"BUY {ticker} ({probability_score})"
+            
+            # 본문: Entry와 TP만 깔끔하게 (SL, 손익비 삭제)
             noti_body = (
-                f"Entry: ${entry:.3f}\n"
-                f"🎯 TP: ${tp:.3f} | 🛡️ SL: ${sl:.3f}\n"
-                f"⚖️ 손익비 1:{rr:.1f}"
+                f"Entry: ${float(entry):.3f}\n"
+                f"TP: ${float(tp):.3f}"
             )
+            
+        # Case 1: 단순 포착 (SCAN) - 점수 표시 X, 티커만
         else:
-            noti_body = f"현재가: ${price:.4f} | AI 확신도: {probability_score}%"
+            # 제목: SCAN 티커
+            noti_title = f"SCAN {ticker}"
+            
+            # 본문: 현재가만 표시
+            noti_body = f"Current: ${float(price):.4f}"
 
         data_payload = {
             'type': 'signal', 'ticker': ticker, 
@@ -367,18 +368,16 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
             'title': noti_title, 'body': noti_body
         }
         
-        # 3. [로그 추가] 전송 시작 알림 (몇 명에게 보내는지 확인)
-        print(f"🔔 [FCM] Sending alert for {ticker} to {len(subscribers)} devices...", flush=True)
+        print(f"🔔 [FCM] Sending: {noti_title}", flush=True)
 
         success_count = 0
         failed_tokens = []
         
-        # 4. 전송 루프
+        # 전송 루프
         for row in subscribers:
             token = row[0]
             user_min_score = row[1] if row[1] is not None else 0 
             
-            # 사용자 설정 점수 미달 시 스킵 (로그는 너무 많아질 수 있으니 생략)
             if probability_score < user_min_score: continue
 
             try:
@@ -386,6 +385,7 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                     token=token,
                     notification=messaging.Notification(title=noti_title, body=noti_body),
                     data=data_payload,
+                    # 안드로이드 설정 (소리, 중요도)
                     android=messaging.AndroidConfig(
                         priority='high', 
                         notification=messaging.AndroidNotification(
@@ -395,6 +395,7 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                             visibility='public'
                         )
                     ),
+                    # iOS 설정
                     apns=messaging.APNSConfig(
                         payload=messaging.APNSPayload(aps=messaging.Aps(alert=messaging.ApsAlert(title=noti_title, body=noti_body), sound="default"))
                     )
@@ -402,34 +403,23 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                 messaging.send(message)
                 success_count += 1
             except Exception as e:
-                # [로그 추가] 전송 실패 시 구체적 에러 출력
-                print(f"❌ [FCM Fail] Token: {token[:10]}... Error: {e}", flush=True)
-                
-                # 토큰 만료 에러 등은 삭제 대상에 추가
+                # 토큰 만료 에러 처리
                 if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e): 
                     failed_tokens.append(token)
         
-        # 5. [로그 추가] 최종 결과 리포트
-        if success_count > 0:
-            print(f"✅ [FCM] Successfully sent to {success_count} devices.", flush=True)
-        else:
-            # 보낼 대상이 있었는데 성공이 0이면 문제 상황
-            print(f"⚠️ [FCM] Zero success. Check tokens, network, or user min_score filters.", flush=True)
-
-        # 만료된 토큰 DB 삭제 처리
+        # 만료된 토큰 정리
         if failed_tokens:
             c = conn.cursor()
             c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
             conn.commit()
             c.close()
-            print(f"🗑️ [FCM] Cleaned up {len(failed_tokens)} invalid tokens.", flush=True)
 
     except Exception as e:
         print(f"❌ [FCM Critical Error] {e}", flush=True)
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)
-
+        
 async def send_fcm_notification(ticker, price, probability_score, entry=None, tp=None, sl=None):
     """[V9.2] 알림 전용 쓰레드 풀 사용"""
     loop = asyncio.get_running_loop()
@@ -933,6 +923,7 @@ class SniperBot:
         if self.vwap == 0: self.vwap = tick_data['p']
         m = self.analyzer.get_metrics()
         
+        # 데이터가 없거나 멈춘 경우 리턴
         if not m or m['tick_speed'] == 0: return 
 
         if m.get('atr') and m['atr'] > 0: self.atr = m['atr']
@@ -960,9 +951,14 @@ class SniperBot:
         quant_score = 0
         active_reasons = []
 
-        # [Confluence Logic] 합의된 공식: (A + B) * 0.7
-        quant_score = (score_rebound + score_momentum) * 0.7
+        # 🔥 [V5.4 FORMULA] Base + Bonus Logic 적용
+        # 공식: (큰 점수 * 0.8) + (작은 점수 * 0.5)
+        max_s = max(score_rebound, score_momentum)
+        min_s = min(score_rebound, score_momentum)
         
+        quant_score = (max_s * 0.8) + (min_s * 0.5)
+        
+        # 전략 태그 결정
         if score_rebound > 50 and score_momentum > 50:
             strategy = "DIP_AND_RIP"
             active_reasons = list(set(reasons_reb + reasons_mom)) + ["Confluence Boost"]
