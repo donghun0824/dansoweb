@@ -576,10 +576,10 @@ async function getFCMToken() {
             });
             alert("✅ Alerts Enabled!");
             console.log("FCM Token registered:", token);
-        } else {
+       } else {
             console.warn("No registration token available. Request permission to generate one.");
         }
-    } catch(e) { 
+    } catch(e) { // ✅ 중괄호 } 추가됨
         console.error("🚨 FCM Token Error:", e);
     }
 }

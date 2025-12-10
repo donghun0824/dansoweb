@@ -14,6 +14,9 @@ app = Flask(__name__)
 # --- 1. 설정 및 환경 변수 ---
 app.secret_key = os.environ.get('SECRET_KEY', 'dev_key_for_session')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=31)
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['REMEMBER_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 API_KEY = os.environ.get('POLYGON_API_KEY')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
@@ -243,7 +246,7 @@ def google_callback():
         cursor.close()
         conn.close()
         
-        login_user(user)
+        login_user(user, remember=True)
         session.permanent = True
         return redirect(url_for('sts_page')) # ✅ sts_page로 변경
         
