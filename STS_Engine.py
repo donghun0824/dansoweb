@@ -777,7 +777,7 @@ class TargetSelector:
         top_list = scored[:limit]
 
         # 🔥 [핵심 수정] 여기서 DB 저장을 하지 않습니다!
-        # self.save_candidates_to_db(top_list)  <-- 이 줄을 삭제했습니다.
+        self.save_candidates_to_db(top_list)
         # 이유: 여기서 저장하면 데이터(Tick)가 없는 놈도 화면에 떠서 0.00으로 도배됨.
         
         if top_list:
