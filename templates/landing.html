@@ -84,9 +84,51 @@
             </a>
         </div>
 
-        <div class="device-frame max-w-5xl mx-auto transform transition hover:scale-[1.01] duration-500">
-            <img src="{{ url_for('static', filename='images/dashboard_preview.png') }}" alt="Dashboard" class="rounded-lg w-full h-auto shadow-sm">
+        <div class="max-w-5xl mx-auto py-12 px-6">
+    
+    <div class="bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-2xl border border-gray-100 p-10 md:p-16 text-center transform transition hover:scale-[1.01] duration-700">
+        
+        <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/5 text-black/60 text-xs font-semibold tracking-wide mb-8 animate-pulse">
+            <span class="w-2 h-2 rounded-full bg-red-500"></span>
+            Access Closing Soon
         </div>
+
+        <div class="flex justify-center items-baseline gap-2 md:gap-4 font-mono text-gray-900 tracking-tighter" id="apple-countdown">
+            
+            <div class="flex flex-col items-center">
+                <span class="text-6xl md:text-9xl font-light" id="main-days">00</span>
+                <span class="text-xs md:text-sm text-gray-400 font-medium mt-2">DAYS</span>
+            </div>
+            
+            <span class="text-4xl md:text-7xl font-light text-gray-200 self-start mt-4">:</span>
+
+            <div class="flex flex-col items-center">
+                <span class="text-6xl md:text-9xl font-light" id="main-hours">00</span>
+                <span class="text-xs md:text-sm text-gray-400 font-medium mt-2">HOURS</span>
+            </div>
+
+            <span class="text-4xl md:text-7xl font-light text-gray-200 self-start mt-4">:</span>
+
+            <div class="flex flex-col items-center">
+                <span class="text-6xl md:text-9xl font-light" id="main-minutes">00</span>
+                <span class="text-xs md:text-sm text-gray-400 font-medium mt-2">MINS</span>
+            </div>
+
+            <span class="text-4xl md:text-7xl font-light text-gray-200 self-start mt-4">:</span>
+
+            <div class="flex flex-col items-center">
+                <span class="text-6xl md:text-9xl font-medium text-black" id="main-seconds">00</span>
+                <span class="text-xs md:text-sm text-gray-400 font-medium mt-2">SECS</span>
+            </div>
+
+        </div>
+
+        <p class="mt-10 text-lg text-gray-500 font-light">
+            The free beta period ends on <span class="text-gray-900 font-medium">December 29</span>.
+        </p>
+
+    </div>
+</div>
     </section>
 
     <section class="py-12 bg-white/50 border-y border-gray-200 backdrop-blur-sm">

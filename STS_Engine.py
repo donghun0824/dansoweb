@@ -540,8 +540,8 @@ class MicrostructureAnalyzer:
         return df_res.dropna()
     
     def get_metrics(self):
-        # 1. 데이터 검증 (최소 5개 틱 필요)
-        if len(self.raw_ticks) < 5: return None
+        # 1. 데이터 검증 (최소 5개 -> 20개로 상향: 지표 계산 최소량 확보)
+        if len(self.raw_ticks) < 20: return None
         
         # 2. DataFrame 생성
         df = pd.DataFrame(self.raw_ticks).set_index('t')
@@ -551,55 +551,57 @@ class MicrostructureAnalyzer:
         volume = df['s'].resample('1s').sum()
         tick_count = df['s'].resample('1s').count()
         
-        # 데이터 합치기
+        # 데이터 합치기 (최근 600초 유지)
         df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
         df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
         
         # 결측치 채우기
         df = df_res.ffill().fillna(0)
         
-        # 다시 한번 검증
-        if len(df) < 5: return None 
+        if len(df) < 20: return None 
         
         try:
-            # --- 윈도우 사이즈 설정 ---
-            WIN_MAIN = 60      # 1분
-            WIN_SQZ = 30       # 30초
-            WIN_SLOPE = 5      # 5초
+            WIN_MAIN = 60
+            WIN_SQZ = 30
+            WIN_SLOPE = 5
 
-            # --- [지표 계산 시작] ---
-            
-            # 1. VWAP 및 기울기
+            # --- 기본 지표 계산 ---
             v = df['volume'].values
             p = df['close'].values
             df['vwap'] = (p * v).cumsum() / (v.cumsum() + 1e-9)
             df['vwap'] = df['vwap'].ffill() 
             df['vwap_slope'] = (df['vwap'].diff(WIN_SLOPE) / (df['vwap'].shift(WIN_SLOPE) + 1e-9)) * 10000
             
-            # 2. RVOL (상대 거래량)
             df['vol_ma'] = df['volume'].rolling(WIN_MAIN).mean()
             df['rvol'] = df['volume'] / (df['vol_ma'] + 1e-9)
             
-            # 3. [볼린저 밴드 하단 터치 확인용] 직접 계산
-            # Squeeze 전략에서 '하단 터치 후 반등'을 잡기 위함
-            df['ma_sqz'] = df['close'].rolling(WIN_SQZ).mean()
-            df['std_sqz'] = df['close'].rolling(WIN_SQZ).std()
-            df['lower_band'] = df['ma_sqz'] - (df['std_sqz'] * 2.0)
-            
-            # 하단 터치 여부 (저가가 하단 밴드보다 낮거나 같음 -> 1)
-            is_lower_touch = 1 if df['low'].iloc[-1] <= df['lower_band'].iloc[-1] else 0
+            # 🔥 [NEW] Volatility Ratio (단기/장기 변동성 비율) - 폭발 감지용
+            # 20초(단기) 변동성이 120초(장기)보다 크면 시장이 흥분 상태임
+            df['realized_vol_20s'] = df['close'].pct_change().rolling(20).std()
+            df['realized_vol_120s'] = df['close'].pct_change().rolling(120).std()
+            df['vol_ratio'] = df['realized_vol_20s'] / (df['realized_vol_120s'] + 1e-9)
 
-            # 4. Squeeze Ratio (indicator 모듈 사용)
+            # 🔥 [NEW] Efficiency Ratio (Hurst 지수 대용) - 추세 강도용
+            # ER = (순수 가격 변화폭) / (전체 이동경로의 합)
+            # 1.0에 가까울수록 "일직선 상승(추세)", 0.0에 가까울수록 "지그재그(횡보)"
+            change = df['close'].diff(20).abs()
+            path = df['close'].diff().abs().rolling(20).sum()
+            df['efficiency_ratio'] = change / (path + 1e-9)
+            
+            # Hurst 값으로 매핑 (0.5~1.0 범위로 변환하여 로직에 전달)
+            df['hurst'] = 0.5 + (df['efficiency_ratio'] * 0.5)
+
+            # Squeeze Ratio
             df['squeeze_ratio'] = ind.compute_bb_bandwidth(df['close'], window=20)
             
-            # 5. Pump Accel (가속도)
+            # Pump Accel
             df['pump_5m'] = df['close'].pct_change(300)
             df['pump_accel'] = df['pump_5m'].diff(60)
             
-            # 6. Tick Accel (틱 속도 변화량)
+            # Tick Accel
             df['tick_accel'] = df['tick_speed'].diff().fillna(0)
 
-            # 7. ATR (변동성)
+            # ATR
             prev_close = df['close'].shift(1)
             tr1 = df['high'] - df['low']
             tr2 = (df['high'] - prev_close).abs()
@@ -607,27 +609,21 @@ class MicrostructureAnalyzer:
             df['tr'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             df['atr'] = df['tr'].rolling(WIN_MAIN).mean()
             
-            # 8. RV_60 (실현 변동성)
-            log_ret = np.log(df['close'] / df['close'].shift(1))
-            df['rv_60'] = log_ret.rolling(60).std() * np.sqrt(60) * 100
-
-            # 9. Fibo Pos (위치값)
+            # Indicators (RSI, Stoch, Fibo)
+            df['rsi'] = ind.compute_rsi_series(df['close'], period=14)
+            df['stoch_k'] = ind.compute_stochastic_series(df['high'], df['low'], df['close'])
             df['fibo_pos'] = ind.compute_fibo_pos(df['high'], df['low'], df['close'], lookback=300)
 
-            # ==========================================================
-            # 🔥 [NEW] 반등 전략용 추가 지표 (RSI, Stoch)
-            # ==========================================================
-            # 10. RSI
-            df['rsi'] = ind.compute_rsi_series(df['close'], period=14)
-            
-            # 11. Stochastic (Fast %K) - 과매도 추가 확인용
-            df['stoch_k'] = ind.compute_stochastic_series(df['high'], df['low'], df['close'])
+            # [Band Touch Logic]
+            df['ma_sqz'] = df['close'].rolling(WIN_SQZ).mean()
+            df['std_sqz'] = df['close'].rolling(WIN_SQZ).std()
+            df['lower_band'] = df['ma_sqz'] - (df['std_sqz'] * 2.0)
+            is_lower_touch = 1 if df['low'].iloc[-1] <= df['lower_band'].iloc[-1] else 0
 
-            # NaN 제거 및 마지막 값 추출
             df = df.fillna(0)
             last = df.iloc[-1]
 
-            # --- [OBI & VPIN 계산] ---
+            # OBI & VPIN Calculation
             bids = np.array([q['s'] for q in self.quotes.get('bids', [])[:OBI_LEVELS]])
             asks = np.array([q['s'] for q in self.quotes.get('asks', [])[:OBI_LEVELS]])
             bid_vol = np.sum(bids) if len(bids) > 0 else 0
@@ -635,15 +631,11 @@ class MicrostructureAnalyzer:
             obi = (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0
             
             obi_mom = obi - self.prev_obi
-            
-            # 🔥 [NEW] OBI Reversal 탐지 (음수 -> 양수 전환)
-            # 현재는 양수인데, 직전 값(현재-변화량)이 음수였으면 '골든크로스'
             prev_obi_val = obi - obi_mom
             obi_reversal_flag = 1 if (obi > 0 and prev_obi_val < 0) else 0
-
-            self.prev_obi = obi # 상태 업데이트
+            self.prev_obi = obi 
             
-            # VPIN (100틱 샘플링)
+            # VPIN (100 ticks sample)
             raw_df = pd.DataFrame(list(self.raw_ticks)[-100:])
             if not raw_df.empty:
                 buy_vol = raw_df[raw_df['p'] >= raw_df['ask']]['s'].sum()
@@ -653,46 +645,30 @@ class MicrostructureAnalyzer:
             else:
                 vpin = 0
 
-            # VWAP 거리 & 스프레드
+            # Spread & Dist
             vwap_dist = (last['close'] - last['vwap']) / last['vwap'] * 100 if last['vwap'] > 0 else 0
-            
             best_bid = self.raw_ticks[-1]['bid']
             best_ask = self.raw_ticks[-1]['ask']
             spread = (best_ask - best_bid) / best_bid * 100 if best_bid > 0 else 0
 
-            # --- [최종 리턴] ---
             return {
-                'obi': obi, 
-                'obi_mom': obi_mom, 
-                'tick_accel': last['tick_accel'],
-                'vpin': vpin, 
-                'vwap_dist': vwap_dist,
-                'vwap_slope': last['vwap_slope'],
-                'rvol': last['rvol'],
-                'squeeze_ratio': last['squeeze_ratio'],
-                'pump_accel': last['pump_accel'],
+                'obi': obi, 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'], 'vpin': vpin, 
+                'vwap_dist': vwap_dist, 'vwap_slope': last['vwap_slope'], 'rvol': last['rvol'],
+                'squeeze_ratio': last['squeeze_ratio'], 'pump_accel': last['pump_accel'],
                 'atr': last['atr'] if last['atr'] > 0 else last['close'] * 0.005,
-                'spread': spread, 
-                'last_price': last['close'], 
-                'tick_speed': last['tick_speed'], 
+                'spread': spread, 'last_price': last['close'], 'tick_speed': last['tick_speed'], 
                 'timestamp': raw_df.iloc[-1]['t'] if not raw_df.empty else pd.Timestamp.now(), 
-                'vwap': last['vwap'],
+                'vwap': last['vwap'], 'rv_60': last['rv_60'], 'fibo_pos': last['fibo_pos'],
+                'bb_width_norm': last['squeeze_ratio'], 'rsi': last['rsi'], 'stoch_k': last['stoch_k'],
+                'obi_reversal_flag': obi_reversal_flag, 'lower_touch': is_lower_touch,
                 
-                # AI용 추가 지표
-                'rv_60': last['rv_60'],
-                'fibo_pos': last['fibo_pos'],
-                'bb_width_norm': last['squeeze_ratio'],
-                
-                # 🔥 [NEW] 반등 전략 필수 지표들
-                'rsi': last['rsi'],
-                'stoch_k': last['stoch_k'],    # 스토캐스틱
-                'lower_touch': is_lower_touch, # 밴드 하단 터치 여부
-                'obi_reversal_flag': obi_reversal_flag
+                # 🔥 [NEW] SniperBot V6.0을 위해 반드시 넘겨줘야 할 데이터
+                'vol_ratio': last['vol_ratio'],
+                'hurst': last['hurst']
             }
             
         except Exception as e:
-            import traceback
-            # print(f"❌ [Metric Calc Error] {e}", flush=True) 
+            # print(f"Metric Error: {e}") 
             return None
             
 class TargetSelector:
@@ -838,96 +814,90 @@ class SniperBot:
         self.last_ready_alert = 0
         self.aiming_start_time = 0
         self.aiming_start_price = 0
+        
+        # 🔥 [V6.0 New] Regime Probability p (초기값 0.5 중립)
+        self.regime_p = 0.5 
 
     # ==============================================================================
-    # [Module 1] Scoring Engines (스코어링 엔진 분리)
+    # [Module 1] Scoring Engines (기존 엔진 유지)
     # ==============================================================================
-    
-    # 전략 A: 줍줍 (Rebound) - 과매도, 밴드 수축, 하락 추세
     def _calc_rebound_score(self, m):
-        score = 0
-        reasons = []
-        
-        # 1. RSI 과매도 (30 이하)
-        rsi = m.get('rsi', 50)
-        if rsi < 30:
-            score += 40; reasons.append(f"Oversold(RSI{rsi:.0f})")
-        elif rsi < 40:
-            score += 20
-            
-        # 2. Squeeze (밴드 수축)
-        if m['squeeze_ratio'] <= 1.0:
-            score += 30; reasons.append("Squeeze Ready")
-            
-        # 3. VWAP 하회 (저평가)
-        if m['vwap_dist'] < -1.0:
-            score += 20; reasons.append("Cheap Zone")
-            
-        # 4. 거래량 다이버전스
+        score = 0; reasons = []
+        if m.get('rsi', 50) < 30: score += 40; reasons.append(f"Oversold")
+        elif m.get('rsi', 50) < 40: score += 20
+        if m['squeeze_ratio'] <= 1.0: score += 30; reasons.append("Squeeze")
+        if m['vwap_dist'] < -1.0: score += 20; reasons.append("Cheap")
         if m['vwap_dist'] < -0.5 and m['rvol'] > 1.5 and m['tick_accel'] > 0:
-            score += 10; reasons.append("Dip Reversal")
-
+            score += 10; reasons.append("DipRev")
         return max(score, 0), reasons
 
-    # 전략 B: 불타기 (Momentum) - 밴드 확장, VWAP 돌파, 거래량 폭발
     def _calc_momentum_score(self, m):
-        score = 0
-        reasons = []
-        
-        # 1. RSI 상승 가속 구간 (50~80)
-        rsi = m.get('rsi', 50)
-        if 50 <= rsi <= 80:
-            score += 30; reasons.append("Momentum Zone")
-        elif rsi > 85:
-            score -= 10; reasons.append("RSI Overheated") 
-            
-        # 2. Expansion (밴드 확장) & 양봉 -> 변동성 돌파
+        score = 0; reasons = []
+        if 50 <= m.get('rsi', 50) <= 80: score += 30; reasons.append("MomZone")
         if m['squeeze_ratio'] > 2.0:
-            if m['tick_accel'] > 0 and m['rvol'] > 2.0:
-                score += 40; reasons.append("Vol Breakout 🚀")
-            else:
-                score -= 10 # 거래량 없는 확장은 위험
-                
-        # 3. VWAP 상회 (정배열)
-        if m['last_price'] > m['vwap']:
-            score += 20; reasons.append("Trend Up")
-            
-        # 4. RVOL 폭발 (핵심 트리거)
-        if m['rvol'] > 3.0:
-            score += 30; reasons.append("Volume Spike 🔥")
-        elif m['rvol'] > 2.0:
-            score += 15
-
+            if m['tick_accel'] > 0 and m['rvol'] > 2.0: score += 40; reasons.append("Breakout")
+            else: score -= 10
+        if m['last_price'] > m['vwap']: score += 20; reasons.append("TrendUp")
+        if m['rvol'] > 3.0: score += 30; reasons.append("VolSpike")
+        elif m['rvol'] > 2.0: score += 15
         return max(score, 0), reasons
 
     # ==============================================================================
-    # [Module 2] Adaptive Filtering (적응형 필터 - VPIN 역설 해결)
+    # [Module 2] Regime Probability Engine (회장님 지시 사항 구현)
+    # ==============================================================================
+    def _calculate_regime_p(self, m):
+        """
+        0.0 (Rebound 장세) <-----> 1.0 (Momentum 장세)
+        """
+        def clamp(x): return max(0.0, min(1.0, x))
+        def sigmoid(x): return 1 / (1 + np.exp(-x))
+
+        try:
+            # 1) 지표 표준화 (0~1 Scaling)
+            p_speed = clamp((m['tick_speed'] - 2) / 6.0)
+            p_vwap = sigmoid(m['vwap_dist'])
+            p_vol = clamp((m.get('vol_ratio', 1.0) - 0.8) / 0.7)
+            p_hurst = clamp((m.get('hurst', 0.5) - 0.45) / 0.20)
+            p_rvol = clamp((m['rvol'] - 1.5) / 3.0)
+            p_squeeze = clamp((m['squeeze_ratio'] - 1.0) / 1.5)
+
+            # 2) 가중 평균 (Weighted Sum) - 논문 기반 최적 비율
+            p_new = (
+                0.25 * p_speed +
+                0.20 * p_vwap +
+                0.20 * p_vol +
+                0.15 * p_hurst +
+                0.15 * p_rvol +
+                0.05 * p_squeeze
+            )
+            
+            # 3) 스무딩 (Smoothing)
+            self.regime_p = (0.7 * self.regime_p) + (0.3 * p_new)
+            
+            return clamp(self.regime_p)
+
+        except:
+            return 0.5 # 에러 시 중립
+
+    # ==============================================================================
+    # [Module 3] Adaptive Filtering
     # ==============================================================================
     def _check_filters(self, m, strategy, final_score):
-        # 1. 공통 필터
-        if m['spread'] > 1.2:
-            return False, f"High Spread({m['spread']:.2f}%)"
-        if m['tick_speed'] < 2:
-            return False, "Dead Zone"
+        if m['spread'] > 1.2: return False, f"Spread({m['spread']:.2f}%)"
+        if m['tick_speed'] < 2: return False, "Dead Zone"
 
-        # 2. 전략별 가변 필터
         if strategy == "REBOUND":
-            # 줍줍: 안전 제일 (VPIN 0.8 미만)
             if m['vpin'] > 0.8: return False, f"High VPIN({m['vpin']:.2f})"
-            if m['rvol'] < 1.0: return False, "Low Volume"
+            if m['rvol'] < 1.0: return False, "Low Vol"
             
         elif strategy in ["MOMENTUM", "DIP_AND_RIP"]:
-            # 불타기: 독성 허용 (VPIN 1.5까지 완화)
-            if m['vpin'] > 1.5: 
-                return False, f"Extreme Toxic({m['vpin']:.2f})"
-            # 대신 거래량 필수
-            if m['rvol'] < 2.5: 
-                return False, f"Weak Pump Vol({m['rvol']:.1f})"
+            if m['vpin'] > 1.5: return False, f"Toxic({m['vpin']:.2f})"
+            if m['rvol'] < 2.5: return False, f"Weak Vol({m['rvol']:.1f})"
                 
         return True, "PASS"
 
     # ==============================================================================
-    # [Module 3] Main Logic (통합 및 실행)
+    # [Module 4] Main Logic (p-Value Blending & Integration)
     # ==============================================================================
     def update_dashboard_db(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
@@ -936,11 +906,10 @@ class SniperBot:
         m = self.analyzer.get_metrics()
         
         if not m or m['tick_speed'] == 0: return 
-
         if m.get('atr') and m['atr'] > 0: self.atr = m['atr']
         else: self.atr = max(self.selector.get_atr(self.ticker), tick_data['p'] * 0.01)
 
-        # 1. AI Score 계산
+        # 1. AI Score
         ai_prob = 0.0
         if self.model:
             try:
@@ -954,56 +923,62 @@ class SniperBot:
                 ai_prob = sum(self.prob_history) / len(self.prob_history)
             except: pass
 
-        # 2. Dual Scoring & Strategy Selection
+        # 2. Dual Scoring
         score_rebound, reasons_reb = self._calc_rebound_score(m)
         score_momentum, reasons_mom = self._calc_momentum_score(m)
         
+        # 🔥 [V6.0 CORE] Regime Probability p 계산
+        p = self._calculate_regime_p(m)
+        
+        # 🔥 [Dynamic Blending] p값에 따라 비중 조절 (핵심!)
+        # p가 높을수록(불장) Momentum 점수를, 낮을수록(하락장) Rebound 점수를 많이 반영
+        quant_score = (score_momentum * p) + (score_rebound * (1 - p))
+        
         strategy = "WATCHING"
-        quant_score = 0
         active_reasons = []
 
-        # [Confluence Logic] 합의된 공식: (A + B) * 0.7
-        quant_score = (score_rebound + score_momentum) * 0.7
-        
-        if score_rebound > 50 and score_momentum > 50:
-            strategy = "DIP_AND_RIP"
-            active_reasons = list(set(reasons_reb + reasons_mom)) + ["Confluence Boost"]
-        elif score_rebound > score_momentum:
-            strategy = "REBOUND"
-            active_reasons = reasons_reb
-        else:
+        # 전략 태그 및 로그 결정
+        if p > 0.7: # 확실한 추세장
             strategy = "MOMENTUM"
-            active_reasons = reasons_mom
+            active_reasons = reasons_mom + [f"Regime:Trend({p:.2f})"]
+        elif p < 0.3: # 확실한 반전장
+            strategy = "REBOUND"
+            active_reasons = reasons_reb + [f"Regime:Dip({p:.2f})"]
+        else: # 중립 구간 -> 점수 높은 쪽 + Dip&Rip 체크
+            if score_rebound > 50 and score_momentum > 50:
+                strategy = "DIP_AND_RIP"
+                quant_score = (score_rebound + score_momentum) * 0.6 # 보너스
+            elif score_rebound > score_momentum:
+                strategy = "REBOUND"
+                active_reasons = reasons_reb
+            else:
+                strategy = "MOMENTUM"
+                active_reasons = reasons_mom
 
-        # 🔥 [WEIGHT FIX] AI 40% : Quant 60% 적용
+        # 최종 점수 (AI 4 : Quant 6)
         final_score = (ai_prob * 100 * 0.4) + (quant_score * 0.6)
 
-        # 3. Adaptive Filtering
+        # 3. Filtering
         is_pass, filter_msg = self._check_filters(m, strategy, final_score)
         
-        # [Warm-up 예외 처리]
+        # Warm-up 예외
         if len(self.analyzer.raw_ticks) < 50:
-            # RVOL 5.0 이상 급등은 데이터 부족해도 강제 통과
             if m['rvol'] > 5.0:
                 final_score = max(final_score, 80)
                 is_pass = True
-                if "Early Pump" not in active_reasons: active_reasons.append("Early Pump Bypass")
+                active_reasons.append("Early Pump Bypass")
             else:
-                final_score = 0
-                is_pass = False
-                self.state = "WARM_UP"
+                final_score = 0; is_pass = False; self.state = "WARM_UP"
 
         display_score = final_score if is_pass else 0
 
-        # 4. Ready 알림
+        # 4. Notification
         if final_score >= 65 and is_pass and self.state != "FIRED":
             if (time.time() - self.last_ready_alert) > 180:
                 self.last_ready_alert = time.time()
-                asyncio.create_task(send_fcm_notification(
-                    self.ticker, m['last_price'], int(final_score)
-                ))
+                asyncio.create_task(send_fcm_notification(self.ticker, m['last_price'], int(final_score)))
 
-        # 5. DB 업데이트
+        # 5. DB Update
         now = time.time()
         if (self.state != self.last_logged_state) or (now - self.last_db_update > 1.5):
             try:
@@ -1019,10 +994,10 @@ class SniperBot:
         self.logger.log_replay({
             'timestamp': m['timestamp'], 'ticker': self.ticker, 'price': m['last_price'], 
             'vwap': self.vwap, 'atr': self.atr, 'obi': m['obi'], 
-            'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': ai_prob
+            'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': ai_prob, 'regime_p': p
         })
 
-        # 6. 진입 실행
+        # 6. Execution
         if self.state == "WATCHING":
             if final_score >= 60 and is_pass and m['tick_accel'] > 0:
                 self.state = "AIMING"
@@ -1069,7 +1044,7 @@ class SniperBot:
         except Exception as e: print(f"❌ [Warmup] Failed: {e}", flush=True)
 
     # ==============================================================================
-    # [Module 4] Dynamic Execution (동적 청산)
+    # [Module 5] Dynamic Execution (동적 청산)
     # ==============================================================================
     def fire(self, price, prob, metrics, strategy="MOMENTUM"):
         print(f"🔫 [FIRE] {self.ticker} ({strategy}) AI:{prob:.2f} Price:${price:.4f}", flush=True)
@@ -1080,7 +1055,7 @@ class SniperBot:
         elif strategy == "MOMENTUM":
             tp_mult = 3.0; sl_mult = 1.5; desc = "Trend Follow"
         elif strategy == "DIP_AND_RIP":
-            tp_mult = 2.0; sl_mult = 1.2; desc = "Hybrid"
+            tp_mult = 2.5; sl_mult = 1.2; desc = "Hybrid V-Shape"
         else:
             tp_mult = 1.5; sl_mult = 1.0; desc = "Default"
 
@@ -1139,7 +1114,6 @@ class SniperBot:
                 'ai_prob': 0, 'obi': 0, 'obi_mom': 0, 'tick_accel': 0, 'vpin': 0,
                 'vwap_dist': 0, 'profit': profit_pct
             })
-
 # ==============================================================================
 # 4. PIPELINE MANAGER
 # ==============================================================================
