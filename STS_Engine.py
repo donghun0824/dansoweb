@@ -151,7 +151,8 @@ def init_db():
             "rsi REAL DEFAULT 50",
             "stoch_k REAL DEFAULT 50",
             "fibo_pos REAL DEFAULT 0.5",
-            "obi_rev INTEGER DEFAULT 0"
+            "obi_rev INTEGER DEFAULT 0",
+            "regime_p REAL DEFAULT 0.5"
         ]
 
         print("🔄 [DB] Checking and adding columns...")
@@ -233,10 +234,10 @@ def update_dashboard_db(ticker, metrics, score, status):
         INSERT INTO sts_live_targets 
         (ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status, 
          obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread, 
-         rsi, stoch_k, fibo_pos, obi_rev, last_updated)
+         rsi, stoch_k, fibo_pos, obi_rev, regime_p,last_updated)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 
                 %s, %s, %s, %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s, NOW())
+                %s, %s, %s, %s,%s, NOW())
         ON CONFLICT (ticker) DO UPDATE SET
             price = EXCLUDED.price,
             ai_score = EXCLUDED.ai_score,
@@ -259,6 +260,7 @@ def update_dashboard_db(ticker, metrics, score, status):
             stoch_k = EXCLUDED.stoch_k,
             fibo_pos = EXCLUDED.fibo_pos,
             obi_rev = EXCLUDED.obi_rev,
+            regime_p = EXCLUDED.regime_p,
             
             last_updated = NOW();
         """
@@ -286,7 +288,8 @@ def update_dashboard_db(ticker, metrics, score, status):
             float(metrics.get('rsi', 50)),
             float(metrics.get('stoch_k', 50)),
             float(metrics.get('fibo_pos', 0.5)),
-            int(metrics.get('obi_reversal_flag', 0))
+            int(metrics.get('obi_reversal_flag', 0)),
+            float(metrics.get('regime_p', 0.5))
         ))
         conn.commit()
         cursor.close()
@@ -987,6 +990,7 @@ class SniperBot:
         if (self.state != self.last_logged_state) or (now - self.last_db_update > 1.5):
             try:
                 metrics_copy = copy.deepcopy(m) 
+                metrics_copy['regime_p'] = p
                 asyncio.get_running_loop().run_in_executor(
                     DB_WORKER_POOL, 
                     partial(update_dashboard_db, self.ticker, metrics_copy, display_score, self.state)
