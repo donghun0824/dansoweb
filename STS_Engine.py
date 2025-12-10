@@ -321,9 +321,9 @@ def log_signal_to_db(ticker, price, score, entry=0, tp=0, sl=0, strategy=""):
     finally:
         if conn: db_pool.putconn(conn)
 
-# [수정된 알림 전송 함수] - 심플 버전 (SCAN / BUY)
+# [수정된 알림 전송 함수] - 로직 유지 + 메시지 포맷 심플화
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
-    # 1. Firebase 초기화 체크
+    # 1. Firebase 초기화 체크 (기존 유지)
     if not firebase_admin._apps:
         print(f"⚠️ [FCM] Firebase not initialized. Skipping alert for {ticker}.", flush=True)
         return
@@ -336,48 +336,54 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         subscribers = cursor.fetchall()
         cursor.close()
         
+        # 구독자가 없으면 로그 남기고 종료 (기존 유지)
         if not subscribers:
+            print(f"⚠️ [FCM] No subscribers found. Skipping alert for {ticker}.", flush=True)
+            db_pool.putconn(conn)
             return
 
         # =========================================================
-        # 🔥 [UI 수정] 알림 메시지 포맷 단순화
+        # 🔥 [UI 수정] 알림 메시지 포맷 단순화 (SCAN / BUY)
         # =========================================================
         
-        # Case 2: 매수 진입 (BUY) - Entry, TP 정보 포함
+        # Case: 매수 진입 (BUY) - Entry와 TP가 존재할 때
         if entry and tp:
             # 제목: BUY 티커 (점수)
             noti_title = f"BUY {ticker} ({probability_score})"
             
-            # 본문: Entry와 TP만 깔끔하게 (SL, 손익비 삭제)
+            # 본문: Entry와 TP만 깔끔하게 (SL, 손익비 제거)
             noti_body = (
                 f"Entry: ${float(entry):.3f}\n"
                 f"TP: ${float(tp):.3f}"
             )
             
-        # Case 1: 단순 포착 (SCAN) - 점수 표시 X, 티커만
+        # Case: 단순 포착 (SCAN) - Entry 정보가 없을 때
         else:
-            # 제목: SCAN 티커
+            # 제목: SCAN 티커 (점수 제거)
             noti_title = f"SCAN {ticker}"
             
             # 본문: 현재가만 표시
             noti_body = f"Current: ${float(price):.4f}"
 
+        # 데이터 페이로드 구성 (기존 유지)
         data_payload = {
             'type': 'signal', 'ticker': ticker, 
             'price': str(price), 'score': str(probability_score), 
             'title': noti_title, 'body': noti_body
         }
         
-        print(f"🔔 [FCM] Sending: {noti_title}", flush=True)
+        # 3. [로그 추가] 전송 시작 알림 (기존 유지)
+        print(f"🔔 [FCM] Sending: {noti_title} to {len(subscribers)} devices...", flush=True)
 
         success_count = 0
         failed_tokens = []
         
-        # 전송 루프
+        # 4. 전송 루프 (기존 로직 100% 유지)
         for row in subscribers:
             token = row[0]
             user_min_score = row[1] if row[1] is not None else 0 
             
+            # 사용자 설정 점수 미달 시 스킵
             if probability_score < user_min_score: continue
 
             try:
@@ -385,7 +391,6 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                     token=token,
                     notification=messaging.Notification(title=noti_title, body=noti_body),
                     data=data_payload,
-                    # 안드로이드 설정 (소리, 중요도)
                     android=messaging.AndroidConfig(
                         priority='high', 
                         notification=messaging.AndroidNotification(
@@ -395,7 +400,6 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                             visibility='public'
                         )
                     ),
-                    # iOS 설정
                     apns=messaging.APNSConfig(
                         payload=messaging.APNSPayload(aps=messaging.Aps(alert=messaging.ApsAlert(title=noti_title, body=noti_body), sound="default"))
                     )
@@ -403,23 +407,31 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                 messaging.send(message)
                 success_count += 1
             except Exception as e:
-                # 토큰 만료 에러 처리
+                # 전송 실패 시 로그 및 만료 토큰 수집
+                print(f"❌ [FCM Fail] Token: {token[:10]}... Error: {e}", flush=True)
                 if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e): 
                     failed_tokens.append(token)
         
-        # 만료된 토큰 정리
+        # 5. 결과 리포트 (기존 유지)
+        if success_count > 0:
+            print(f"✅ [FCM] Successfully sent to {success_count} devices.", flush=True)
+        else:
+            print(f"⚠️ [FCM] Zero success. Check tokens or filters.", flush=True)
+
+        # 만료된 토큰 DB 삭제 처리 (기존 유지)
         if failed_tokens:
             c = conn.cursor()
             c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
             conn.commit()
             c.close()
+            print(f"🗑️ [FCM] Cleaned up {len(failed_tokens)} invalid tokens.", flush=True)
 
     except Exception as e:
         print(f"❌ [FCM Critical Error] {e}", flush=True)
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)
-        
+
 async def send_fcm_notification(ticker, price, probability_score, entry=None, tp=None, sl=None):
     """[V9.2] 알림 전용 쓰레드 풀 사용"""
     loop = asyncio.get_running_loop()
@@ -923,7 +935,6 @@ class SniperBot:
         if self.vwap == 0: self.vwap = tick_data['p']
         m = self.analyzer.get_metrics()
         
-        # 데이터가 없거나 멈춘 경우 리턴
         if not m or m['tick_speed'] == 0: return 
 
         if m.get('atr') and m['atr'] > 0: self.atr = m['atr']
@@ -951,14 +962,9 @@ class SniperBot:
         quant_score = 0
         active_reasons = []
 
-        # 🔥 [V5.4 FORMULA] Base + Bonus Logic 적용
-        # 공식: (큰 점수 * 0.8) + (작은 점수 * 0.5)
-        max_s = max(score_rebound, score_momentum)
-        min_s = min(score_rebound, score_momentum)
+        # [Confluence Logic] 합의된 공식: (A + B) * 0.7
+        quant_score = (score_rebound + score_momentum) * 0.7
         
-        quant_score = (max_s * 0.8) + (min_s * 0.5)
-        
-        # 전략 태그 결정
         if score_rebound > 50 and score_momentum > 50:
             strategy = "DIP_AND_RIP"
             active_reasons = list(set(reasons_reb + reasons_mom)) + ["Confluence Boost"]
