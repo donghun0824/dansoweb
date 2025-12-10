@@ -252,6 +252,47 @@
             </div>
         </div>
     </footer>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // [수정] 날짜 형식을 'YYYY-MM-DDTHH:mm:ss'로 변경 (오류 해결의 핵심!)
+        const targetDate = new Date("2025-12-29T00:00:00").getTime();
+
+        const timer = setInterval(() => {
+            const now = new Date().getTime();
+            const distance = targetDate - now;
+
+            // 종료 시 처리
+            if (distance < 0) {
+                clearInterval(timer);
+                document.getElementById('apple-countdown').innerHTML = 
+                    '<div class="text-3xl md:text-6xl font-bold text-gray-900 tracking-tight py-10">Access Closed</div>';
+                return;
+            }
+
+            // 시간 계산
+            const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+            // 포맷팅 (01, 05)
+            const fmt = (n) => n < 10 ? '0' + n : n;
+
+            // 화면 업데이트
+            const elDays = document.getElementById('main-days');
+            const elHours = document.getElementById('main-hours');
+            const elMins = document.getElementById('main-minutes');
+            const elSecs = document.getElementById('main-seconds');
+
+            if(elDays) elDays.innerText = fmt(days);
+            if(elHours) elHours.innerText = fmt(hours);
+            if(elMins) elMins.innerText = fmt(minutes);
+            if(elSecs) elSecs.innerText = fmt(seconds);
+
+        }, 1000);
+    });
+</script>
+          
 
 </body>
 </html>

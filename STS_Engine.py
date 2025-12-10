@@ -521,9 +521,13 @@ class MicrostructureAnalyzer:
         best_bid = current_quotes['bids'][0]['p'] if current_quotes['bids'] else 0
         best_ask = current_quotes['asks'][0]['p'] if current_quotes['asks'] else 0
         
+        # [수정 완료] 데이터가 없을 때를 대비해 .get() 사용 (안전장치)
         self.raw_ticks.append({
-            't': pd.to_datetime(tick_data['t'], unit='ms'),
-            'p': tick_data['p'], 's': tick_data['s'], 'bid': best_bid, 'ask': best_ask
+            't': pd.to_datetime(tick_data.get('t', time.time()*1000), unit='ms'), 
+            'p': tick_data.get('p', 0),  
+            's': tick_data.get('s', 0),  # 🔥 여기가 핵심 수정 포인트! ('s' 없으면 0 처리)
+            'bid': best_bid, 
+            'ask': best_ask
         })
         self.quotes = current_quotes
 
