@@ -682,7 +682,6 @@ class TargetSelector:
     def __init__(self):
         self.snapshots = {} 
         self.last_gc_time = time.time()
-        # [NEW] 시장 평균 거래량 추적용 (RVOL 대용)
         self.market_vol_tracker = defaultdict(float)
 
     def update(self, agg_data):
@@ -700,8 +699,8 @@ class TargetSelector:
         d['c'] = agg_data['c']
         d['h'] = max(d['h'], agg_data['h'])
         d['l'] = min(d['l'], agg_data['l'])
-        d['v'] += agg_data['v'] # 누적 거래량
-        d['vwap'] = agg_data.get('vw', d['c']) # VWAP 업데이트
+        d['v'] += agg_data['v']
+        d['vwap'] = agg_data.get('vw', d['c'])
         d['last_updated'] = time.time()
 
     def get_atr(self, ticker):
@@ -710,62 +709,57 @@ class TargetSelector:
             return (d['h'] - d['l']) * 0.1 
         return 0.05
 
-    # 🟢 [수정 1] "스마트 업데이트" 적용된 DB 저장 함수
+    # 🟢 [수정 핵심] RVOL은 건드리지 않고, 거래대금(dollar_vol)만 따로 저장
     def save_candidates_to_db(self, candidates):
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # candidates는 (티커, 점수, 등락률, 거래대금) 4개 데이터가 확실히 들어옴
+            # *rest 사용: 데이터가 4개 이상 들어와도 에러 없이 처리 (기존 로직 유지)
             for t, score, change, vol, *rest in candidates:
                 d = self.snapshots.get(t)
                 if not d: continue
                 
-                # [핵심 로직]
-                # 1. Insert: 없으면 'SCANNING' 상태로 넣음.
-                # 2. Update: 있으면 갱신하되, "WHERE status = 'SCANNING'" 조건을 걺.
-                #    -> 즉, 이미 봇이 잡아서 'AIMING'이나 'FIRED'가 된 종목은
-                #       스캐너가 허접한 데이터로 덮어쓰지 못하게 막음 (깜빡임 방지).
+                # 1. Insert: 없을 땐 dollar_vol에 거래대금을 넣고, rvol은 0으로 초기화
+                # 2. Update: 있을 땐 dollar_vol만 갱신. rvol은 봇이 계산한 값이 있을 수 있으므로 건드리지 않음.
+                # 3. WHERE: 'SCANNING' 상태일 때만 업데이트 (봇이 매매 중인 종목 보호)
                 
                 query = """
                 INSERT INTO sts_live_targets 
-                (ticker, price, ai_score, day_change, rvol, status, last_updated)
-                VALUES (%s, %s, %s, %s, %s, 'SCANNING', NOW())
+                (ticker, price, ai_score, day_change, dollar_vol, rvol, status, last_updated)
+                VALUES (%s, %s, %s, %s, %s, 0, 'SCANNING', NOW()) 
+                
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price,
-                    day_change = EXCLUDED.day_change, -- 등락률 갱신
-                    rvol = EXCLUDED.rvol,             -- 거래대금 갱신
-                    last_updated = NOW()
+                    day_change = EXCLUDED.day_change,
+                    dollar_vol = EXCLUDED.dollar_vol, -- 🔥 거래대금은 여기로 저장
                     
-                    -- 주의: ai_score 등은 덮어쓰지 않거나, 필요하다면 SCANNING일 때만 갱신
-                    -- 여기서는 스캐너 점수를 ai_score 칸에 잠시 보여주기 위해 업데이트함
+                    -- ❌ rvol = ... (제거됨: 스캐너가 0으로 덮어쓰는 사고 방지)
+                    
+                    last_updated = NOW()
                     
                 WHERE sts_live_targets.status = 'SCANNING'; 
                 """
-                # rvol 컬럼에 dollar_vol(거래대금)을 저장해서 대시보드에 표시
+                # vol 변수(거래대금)를 5번째 파라미터(dollar_vol)로 전달
                 cursor.execute(query, (t, float(d['c']), float(score), float(change), float(vol))) 
             
             conn.commit()
             cursor.close()
         except Exception as e:
-            # DB 에러가 나도 봇 전체가 멈추면 안 됨
+            # 에러 로그는 남기되, 봇이 멈추지 않도록 처리
             print(f"⚠️ [Scanner DB Save Error] {e}", flush=True)
             if conn: conn.rollback()
         finally:
             if conn: db_pool.putconn(conn)
 
-    # 🟢 [수정 2] 데이터 4개를 정확히 포장해서 보내도록 수정
+    # 🟢 [기존 로직 유지] 4개 데이터 포장 및 DB 저장 호출
     def get_top_gainers_candidates(self, limit=10):
         scored = []
         now = time.time()
         
-        # 1. 전체 스캔
         for t, d in self.snapshots.items():
-            # 죽은 데이터(1분 이상 갱신 없는 놈) 제외
             if now - d['last_updated'] > 60: continue 
-            
-            # [Filter]
             if d['c'] > STS_MAX_PRICE: continue
             
             dollar_vol = d['c'] * d['v']
@@ -774,26 +768,19 @@ class TargetSelector:
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
             if change_pct < 1.0: continue 
 
-            # 점수 산정
             score = change_pct * np.log1p(dollar_vol)
             
-            # 🔥 [중요] 여기서 정확히 4개의 데이터를 튜플로 묶습니다.
             # (티커, 점수, 등락률, 거래대금)
             scored.append((t, score, change_pct, dollar_vol))
         
-        # 정렬
         scored.sort(key=lambda x: x[1], reverse=True)
         top_list = scored[:limit]
 
-        # 🔥 [주석 해제] 이제 안전하므로 DB 저장을 실행합니다.
         if top_list:
             self.save_candidates_to_db(top_list)
-            # print(f"🔎 [Scanner] Updated Top {len(top_list)} to DB", flush=True)
 
-        # 리턴은 매니저가 쓰기 좋게 티커 리스트만
         return [x[0] for x in top_list]
 
-    # (이하 기존 코드 유지)
     def get_best_snipers(self, candidates, limit=3):
         scored = []
         for t in candidates:
