@@ -60,3 +60,4 @@ joblib
 redis
 supervisor
 Flask-Login
+Authlib
