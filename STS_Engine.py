@@ -718,7 +718,7 @@ class TargetSelector:
             cursor = conn.cursor()
             
             # candidates는 (티커, 점수, 등락률, 거래대금) 4개 데이터가 확실히 들어옴
-            for t, score, change, vol in candidates:
+            for t, score, change, vol, *rest in candidates:
                 d = self.snapshots.get(t)
                 if not d: continue
                 
