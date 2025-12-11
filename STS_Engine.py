@@ -729,7 +729,6 @@ class TargetSelector:
                 VALUES (%s, %s, %s, 0, 0, 0, 0, 'SCANNING', NOW())
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price,
-                    ai_score = EXCLUDED.ai_score,
                     day_change = EXCLUDED.day_change, -- [중요] 등락률 갱신
                     last_updated = NOW()
                 WHERE sts_live_targets.status != 'FIRED'; -- 이미 발사된 건 건드리지 않음
@@ -777,7 +776,7 @@ class TargetSelector:
         top_list = scored[:limit]
 
         # 🔥 [핵심 수정] 여기서 DB 저장을 하지 않습니다!
-        #self.save_candidates_to_db(top_list)
+        self.save_candidates_to_db(top_list)
         # 이유: 여기서 저장하면 데이터(Tick)가 없는 놈도 화면에 떠서 0.00으로 도배됨.
         
         if top_list:
