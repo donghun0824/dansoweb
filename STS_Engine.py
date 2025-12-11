@@ -729,6 +729,7 @@ class TargetSelector:
                 VALUES (%s, %s, %s, 0, 0, 0, 0, 'SCANNING', NOW())
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price,
+                    ai_score = EXCLUDED.ai_score,
                     day_change = EXCLUDED.day_change, -- [중요] 등락률 갱신
                     last_updated = NOW()
                 WHERE sts_live_targets.status != 'FIRED'; -- 이미 발사된 건 건드리지 않음
@@ -776,7 +777,7 @@ class TargetSelector:
         top_list = scored[:limit]
 
         # 🔥 [핵심 수정] 여기서 DB 저장을 하지 않습니다!
-        self.save_candidates_to_db(top_list)
+        #self.save_candidates_to_db(top_list)
         # 이유: 여기서 저장하면 데이터(Tick)가 없는 놈도 화면에 떠서 0.00으로 도배됨.
         
         if top_list:
@@ -911,22 +912,6 @@ class SniperBot:
         self.analyzer.update_tick(tick_data, quote_data)
         if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
         if self.vwap == 0: self.vwap = tick_data['p']
-
-        # ==============================================================================
-        # 🔥 [긴급 수정] CPU 폭주 방지: 연산 스로틀링 (Throttling)
-        # 0.5초가 지나지 않았으면 여기서 함수를 종료하여 무거운 계산을 건너뜀
-        # ==============================================================================
-        now = time.time()
-        # self.last_calc_time 변수가 없으면 0으로 초기화 (안전장치)
-        if not hasattr(self, 'last_calc_time'): self.last_calc_time = 0
-        
-        # 마지막 계산 후 0.5초가 안 지났으면 리턴 (CPU 보호)
-        if (now - self.last_calc_time) < 0.5: 
-            return 
-        
-        # 시간 갱신
-        self.last_calc_time = now
-        # ==============================================================================
 
         # 2. 여기서부터 무거운 연산 시작 (이제 0.5초마다 한 번만 실행됨)
         m = self.analyzer.get_metrics()
@@ -1413,8 +1398,6 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     try:
-        # 기존: asyncio.run(pipeline.connect()) 
-        # 수정: 위에서 만든 main_startup 실행
         asyncio.run(main_startup())
 
     except KeyboardInterrupt:

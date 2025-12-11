@@ -57,3 +57,5 @@ firebase-admin==6.5.0
 xgboost
 scikit-learn
 joblib
+redis
+supervisor
