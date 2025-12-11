@@ -777,7 +777,7 @@ class TargetSelector:
         top_list = scored[:limit]
 
         # 🔥 [핵심 수정] 여기서 DB 저장을 하지 않습니다!
-        self.save_candidates_to_db(top_list)
+        #self.save_candidates_to_db(top_list)
         # 이유: 여기서 저장하면 데이터(Tick)가 없는 놈도 화면에 떠서 0.00으로 도배됨.
         
         if top_list:
@@ -819,6 +819,7 @@ class SniperBot:
         self.last_db_update = 0
         self.last_logged_state = "WATCHING"
         self.last_ready_alert = 0
+        self.last_calc_time = 0
         self.aiming_start_time = 0
         self.aiming_start_price = 0
         
@@ -907,9 +908,28 @@ class SniperBot:
     # [Module 4] Main Logic (p-Value Blending & Integration)
     # ==============================================================================
     def update_dashboard_db(self, tick_data, quote_data, agg_data):
+        # 1. [필수] 데이터 수집은 틱이 들어올 때마다 무조건 실행 (데이터 유실 방지)
         self.analyzer.update_tick(tick_data, quote_data)
         if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
         if self.vwap == 0: self.vwap = tick_data['p']
+
+        # ==============================================================================
+        # 🔥 [긴급 수정] CPU 폭주 방지: 연산 스로틀링 (Throttling)
+        # 0.5초가 지나지 않았으면 여기서 함수를 종료하여 무거운 계산을 건너뜀
+        # ==============================================================================
+        now = time.time()
+        # self.last_calc_time 변수가 없으면 0으로 초기화 (안전장치)
+        if not hasattr(self, 'last_calc_time'): self.last_calc_time = 0
+        
+        # 마지막 계산 후 0.5초가 안 지났으면 리턴 (CPU 보호)
+        if (now - self.last_calc_time) < 0.5: 
+            return 
+        
+        # 시간 갱신
+        self.last_calc_time = now
+        # ==============================================================================
+
+        # 2. 여기서부터 무거운 연산 시작 (이제 0.5초마다 한 번만 실행됨)
         m = self.analyzer.get_metrics()
         
         if not m or m['tick_speed'] == 0: return 
@@ -937,24 +957,23 @@ class SniperBot:
         # 🔥 [V6.0 CORE] Regime Probability p 계산
         p = self._calculate_regime_p(m)
         
-        # 🔥 [Dynamic Blending] p값에 따라 비중 조절 (핵심!)
-        # p가 높을수록(불장) Momentum 점수를, 낮을수록(하락장) Rebound 점수를 많이 반영
+        # 🔥 [Dynamic Blending] p값에 따라 비중 조절
         quant_score = (score_momentum * p) + (score_rebound * (1 - p))
         
         strategy = "WATCHING"
         active_reasons = []
 
         # 전략 태그 및 로그 결정
-        if p > 0.7: # 확실한 추세장
+        if p > 0.7: 
             strategy = "MOMENTUM"
             active_reasons = reasons_mom + [f"Regime:Trend({p:.2f})"]
-        elif p < 0.3: # 확실한 반전장
+        elif p < 0.3: 
             strategy = "REBOUND"
             active_reasons = reasons_reb + [f"Regime:Dip({p:.2f})"]
-        else: # 중립 구간 -> 점수 높은 쪽 + Dip&Rip 체크
+        else: 
             if score_rebound > 50 and score_momentum > 50:
                 strategy = "DIP_AND_RIP"
-                quant_score = (score_rebound + score_momentum) * 0.6 # 보너스
+                quant_score = (score_rebound + score_momentum) * 0.6 
             elif score_rebound > score_momentum:
                 strategy = "REBOUND"
                 active_reasons = reasons_reb
