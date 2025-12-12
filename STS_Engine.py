@@ -728,15 +728,11 @@ class TargetSelector:
                 query = """
                 INSERT INTO sts_live_targets 
                 (ticker, price, ai_score, day_change, dollar_vol, rvol, status, last_updated)
-                VALUES (%s, %s, %s, %s, %s, 0, 'SCANNING', NOW()) 
+                VALUES (%s, %s, %s, %s, 0, 'SCANNING', NOW()) 
                 
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price,
-                    day_change = EXCLUDED.day_change,
-                    dollar_vol = EXCLUDED.dollar_vol, -- 🔥 거래대금은 여기로 저장
-                    
-                    -- ❌ rvol = ... (제거됨: 스캐너가 0으로 덮어쓰는 사고 방지)
-                    
+                    day_change = EXCLUDED.day_change, 
                     last_updated = NOW()
                     
                 WHERE sts_live_targets.status = 'SCANNING'; 
