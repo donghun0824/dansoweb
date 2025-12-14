@@ -581,6 +581,7 @@ class MicrostructureAnalyzer:
             
             df['vol_ma'] = df['volume'].rolling(WIN_MAIN).mean()
             df['rvol'] = df['volume'] / (df['vol_ma'] + 1e-9)
+            df['rv_60'] = df['close'].pct_change().rolling(60).std()
             
             # 🔥 [NEW] Volatility Ratio (단기/장기 변동성 비율) - 폭발 감지용
             # 20초(단기) 변동성이 120초(장기)보다 크면 시장이 흥분 상태임
@@ -796,11 +797,22 @@ class TargetSelector:
         self.last_gc_time = now
 
 class SniperBot:
-    def __init__(self, ticker, logger, selector, shared_model):
+    # 🟢 [수정됨] 4번째 인자가 shared_model -> model_bytes 로 변경되었습니다.
+    def __init__(self, ticker, logger, selector, model_bytes):
         self.ticker = ticker
         self.logger = logger
         self.selector = selector
-        self.model = shared_model 
+        
+        # 🟢 [신규 로직] 공유 모델을 쓰는 게 아니라, 바이트 데이터를 복제해서 '내 전용 모델'을 만듭니다.
+        # 이렇게 하면 100개의 봇이 동시에 계산해도 절대 충돌나지 않습니다.
+        self.model = None
+        if model_bytes:
+            try:
+                self.model = xgb.Booster()
+                self.model.load_model(model_bytes) # 메모리에서 바로 로드 (고속 복제)
+            except Exception as e:
+                print(f"⚠️ {ticker}: Failed to clone AI model - {e}")
+
         self.analyzer = MicrostructureAnalyzer()
         self.state = "WATCHING"
         self.vwap = 0
@@ -815,7 +827,7 @@ class SniperBot:
         self.aiming_start_price = 0
         
         # 🔥 [V6.0 New] Regime Probability p (초기값 0.5 중립)
-        self.regime_p = 0.5 
+        self.regime_p = 0.5
 
     # ==============================================================================
     # [Module 1] Scoring Engines (기존 엔진 유지)
@@ -1122,12 +1134,11 @@ class SniperBot:
 class STSPipeline:
     def __init__(self):
         self.selector = TargetSelector()
-        self.snipers = {}       # 현재 활성 Top 3 봇
-        self.candidates = []    # Top 10 후보군 리스트
+        self.snipers = {}       
+        self.candidates = []    
         self.last_quotes = {}
         
-        # [수정 1] ★핵심★: 마지막 Agg(A) 데이터를 저장할 공간 초기화
-        # (이게 없으면 T 이벤트가 들어올 때 VWAP 계산을 못함)
+        # [수정 1] 마지막 Agg(A) 데이터를 저장할 공간 초기화
         self.last_agg = {}      
         
         self.logger = DataLogger()
@@ -1135,13 +1146,23 @@ class STSPipeline:
         # 수신과 처리를 분리할 큐 생성
         self.msg_queue = asyncio.Queue(maxsize=100000)
         
-        self.shared_model = None
+        # 🟢 [수정됨] shared_model 삭제 -> model_bytes 추가
+        # 이유: 모델 객체를 공유하면 충돌이 나므로, 바이트(RAM) 데이터로 들고 있다가 복제해서 씁니다.
+        self.model_bytes = None 
+        
         if os.path.exists(MODEL_FILE):
-            print(f"🤖 [System] Loading AI Model: {MODEL_FILE}", flush=True)
+            print(f"🤖 [System] Loading AI Model to RAM: {MODEL_FILE}", flush=True)
             try:
-                self.shared_model = xgb.Booster()
-                self.shared_model.load_model(MODEL_FILE)
-            except Exception as e: print(f"❌ Load Error: {e}")
+                # 1. 모델을 임시 로드해서
+                temp_booster = xgb.Booster()
+                temp_booster.load_model(MODEL_FILE)
+                
+                # 2. 바이트(Bytearray) 형태로 메모리에 덤프를 뜹니다.
+                self.model_bytes = temp_booster.save_raw("json") 
+                
+                print(f"✅ Model Loaded! Size: {len(self.model_bytes)} bytes", flush=True)
+            except Exception as e: 
+                print(f"❌ Load Error: {e}")
 
     # [1] 구독 요청 함수
     async def subscribe(self, ws, params):

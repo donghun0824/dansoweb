@@ -136,7 +136,7 @@ def consumer():
                         if add not in pipeline.snipers:
                             print(f"🚀 [Worker] Attach: {add}", flush=True)
                             
-                            new_bot = SniperBot(add, pipeline.logger, pipeline.selector, pipeline.shared_model)
+                            new_bot = SniperBot(add, pipeline.logger, pipeline.selector, pipeline.model_bytes)
                             pipeline.snipers[add] = new_bot
                             
                             # 시간 기록
