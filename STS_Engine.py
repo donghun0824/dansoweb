@@ -709,35 +709,35 @@ class TargetSelector:
             return (d['h'] - d['l']) * 0.1 
         return 0.05
 
-    # 🟢 [수정 핵심] RVOL은 건드리지 않고, 거래대금(dollar_vol)만 따로 저장
+    # 🟢 [수정 완료] RVOL은 0으로 초기화, 거래대금(dollar_vol)은 매핑 추가
     def save_candidates_to_db(self, candidates):
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # *rest 사용: 데이터가 4개 이상 들어와도 에러 없이 처리 (기존 로직 유지)
+            # *rest 사용: 데이터가 4개 이상 들어와도 에러 없이 처리
             for t, score, change, vol, *rest in candidates:
                 d = self.snapshots.get(t)
                 if not d: continue
                 
-                # 1. Insert: 없을 땐 dollar_vol에 거래대금을 넣고, rvol은 0으로 초기화
-                # 2. Update: 있을 땐 dollar_vol만 갱신. rvol은 봇이 계산한 값이 있을 수 있으므로 건드리지 않음.
-                # 3. WHERE: 'SCANNING' 상태일 때만 업데이트 (봇이 매매 중인 종목 보호)
-                
+                # [수정 포인트]
+                # 1. VALUES 절에 %s를 5개로 늘림 (vol 변수가 들어갈 자리 확보)
+                # 2. dollar_vol 자리에 %s 배치, rvol 자리에 0 배치
                 query = """
                 INSERT INTO sts_live_targets 
                 (ticker, price, ai_score, day_change, dollar_vol, rvol, status, last_updated)
-                VALUES (%s, %s, %s, %s, 0, 'SCANNING', NOW()) 
+                VALUES (%s, %s, %s, %s, %s, 0, 'SCANNING', NOW()) 
                 
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price,
-                    day_change = EXCLUDED.day_change, 
+                    day_change = EXCLUDED.day_change,
+                    dollar_vol = EXCLUDED.dollar_vol,
                     last_updated = NOW()
                     
                 WHERE sts_live_targets.status = 'SCANNING'; 
                 """
-                # vol 변수(거래대금)를 5번째 파라미터(dollar_vol)로 전달
+                # 이제 파라미터 5개(t, c, score, change, vol)와 %s 5개가 딱 맞습니다.
                 cursor.execute(query, (t, float(d['c']), float(score), float(change), float(vol))) 
             
             conn.commit()
