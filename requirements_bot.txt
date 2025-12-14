@@ -119,3 +119,5 @@ Flask-Login
 Authlib
 redis
 supervisor
+flask-socketio
+eventlet

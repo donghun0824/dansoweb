@@ -57,3 +57,4 @@ Authlib
 redis
 supervisor
 flask-socketio
+eventlet
