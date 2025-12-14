@@ -292,7 +292,169 @@
         }, 1000);
     });
 </script>
-          
+<div id="danso-popup" class="fixed inset-0 z-[100] hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="fixed inset-0 bg-black/20 backdrop-blur-sm transition-opacity"></div>
 
+    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+        <div class="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+            <div class="relative transform overflow-hidden rounded-2xl bg-white/90 backdrop-blur-xl text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg border border-white/20 ring-1 ring-black/5">
+                
+                <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white/50">
+                    <h3 class="text-lg font-semibold leading-6 text-gray-900" id="popup-title">📢 Service Notice</h3>
+                    <div class="flex bg-gray-100 rounded-lg p-1 text-xs font-semibold">
+                        <button onclick="changeLang('ko')" id="btn-ko" class="px-3 py-1 rounded-md transition-all text-gray-500 hover:text-gray-900">KR</button>
+                        <button onclick="changeLang('en')" id="btn-en" class="px-3 py-1 rounded-md transition-all bg-white text-gray-900 shadow-sm">EN</button>
+                    </div>
+                </div>
+
+                <div class="px-6 py-6 max-h-[60vh] overflow-y-auto">
+                    <div class="mb-6 rounded-xl bg-red-50 p-4 border border-red-100">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <h3 class="text-sm font-semibold text-red-700" id="warn-title">Disclaimer</h3>
+                                <div class="mt-1 text-sm text-red-600/90 leading-relaxed" id="warn-desc">
+                                    All investments carry risks. Users are solely responsible for their investment decisions.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <h4 class="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                            <span class="text-blue-500">💡</span> <span id="guide-title">Quick Guide</span>
+                        </h4>
+                        <ul class="text-sm text-gray-600 space-y-2 list-disc pl-5 marker:text-gray-400" id="guide-list">
+                            <li>Check real-time charts and AI scores.</li>
+                            <li>Sniper Mode supports automated trading.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50/50 px-6 py-4 sm:flex sm:flex-row-reverse sm:px-6 border-t border-gray-100">
+                    <button type="button" onclick="closePopup(false)" class="inline-flex w-full justify-center rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-black sm:ml-3 sm:w-auto transition transform hover:-translate-y-0.5">
+                        <span id="btn-confirm">I Understand</span>
+                    </button>
+                    <button type="button" onclick="closePopup(true)" class="mt-3 inline-flex w-full justify-center rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-gray-500 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto transition">
+                        <span id="btn-today">Don't show today</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 데이터 (텍스트) ---
+    const popupData = {
+        ko: {
+            title: "📢 서비스 이용 안내",
+            warnTitle: "투자 유의사항 (필독)",
+            warnDesc: "본 서비스는 투자 판단을 돕기 위한 보조 도구입니다. 모든 투자의 책임은 사용자 본인에게 있으며, Danso는 발생한 손실에 대해 법적 책임을 지지 않습니다.",
+            guideTitle: "간단 사용 가이드",
+            guideList: [
+                "대시보드에서 실시간 AI 스코어와 차트를 확인하세요.",
+                "스나이퍼 모드는 자동매매가 아니며, 신호 포착 시 **핸드폰으로 알림**을 보냅니다.",
+                "별도의 복잡한 설정 없이 AI가 분석한 최적의 타이밍을 받아보세요."
+            ],
+            btnConfirm: "확인했습니다",
+            btnToday: "오늘 하루 보지 않기"
+        },
+        en: {
+            title: "📢 Service Notice",
+            warnTitle: "Disclaimer (Read Carefully)",
+            warnDesc: "This service is an auxiliary tool for investment. The final responsibility lies solely with the user. Danso is not liable for any losses incurred.",
+            guideTitle: "Quick Guide",
+            guideList: [
+                "Check real-time AI scores and charts on the dashboard.",
+                "Sniper Mode sends **instant mobile alerts** (Not auto-trading).",
+                "No complex setup required; receive AI-analyzed signals automatically."
+            ],
+            btnConfirm: "I Understand",
+            btnToday: "Don't show today"
+        }
+    };
+
+    let currentLang = 'ko'; // 기본 언어
+
+    // --- 초기화 ---
+    document.addEventListener('DOMContentLoaded', () => {
+        // 1. 브라우저 언어 감지
+        const browserLang = navigator.language || navigator.userLanguage;
+        if (browserLang.toLowerCase().includes('en')) {
+            currentLang = 'en';
+        }
+        changeLang(currentLang);
+
+        // 2. 오늘 하루 보지 않기 체크
+        const hideDate = localStorage.getItem('danso_popup_hide_date');
+        const today = new Date().toISOString().split('T')[0];
+
+        if (hideDate !== today) {
+            // 팝업 열기 (Tailwind class 제거로 표시)
+            const popup = document.getElementById('danso-popup');
+            popup.classList.remove('hidden');
+            // 애니메이션 효과 (선택사항)
+            setTimeout(() => {
+                popup.querySelector('.relative').classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+    });
+
+    // --- 언어 변경 함수 ---
+    function changeLang(lang) {
+        currentLang = lang;
+        const data = popupData[lang];
+
+        // 텍스트 업데이트
+        document.getElementById('popup-title').textContent = data.title;
+        document.getElementById('warn-title').textContent = data.warnTitle;
+        document.getElementById('warn-desc').textContent = data.warnDesc;
+        document.getElementById('guide-title').textContent = data.guideTitle;
+        document.getElementById('btn-confirm').textContent = data.btnConfirm;
+        document.getElementById('btn-today').textContent = data.btnToday;
+
+        // 리스트 업데이트
+        const listContainer = document.getElementById('guide-list');
+        listContainer.innerHTML = '';
+        data.guideList.forEach(item => {
+            const li = document.createElement('li');
+            li.innerHTML = item; // **bold** 처리를 위해 innerHTML 사용
+            listContainer.appendChild(li);
+        });
+
+        // 버튼 스타일 토글
+        const btnKo = document.getElementById('btn-ko');
+        const btnEn = document.getElementById('btn-en');
+        const activeClass = ['bg-white', 'text-gray-900', 'shadow-sm'];
+        const inactiveClass = ['text-gray-500', 'hover:text-gray-900'];
+
+        if (lang === 'ko') {
+            btnKo.classList.add(...activeClass);
+            btnKo.classList.remove(...inactiveClass);
+            btnEn.classList.remove(...activeClass);
+            btnEn.classList.add(...inactiveClass);
+        } else {
+            btnEn.classList.add(...activeClass);
+            btnEn.classList.remove(...inactiveClass);
+            btnKo.classList.remove(...activeClass);
+            btnKo.classList.add(...inactiveClass);
+        }
+    }
+
+    // --- 닫기 함수 ---
+    function closePopup(hideToday) {
+        if (hideToday) {
+            const today = new Date().toISOString().split('T')[0];
+            localStorage.setItem('danso_popup_hide_date', today);
+        }
+        document.getElementById('danso-popup').classList.add('hidden');
+    }
+</script>
+          
 </body>
 </html>
