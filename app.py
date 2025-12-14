@@ -1,5 +1,6 @@
 from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
 import secrets 
 import json
@@ -10,7 +11,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
-
+socketio = SocketIO(app, cors_allowed_origins="*")
 # --- 1. 설정 및 환경 변수 ---
 app.secret_key = os.environ.get('SECRET_KEY', 'dev_key_for_session')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=31)
@@ -638,5 +639,44 @@ def check_user_count():
 
 init_db()
 
+# ... 위에는 init_db() 함수가 있음 ...
+
+# ▼▼▼▼▼ [여기 추가] 실시간 채팅 & 봇 브로드캐스트 로직 ▼▼▼▼▼
+
+# 1. 채팅방 연결 (입장)
+@socketio.on('connect')
+def handle_connect():
+    # 클라이언트가 보낸 쿼리 파라미터 받기 (sts.js에서 보낸 username)
+    username = request.args.get('username', 'Guest')
+    print(f"🟢 [Chat] User connected: {username}")
+
+# 2. 메시지 받아서 뿌리기 (사람들 대화)
+@socketio.on('send_message')
+def handle_user_message(data):
+    # 받은 메시지를 그대로 모든 사람에게 재전송 (Broadcast)
+    # data 구조: {'user': 'Trader', 'message': '안녕', 'type': 'user'}
+    emit('chat_message', data, broadcast=True)
+
+# 3. [봇 전용] 외부 봇이 HTTP 요청으로 메시지를 쏘면 -> 채팅방으로 송출
+# 봇 파이프라인(Python)이 이 주소(POST /api/chat/broadcast)로 데이터를 보내면 됩니다.
+@app.route('/api/chat/broadcast', methods=['POST'])
+def broadcast_from_bot():
+    try:
+        data = request.json
+        # 봇이 보낸 데이터를 채팅방 전체에 뿌림
+        # data 구조 예시: {'user': '🤖 AI Sniper', 'message': '...', 'type': 'bot_signal'}
+        socketio.emit('chat_message', data)
+        return jsonify({"status": "OK", "message": "Broadcasted to chat"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+# ▲▲▲▲▲ [여기까지 추가] ▲▲▲▲▲
+
+# if __name__ == '__main__': ... (아래로 이어짐)
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # [수정 전] app.run(debug=True, port=5000)
+    
+    # [수정 후] 소켓 모드로 실행
+    print("🚀 Danso Server & Chat Socket Started on Port 5000")
+    socketio.run(app, debug=True, port=5000, allow_unsafe_werkzeug=True)

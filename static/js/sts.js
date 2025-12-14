@@ -20,6 +20,31 @@ const messaging = getMessaging(app);
 window.currentFCMToken = null;
 
 /* ==========================================================================
+   [수정 1] SOCKET CONNECTION (여기에 추가하세요)
+   ========================================================================== */
+// HTML에서 socket.io CDN을 불러왔는지 확인하고 연결합니다.
+let socket = null;
+if (typeof io !== 'undefined') {
+    // 나중에 구글 로그인 연동 시 userInfo 값을 실제 로그인 정보로 바꾸면 됩니다.
+    const userInfo = {
+        name: "Trader",  
+        email: "guest@danso.ai"
+    };
+
+    // 서버로 연결 시도 (이름표 달고 입장)
+    socket = io({
+        query: {
+            username: userInfo.name,
+            email: userInfo.email
+        }
+    });
+
+    console.log("🔌 Socket Initialized for Chat");
+} else {
+    console.warn("⚠️ Socket.io not found. Chat will be offline.");
+}
+
+/* ==========================================================================
    PART 1. GLOBAL STATE & DOM ELEMENTS
    ========================================================================== */
 let chart = null;
@@ -468,16 +493,15 @@ function generateDummyData() {
     return res;
 }
 
-// ==========================================================================
-// PART 4. INIT & FCM
-// ==========================================================================
-
-setInterval(updateDashboard, 1000); // 1-second polling
+/* ==========================================================================
+   PART 4. INIT & REAL-TIME CHAT (Socket.io) - [수정됨]
+   ========================================================================== */
+setInterval(updateDashboard, 1000); 
 updateDashboard();
 
 document.addEventListener('DOMContentLoaded', () => {
     // ------------------------------------------------------------
-    // 1. 기존 로직: 알림 구독 버튼 및 서비스 워커 등록
+    // 1. 기존 알림 구독 로직 유지
     // ------------------------------------------------------------
     const subBtn = document.getElementById('subscribe-btn');
     if (subBtn) subBtn.addEventListener('click', requestNotificationPermission);
@@ -487,65 +511,90 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ------------------------------------------------------------
-    // 2. [수정됨] 채팅 기능 활성화 (HTML ID/Class 정밀 매칭)
+    // 2. [수정됨] 채팅 로직 (봇 메시지 + 유저 대화)
     // ------------------------------------------------------------
-    
-    // HTML의 <input class="chat-input"> 찾기
     const chatInput = document.querySelector('.chat-input'); 
-
-    // HTML의 <button id="post-submit-btn"> 찾기
     const chatBtn = document.getElementById('post-submit-btn');
-
-    // HTML의 <div id="community-feed-container"> 찾기
     const chatBody = document.getElementById('community-feed-container');
 
-    // 메시지 전송 처리 함수
+    // [A] 메시지 수신 (서버에서 봇이나 다른 사람의 글이 왔을 때)
+    if (socket) {
+        socket.on('chat_message', (data) => {
+            if (!chatBody) return;
+            
+            // 봇인지 확인 (type이 bot_signal이면 봇)
+            const isBot = data.type === 'bot_signal' || data.type === 'bot_welcome';
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            let html = '';
+
+            // 🤖 [봇] 파란색 강조 박스 디자인
+            if (isBot) {
+                html = `
+                    <div style="margin-bottom:12px; display:flex; gap:10px; opacity:0; animation:fadeIn 0.3s forwards;">
+                        <div style="width:32px; height:32px; border-radius:50%; background:#007AFF; color:white; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:16px;">🤖</div>
+                        <div style="background:rgba(0, 113, 227, 0.08); border:1px solid rgba(0, 113, 227, 0.2); padding:10px; border-radius:12px; font-size:13px; width:100%;">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                                <strong style="color:#007AFF;">${data.user}</strong>
+                                <span style="font-size:10px; color:#999;">${time}</span>
+                            </div>
+                            <div style="color:#333; line-height:1.4;">${data.message}</div>
+                        </div>
+                    </div>`;
+            } 
+            // 👤 [사람] 일반 말풍선 디자인
+            else {
+                const isMe = data.user === "Trader"; // 내 이름이면 오른쪽 정렬
+                const alignStyle = isMe ? 'justify-content:flex-end;' : 'justify-content:flex-start;';
+                const bgStyle = isMe ? 'background:#007AFF; color:white; border-radius:12px 12px 0 12px;' : 'background:#f5f5f7; color:#333; border-radius:12px 12px 12px 0;';
+                
+                html = `
+                    <div style="display:flex; ${alignStyle} margin-bottom:10px;">
+                        <div style="max-width:85%;">
+                            ${!isMe ? `<div style="font-size:11px; color:#999; margin-bottom:2px;">${data.user}</div>` : ''}
+                            <div style="${bgStyle} padding:8px 12px; font-size:13px; display:inline-block; text-align:left;">
+                                ${data.message}
+                            </div>
+                            <div style="font-size:10px; color:#ccc; margin-top:2px; text-align:${isMe?'right':'left'};">${time}</div>
+                        </div>
+                    </div>`;
+            }
+
+            chatBody.insertAdjacentHTML('beforeend', html);
+            chatBody.scrollTop = chatBody.scrollHeight; // 스크롤 하단 고정
+        });
+    }
+
+    // [B] 메시지 전송 (내가 글 쓸 때)
     function sendMsg() {
         if (!chatInput || !chatInput.value.trim()) return;
-        
+        if (!socket) { alert("채팅 연결이 끊겨있습니다."); return; }
+
         const msg = chatInput.value.trim();
-        const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-
-        // 내 말풍선 HTML 생성 (우측 정렬 + 파란색 배경)
-        const html = `
-            <div style="display:flex; justify-content:flex-end; margin: 8px 0; padding-right:10px;">
-                <div style="max-width:85%; text-align:right;">
-                    <div style="background:#007AFF; color:white; padding:8px 12px; border-radius:12px 12px 0 12px; font-size:13px; display:inline-block; text-align:left;">
-                        ${msg}
-                    </div>
-                    <div style="font-size:10px; color:#ccc; margin-top:2px; margin-right:2px;">${time}</div>
-                </div>
-            </div>`;
         
-        // 화면에 추가
-        if (chatBody) {
-            chatBody.insertAdjacentHTML('beforeend', html);
-            chatBody.scrollTop = chatBody.scrollHeight; // 스크롤을 맨 아래로 이동
-        }
-        
-        chatInput.value = ''; // 입력창 초기화
-        
-        // (선택 사항) 서버로 메시지 전송이 필요하면 여기에 fetch 코드 추가
-        // console.log("Message sent:", msg);
-    }
-
-    // 클릭 이벤트 연결 (버튼)
-    if (chatBtn) {
-        chatBtn.addEventListener('click', (e) => {
-            e.preventDefault(); // 폼 제출로 인한 새로고침 방지
-            sendMsg();
+        // 서버로 전송 (화면에 그리는 건 위 [A]에서 처리함)
+        socket.emit('send_message', { 
+            user: "Trader", 
+            message: msg,
+            type: 'user' 
         });
+
+        chatInput.value = ''; // 입력창 비우기
     }
 
-    // 엔터키 이벤트 연결 (입력창)
+    // 이벤트 리스너 연결
+    if (chatBtn) {
+        chatBtn.addEventListener('click', (e) => { e.preventDefault(); sendMsg(); });
+    }
     if (chatInput) {
         chatInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault(); // 엔터키로 인한 폼 제출 방지
-                sendMsg();
-            }
+            if (e.key === 'Enter') { e.preventDefault(); sendMsg(); }
         });
     }
+    
+    // 애니메이션 스타일 추가
+    const style = document.createElement('style');
+    style.innerHTML = `@keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }`;
+    document.head.appendChild(style);
 });
 
 async function requestNotificationPermission() {
@@ -553,33 +602,19 @@ async function requestNotificationPermission() {
     if (permission === 'granted') getFCMToken();
 }
 
-// Service Worker 대기 로직이 포함된 안전한 토큰 발급 함수
 async function getFCMToken() {
     try {
-        // [수정] Service Worker가 완전히 준비될 때까지 대기
         const registration = await navigator.serviceWorker.ready;
-
         const vapidKey = "BGMvyGLU9fapufXPNvNcyK0P0mOyhRXAeFWDlQZ4QU-sxBryPM4_K188GP9xhcqVY7vrQoJOJU5f54aeju-AzF8";
-        
-        // [수정] getToken 호출 시 registration 객체를 명시적으로 전달
-        const token = await getToken(messaging, { 
-            vapidKey: vapidKey,
-            serviceWorkerRegistration: registration 
-        });
+        const token = await getToken(messaging, { vapidKey: vapidKey, serviceWorkerRegistration: registration });
 
         if (token) {
-            // 토큰 획득 성공 시 서버로 전송
             await fetch("/subscribe", { 
                 method: "POST", 
                 headers: { "Content-Type": "application/json" }, 
                 body: JSON.stringify({ token }) 
             });
             alert("✅ Alerts Enabled!");
-            console.log("FCM Token registered:", token);
-       } else {
-            console.warn("No registration token available. Request permission to generate one.");
-        }
-    } catch(e) { // ✅ 중괄호 } 추가됨
-        console.error("🚨 FCM Token Error:", e);
-    }
+       }
+    } catch(e) { console.error("🚨 FCM Token Error:", e); }
 }
