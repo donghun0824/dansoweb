@@ -4,6 +4,7 @@ import websockets
 import json
 import os
 import time
+import redis.asyncio as redis
 import numpy as np
 import pandas as pd
 import csv
@@ -32,6 +33,9 @@ POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 FIREBASE_ADMIN_SDK_JSON_STR = os.environ.get('FIREBASE_ADMIN_SDK_JSON')
 WS_URI = "wss://socket.polygon.io/stocks"
+
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+r = redis.from_url(REDIS_URL)
 
 # 전략 설정
 STS_TARGET_COUNT = 3
@@ -428,15 +432,32 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
     finally:
         if conn: db_pool.putconn(conn)
 
+# [STS_Engine.py]
+
 async def send_fcm_notification(ticker, price, probability_score, entry=None, tp=None, sl=None):
-    """[V9.2] 알림 전용 쓰레드 풀 사용"""
-    loop = asyncio.get_running_loop()
-    
-    # [수정] NOTI_WORKER_POOL 사용
-    await loop.run_in_executor(
-        NOTI_WORKER_POOL, 
-        partial(_send_fcm_sync, ticker, price, probability_score, entry, tp, sl)
-    )
+    """
+    [역할 분리] 엔진은 직접 보내지 않고 Redis 'fcm_queue'에 작업 지시서(JSON)만 넣습니다.
+    """
+    try:
+        # 1. 보낼 데이터 포장 (무조건 문자열로 변환하여 안전하게)
+        payload = {
+            'ticker': str(ticker),
+            'price': str(price),
+            'score': str(int(probability_score)),
+            'entry': str(entry) if entry else "",
+            'tp': str(tp) if tp else "",
+            'timestamp': time.time()
+        }
+
+        # 2. Redis 큐에 직렬화해서 밀어넣기 (0.001초 소요)
+        # r은 redis.asyncio 객체 (이미 코드 상단에 선언되어 있음)
+        await r.lpush('fcm_queue', json.dumps(payload))
+        
+        # 로그는 한 줄만 심플하게
+        # print(f"🔔 [Engine] Queued signal for {ticker}", flush=True)
+
+    except Exception as e:
+        print(f"❌ [Engine] Failed to queue notification: {e}", flush=True)
 
 # ==============================================================================
 # 3. CORE CLASSES (Analyzer, Selector, Bot)

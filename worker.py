@@ -8,14 +8,13 @@ import asyncio
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 import firebase_admin
-from firebase_admin import credentials
+from firebase_admin import credentials, messaging # [수정] messaging 모듈 추가
 
 # [필수] DB 설정 가져오기
-from app import init_db
+from app import init_db, get_db_connection # [수정] get_db_connection 추가 (토큰 조회용)
 
 try:
     # 우리가 수정한 STS_Engine에서 필요한 클래스와 변수들 가져오기
-    # DB_WORKER_POOL은 STS_Engine에 정의되어 있어야 합니다. 없다면 아래에서 새로 정의해도 됩니다.
     from STS_Engine import STSPipeline, STS_TARGET_COUNT, SniperBot, DB_WORKER_POOL
 except ImportError:
     print("❌ [Worker Error] 'STS_Engine.py'를 찾을 수 없습니다. 경로를 확인하세요.")
@@ -26,8 +25,8 @@ REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
 FIREBASE_ADMIN_SDK_JSON_STR = os.environ.get('FIREBASE_ADMIN_SDK_JSON')
 r = redis.from_url(REDIS_URL)
 
-# Redis 블로킹 방지를 위한 별도 스레드 풀 (메인 루프 멈춤 방지용)
-REDIS_POOL = ThreadPoolExecutor(max_workers=1)
+# [수정] Redis 블로킹 방지를 위한 스레드 풀 (시세 처리 + 알림 발송 = 최소 2개 필요)
+REDIS_POOL = ThreadPoolExecutor(max_workers=2)
 
 def init_firebase_worker():
     if firebase_admin._apps: return
@@ -46,13 +45,109 @@ def init_firebase_worker():
     except Exception as e:
         print(f"⚠️ [Worker] Firebase Init Warning: {e}", flush=True)
 
-# 웜업을 안전한 비동기 태스크로 실행하는 헬퍼
+# 웜업을 안전한 비동기 태스크로 실행하는 헬퍼 (기존 코드 유지)
 def run_warmup_task(bot):
     try:
         # threading.Thread 대신 asyncio.create_task 사용 (충돌 해결 핵심)
         asyncio.create_task(bot.warmup())
     except Exception as e:
         print(f"⚠️ [Warmup Start Error] {e}")
+
+# 🔥 [추가] 알림 큐 처리 함수 (정규화된 방식)
+def process_fcm_job():
+    """
+    Redis 'fcm_queue'에서 작업을 꺼내 실제 푸시를 쏘는 함수
+    """
+    try:
+        # 1. 큐에서 하나 꺼내기 (Non-blocking rpop 사용)
+        packed_data = r.rpop('fcm_queue')
+        
+        if not packed_data: return # 할 일 없으면 리턴
+
+        # 2. 데이터 풀기
+        task = json.loads(packed_data)
+        ticker = task['ticker']
+        score = task['score']
+        
+        # 3. DB에서 토큰 가져오기 (직접 수행)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT token, min_score FROM fcm_tokens")
+        subscribers = cursor.fetchall()
+        cursor.close()
+        conn.close() # 바로 반납
+
+        if not subscribers: return
+
+        # 4. 정규화된 알림 설정 (Android/iOS 표준)
+        # [Android] 중요도 높음 + 기본 소리
+        android_config = messaging.AndroidConfig(
+            priority='high',
+            notification=messaging.AndroidNotification(sound='default', click_action='FLUTTER_NOTIFICATION_CLICK')
+        )
+        # [iOS] 즉시 전송 + 기본 소리
+        apns_config = messaging.APNSConfig(
+            headers={'apns-priority': '10'},
+            payload=messaging.APNSPayload(aps=messaging.Aps(sound='default', content_available=True))
+        )
+
+        # 내용 구성
+        if task.get('entry') and task.get('tp'):
+            title = f"BUY {ticker} (Score: {score})"
+            body = f"Entry: ${task['entry']} / TP: ${task['tp']}"
+        else:
+            title = f"SCAN {ticker} (Score: {score})"
+            body = f"Current: ${task['price']}"
+
+        # 데이터 페이로드
+        data_payload = {
+            'type': 'signal',
+            'ticker': ticker,
+            'price': str(task['price']), # 문자열 안전 변환
+            'score': str(score),
+            'click_action': 'FLUTTER_NOTIFICATION_CLICK'
+        }
+
+        print(f"📨 [Worker] Sending FCM: {title}", flush=True)
+
+        # 5. 발송 루프
+        success = 0
+        failed_tokens = []
+        
+        if not firebase_admin._apps: init_firebase_worker()
+
+        for row in subscribers:
+            token = row[0]
+            user_min = row[1] if (len(row) > 1 and row[1] is not None) else 0
+            
+            try:
+                if float(score) < user_min: continue
+            except: pass
+
+            try:
+                msg = messaging.Message(
+                    token=token,
+                    notification=messaging.Notification(title=title, body=body),
+                    data=data_payload,
+                    android=android_config,
+                    apns=apns_config
+                )
+                messaging.send(msg)
+                success += 1
+            except Exception as e:
+                if "registration-token-not-registered" in str(e): failed_tokens.append(token)
+
+        # 토큰 청소
+        if failed_tokens:
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
+            conn.commit()
+            conn.close()
+
+    except Exception as e:
+        print(f"❌ [Worker FCM Error] {e}", flush=True)
+
 
 # 메인 루프를 비동기 함수로 변경
 async def redis_consumer():
@@ -76,15 +171,17 @@ async def redis_consumer():
     # 입사 시간 기록부
     bot_attach_times = {}
 
-    print("🧠 [Worker] Ready. Listening to 'ticker_stream'...", flush=True)
+    print("🧠 [Worker] Ready. Listening to 'ticker_stream' & 'fcm_queue'...", flush=True)
 
     # 현재 실행 중인 루프 가져오기
     loop = asyncio.get_running_loop()
 
     while True:
         try:
-            # [핵심 수정 1] Redis brpop을 별도 스레드에서 실행하여 메인 루프 차단 방지
-            # 이제 Redis가 데이터를 기다리는 동안에도 봇은 다른 일(매매, 웜업)을 할 수 있습니다.
+            # =========================================================
+            # 1. 시세 데이터 처리 (기존 로직)
+            # =========================================================
+            # [핵심 수정 1] Redis brpop을 별도 스레드에서 실행
             pop_result = await loop.run_in_executor(
                 REDIS_POOL, 
                 partial(r.brpop, 'ticker_stream', timeout=1)
@@ -102,7 +199,6 @@ async def redis_consumer():
                         pipeline.selector.update(item)
                         last_agg[t] = item
                         if t in pipeline.snipers:
-                            # 봇 로직 업데이트 (내부적으로 최적화됨)
                             pipeline.snipers[t].update_dashboard_db(
                                 {'p': item['c'], 's': item['v'], 't': item['e']}, 
                                 last_quotes.get(t, {'bids':[],'asks':[]}), 
@@ -121,7 +217,15 @@ async def redis_consumer():
                         )
 
             # =========================================================
-            # Manager 로직 (비동기 호환 수정)
+            # 2. 🔥 [추가] 알림 큐 처리 (우체통 확인)
+            # =========================================================
+            await loop.run_in_executor(
+                REDIS_POOL,
+                process_fcm_job
+            )
+
+            # =========================================================
+            # 3. Manager 로직 (종목 관리)
             # =========================================================
             now = time.time()
 
@@ -133,11 +237,6 @@ async def redis_consumer():
                 )
                 
                 if candidates:
-                    # 저장 로직은 TargetSelector 내부에서 안전하게 처리됨 ('P' 에러 해결됨)
-                    # pipeline.selector.save_candidates_to_db(candidates) -> get_top_gainers 내부 호출 가정 시 생략 가능
-                    # 만약 get_top_gainers 안에서 호출 안 한다면 아래 주석 해제:
-                    # pipeline.selector.save_candidates_to_db(candidates)
-                    
                     target_top3 = pipeline.selector.get_best_snipers(candidates, limit=STS_TARGET_COUNT)
                     
                     current_set = set(pipeline.snipers.keys())
@@ -156,6 +255,7 @@ async def redis_consumer():
                             print(f"👋 [Worker] Detach: {rem}", flush=True)
                             del pipeline.snipers[rem]
                             if rem in bot_attach_times: del bot_attach_times[rem]
+                            r.srem('focused_tickers', rem)
                     
                     # Attach
                     for add in (new_set - current_set):
@@ -169,6 +269,7 @@ async def redis_consumer():
                             
                             # [핵심 수정 3] 웜업을 비동기 태스크로 실행 (스레드 생성 에러 해결)
                             run_warmup_task(new_bot)
+                            r.sadd('focused_tickers', add)
 
                 last_manager_run = now
 
