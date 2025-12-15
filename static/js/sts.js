@@ -609,12 +609,14 @@ async function getFCMToken() {
         const token = await getToken(messaging, { vapidKey: vapidKey, serviceWorkerRegistration: registration });
 
         if (token) {
-            await fetch("/subscribe", { 
+            // [수정됨] /subscribe -> /api/register_token
+            await fetch("/api/register_token", { 
                 method: "POST", 
                 headers: { "Content-Type": "application/json" }, 
                 body: JSON.stringify({ token }) 
             });
-            alert("✅ Alerts Enabled!");
+            console.log("📱 Token sent to server:", token);
+            alert("✅ Alerts Enabled! (Real-time notifications active)");
        }
     } catch(e) { console.error("🚨 FCM Token Error:", e); }
 }

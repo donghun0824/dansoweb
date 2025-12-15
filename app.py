@@ -113,6 +113,7 @@ def get_sts_status():
                 obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread,
                 -- ▼▼▼ 여기 4개 컬럼을 추가했습니다 ▼▼▼
                 rsi, stoch_k, fibo_pos, obi_rev
+                vol_ratio, hurst  -- 🔥 [NEW] 추가됨
             FROM sts_live_targets
             WHERE last_updated > NOW() - INTERVAL '1 minute'
             ORDER BY 
@@ -157,7 +158,9 @@ def get_sts_status():
                 'rsi': r.get('rsi') or 0,
                 'stoch': r.get('stoch_k') or 0,
                 'fibo_pos': r.get('fibo_pos') or 0,
-                'obi_rev': r.get('obi_rev') or 0
+                'obi_rev': r.get('obi_rev') or 0,
+                'vol_ratio': r.get('vol_ratio') or 0, # 🔥 [NEW]
+                'hurst': r.get('hurst') or 0.5        # 🔥 [NEW] 기본값 0.5
             })
             
         # 2. 최근 신호 로그 (기존 로직 유지)
@@ -473,24 +476,51 @@ def set_alert_threshold():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@app.route('/subscribe', methods=['POST'])
-def subscribe():
-    data = request.json
-    token = data.get('token')
-    if not token: return jsonify({"status": "error", "message": "No token"}), 400
+# [app.py] 기존 subscribe 함수를 지우고 이 코드로 교체
+
+@app.route('/api/register_token', methods=['POST'])
+def register_token():
+    """
+    [수정됨] 프론트엔드에서 보낸 FCM 토큰을 DB에 저장하거나 갱신합니다.
+    - 신규 토큰: INSERT
+    - 기존 토큰: UPDATE (created_at 갱신 -> 활성 사용자로 인식)
+    """
     conn = None
     try:
+        # 1. 프론트엔드 데이터 수신
+        data = request.get_json()
+        token = data.get('token')
+        
+        if not token:
+            return jsonify({'status': 'error', 'message': 'No token provided'}), 400
+
+        # 로그로 확인 (토큰 앞부분만 출력)
+        print(f"📱 [API] Token Registration Request: {token[:15]}...", flush=True)
+
+        # 2. DB 연결
         conn = get_db_connection()
         cursor = conn.cursor()
-        # min_score 기본값은 DB 레벨에서 처리됨 (DEFAULT 0)
-        cursor.execute("INSERT INTO fcm_tokens (token) VALUES (%s) ON CONFLICT (token) DO NOTHING", (token,))
+        
+        # 3. 토큰 저장 (Upsert 로직)
+        # 이미 존재하는 토큰이면 created_at만 현재 시간으로 바꿔줍니다.
+        cursor.execute("""
+            INSERT INTO fcm_tokens (token, created_at, min_score)
+            VALUES (%s, NOW(), 0)
+            ON CONFLICT (token) 
+            DO UPDATE SET created_at = NOW();
+        """, (token,))
+        
         conn.commit()
         cursor.close()
-        conn.close()
-        return jsonify({"status": "success"}), 201
+        
+        return jsonify({'status': 'success', 'message': 'Token saved/updated successfully'})
+
     except Exception as e:
+        print(f"❌ [API Error] register_token failed: {e}", flush=True)
+        if conn: conn.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
         if conn: conn.close()
-        return jsonify({"status": "error", "message": str(e)}), 500
 
 # --- 10. DB 초기화 (서버 시작 시 실행) ---
 def init_db():
