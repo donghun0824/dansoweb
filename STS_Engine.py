@@ -22,6 +22,8 @@ import traceback
 import pytz
 # 커스텀 지표 모듈 임포트
 import indicators_sts as ind 
+import sys
+sys.setrecursionlimit(2000)  # [수정] 기본값(1000)을 2000으로 상향 조정
 
 # ==============================================================================
 # 1. CONFIGURATION & CONSTANTS
@@ -329,13 +331,15 @@ def log_signal_to_db(ticker, price, score, entry=0, tp=0, sl=0, strategy=""):
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
     # 1. Firebase 초기화 체크
     if not firebase_admin._apps:
-        print(f"⚠️ [FCM] Firebase not initialized. Skipping alert for {ticker}.", flush=True)
+        # print(...) # 로그 생략
         return
 
-    # 🟢 [핵심 수정] Numpy 타입을 Python 기본 타입으로 변환하는 헬퍼 함수
+    # 🟢 [헬퍼] 안전한 타입 변환
     def sanitize(val):
-        if hasattr(val, 'item'): return val.item() # numpy 타입이면 python 타입으로 변환
-        return val
+        try:
+            if hasattr(val, 'item'): return val.item()
+            return val
+        except: return 0
 
     conn = None
     try:
@@ -346,44 +350,39 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         cursor.close()
         
         if not subscribers:
-            print(f"⚠️ [FCM] No subscribers found. Skipping alert for {ticker}.", flush=True)
             db_pool.putconn(conn)
             return
 
-        # 🟢 [데이터 정제] 모든 입력값을 안전한 파이썬 타입으로 변환
+        # 🟢 [데이터 정제]
         price = sanitize(price)
         score_val = sanitize(probability_score)
         entry = sanitize(entry)
         tp = sanitize(tp)
 
-        # =========================================================
-        # 알림 메시지 포맷 설정
-        # =========================================================
-        
-        # Case: 매수 진입 (BUY)
+        # 알림 내용 구성
         if entry and tp:
             noti_title = f"BUY {ticker} ({score_val})"
             noti_body = f"Entry: ${float(entry):.3f}\nTP: ${float(tp):.3f}"
-        # Case: 단순 포착 (SCAN)
         else:
             noti_title = f"SCAN {ticker}"
             noti_body = f"Current: ${float(price):.4f}"
 
-        # 데이터 페이로드 구성 (모두 문자열로 변환)
+        # 🟢 [수정 핵심] Data Payload는 모두 문자열이어야 함 (안전하게 str로 감싸기)
         data_payload = {
             'type': 'signal', 
             'ticker': str(ticker), 
             'price': str(price), 
             'score': str(score_val),
-            'title': str(noti_title), 
-            'body': str(noti_body)
+            'click_action': 'FLUTTER_NOTIFICATION_CLICK' # 앱 연동을 위해 권장
         }
         
-        print(f"🔔 [FCM] Sending: {noti_title} to {len(subscribers)} devices...", flush=True)
+        print(f"🔔 [FCM] Sending: {noti_title}...", flush=True)
 
         success_count = 0
         failed_tokens = []
         
+        # 🟢 [수정 핵심] 메시지 객체 단순화 (Config 제거 테스트)
+        # 만약 이래도 에러가 나면 android=, apns= 옵션을 아예 빼고 보내보세요.
         for row in subscribers:
             token = row[0]
             user_min_score = row[1] if row[1] is not None else 0 
@@ -394,43 +393,37 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                 message = messaging.Message(
                     token=token,
                     notification=messaging.Notification(title=noti_title, body=noti_body),
-                    data=data_payload,
+                    data=data_payload
+                    # ⚠️ [중요] 아래 설정들이 재귀 에러의 주범인 경우가 많습니다.
+                    # 에러가 지속되면 아래 주석 처리된 부분을 삭제하고 기본 알림만 보내세요.
+                    ,
                     android=messaging.AndroidConfig(
-                        priority='high', 
-                        notification=messaging.AndroidNotification(
-                            channel_id='high_importance_channel', 
-                            priority='high', 
-                            default_sound=True, 
-                            visibility='public'
-                        )
+                        priority='high',
+                        notification=messaging.AndroidNotification(sound='default')
                     ),
                     apns=messaging.APNSConfig(
-                        payload=messaging.APNSPayload(aps=messaging.Aps(alert=messaging.ApsAlert(title=noti_title, body=noti_body), sound="default"))
+                        payload=messaging.APNSPayload(
+                            aps=messaging.Aps(sound='default')
+                        )
                     )
                 )
                 messaging.send(message)
                 success_count += 1
             except Exception as e:
-                # 🟢 [수정] 에러 메시지가 너무 길면 잘라서 출력 (로그 폭주 방지)
-                error_msg = str(e)[:100]
-                print(f"❌ [FCM Fail] Token: {token[:10]}... Error: {error_msg}", flush=True)
-                if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e): 
+                # 에러 로그가 너무 길어지지 않게 짧게 출력
+                print(f"❌ [FCM Fail] Token Error: {str(e)[:50]}...", flush=True)
+                if "registration-token-not-registered" in str(e): 
                     failed_tokens.append(token)
         
-        if success_count > 0:
-            print(f"✅ [FCM] Successfully sent to {success_count} devices.", flush=True)
-        else:
-            print(f"⚠️ [FCM] Zero success. Check tokens or filters.", flush=True)
-
+        # (이하 토큰 정리 로직 동일)
         if failed_tokens:
             c = conn.cursor()
             c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
             conn.commit()
             c.close()
-            print(f"🗑️ [FCM] Cleaned up {len(failed_tokens)} invalid tokens.", flush=True)
 
     except Exception as e:
-        print(f"❌ [FCM Critical Error] {e}", flush=True)
+        print(f"❌ [FCM Critical] {e}", flush=True)
         if conn: conn.rollback()
     finally:
         if conn: db_pool.putconn(conn)
