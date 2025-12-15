@@ -147,7 +147,7 @@ def init_db():
             "pump_accel REAL DEFAULT 0",
             "spread REAL DEFAULT 0",
             "day_change REAL DEFAULT 0",  # 기존 맨 아래 있던 day_change도 포함
-            # 🔥 [NEW] 여기에 새 컬럼 추가! (이 부분 복사해서 넣으세요)
+            "dollar_vol REAL DEFAULT 0",
             "rsi REAL DEFAULT 50",
             "stoch_k REAL DEFAULT 50",
             "fibo_pos REAL DEFAULT 0.5",
