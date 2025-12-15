@@ -584,6 +584,20 @@ def init_db():
                 conn.rollback() # 컬럼이 이미 존재하면 패스
         # ▲▲▲▲▲ [여기까지 추가] ▲▲▲▲▲
 
+        # 🔥🔥 [여기부터 추가!] sts_live_targets 테이블에 새 지표(hurst, vol_ratio) 뚫어주기
+        target_cols = [
+            "ALTER TABLE sts_live_targets ADD COLUMN vol_ratio REAL DEFAULT 0",
+            "ALTER TABLE sts_live_targets ADD COLUMN hurst REAL DEFAULT 0.5"
+        ]
+        
+        for cmd in target_cols:
+            try:
+                cursor.execute(cmd)
+                conn.commit()
+                print(f"✅ [DB Fix] Added missing column to sts_live_targets.")
+            except psycopg2.Error:
+                conn.rollback() # 이미 컬럼이 있으면 에러 나니까 조용히 패스
+
         cursor.close()
         conn.close()
         print("✅ [DB] Init success.")
