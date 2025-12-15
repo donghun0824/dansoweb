@@ -710,21 +710,29 @@ class TargetSelector:
             return (d['h'] - d['l']) * 0.1 
         return 0.05
 
-    # 🟢 [수정 완료] RVOL은 0으로 초기화, 거래대금(dollar_vol)은 매핑 추가
+    # [TargetSelector 클래스 내부]
     def save_candidates_to_db(self, candidates):
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             
+            # 🟢 [수정됨] 데이터 검증 로직 추가 
+            # (리스트나 튜플이 아니거나, 데이터 개수가 4개 미만이면 무시해서 에러 방지)
+            valid_list = []
+            for item in candidates:
+                if isinstance(item, (list, tuple)) and len(item) >= 4:
+                    valid_list.append(item)
+            
+            # 유효한 데이터가 없으면 종료
+            if not valid_list:
+                return
+
             # *rest 사용: 데이터가 4개 이상 들어와도 에러 없이 처리
-            for t, score, change, vol, *rest in candidates:
+            for t, score, change, vol, *rest in valid_list:
                 d = self.snapshots.get(t)
                 if not d: continue
                 
-                # [수정 포인트]
-                # 1. VALUES 절에 %s를 5개로 늘림 (vol 변수가 들어갈 자리 확보)
-                # 2. dollar_vol 자리에 %s 배치, rvol 자리에 0 배치
                 query = """
                 INSERT INTO sts_live_targets 
                 (ticker, price, ai_score, day_change, dollar_vol, rvol, status, last_updated)
@@ -738,7 +746,6 @@ class TargetSelector:
                     
                 WHERE sts_live_targets.status = 'SCANNING'; 
                 """
-                # 이제 파라미터 5개(t, c, score, change, vol)와 %s 5개가 딱 맞습니다.
                 cursor.execute(query, (t, float(d['c']), float(score), float(change), float(vol))) 
             
             conn.commit()
@@ -1319,13 +1326,21 @@ class STSPipeline:
             finally:
                 self.msg_queue.task_done()
 
-    # [6] Scanner (20초 주기)
+   # [STSPipeline 클래스 내부]
     async def task_global_scan(self):
         print("🔭 [Scanner] Started (Fast Mode: 20s)", flush=True)
+        # 현재 실행 중인 루프 가져오기
+        loop = asyncio.get_running_loop()
+        
         while True:
             try:
-                # 봇 켜자마자 바로 한번 스캔
-                self.candidates = self.selector.get_top_gainers_candidates(limit=10)
+                # [수정] run_in_executor를 사용하여 DB 작업을 별도 쓰레드에서 실행
+                # 이렇게 해야 메인 루프가 차단(Block)되지 않습니다.
+                self.candidates = await loop.run_in_executor(
+                    DB_WORKER_POOL, 
+                    partial(self.selector.get_top_gainers_candidates, limit=10)
+                )
+
                 if self.candidates:
                     print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
                 
@@ -1333,6 +1348,8 @@ class STSPipeline:
                 await asyncio.sleep(20) # 20초 대기
             except Exception as e:
                 print(f"⚠️ Scanner Warning: {e}", flush=True)
+                import traceback
+                traceback.print_exc() # 에러가 나면 어디서 났는지 자세히 출력
                 await asyncio.sleep(5)
 
     # [7] Manager (5초 주기 & Warmup 적용)
