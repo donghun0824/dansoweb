@@ -710,25 +710,26 @@ class TargetSelector:
             return (d['h'] - d['l']) * 0.1 
         return 0.05
 
-    # [TargetSelector 클래스 내부]
     def save_candidates_to_db(self, candidates):
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            
-            # 🟢 [수정됨] 데이터 검증 로직 추가 
-            # (리스트나 튜플이 아니거나, 데이터 개수가 4개 미만이면 무시해서 에러 방지)
+
+            # [핵심 수정] 리스트에서 올바른 튜플(4개 이상)만 필터링
             valid_list = []
             for item in candidates:
+                # 문자열이면 건너뜀 (가장 중요)
+                if isinstance(item, str):
+                    continue
                 if isinstance(item, (list, tuple)) and len(item) >= 4:
                     valid_list.append(item)
-            
+
             # 유효한 데이터가 없으면 종료
             if not valid_list:
                 return
 
-            # *rest 사용: 데이터가 4개 이상 들어와도 에러 없이 처리
+            # 검증된 데이터만 처리
             for t, score, change, vol, *rest in valid_list:
                 d = self.snapshots.get(t)
                 if not d: continue
@@ -737,13 +738,11 @@ class TargetSelector:
                 INSERT INTO sts_live_targets 
                 (ticker, price, ai_score, day_change, dollar_vol, rvol, status, last_updated)
                 VALUES (%s, %s, %s, %s, %s, 0, 'SCANNING', NOW()) 
-                
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price,
                     day_change = EXCLUDED.day_change,
                     dollar_vol = EXCLUDED.dollar_vol,
                     last_updated = NOW()
-                    
                 WHERE sts_live_targets.status = 'SCANNING'; 
                 """
                 cursor.execute(query, (t, float(d['c']), float(score), float(change), float(vol))) 
@@ -751,7 +750,7 @@ class TargetSelector:
             conn.commit()
             cursor.close()
         except Exception as e:
-            # 에러 로그는 남기되, 봇이 멈추지 않도록 처리
+            # DB 오류가 나도 봇은 멈추지 않음
             print(f"⚠️ [Scanner DB Save Error] {e}", flush=True)
             if conn: conn.rollback()
         finally:
@@ -1053,6 +1052,8 @@ class SniperBot:
             from_ts = to_ts - (180 * 1000) 
             url = f"https://api.polygon.io/v2/aggs/ticker/{self.ticker}/range/1/second/{from_ts}/{to_ts}"
             params = {"adjusted": "true", "sort": "asc", "limit": 500, "apiKey": POLYGON_API_KEY}
+            
+            # [핵심 수정] asyncio.run() 대신 httpx.AsyncClient 사용 (올바른 비동기 호출)
             async with httpx.AsyncClient() as client:
                 resp = await client.get(url, params=params, timeout=5.0)
                 if resp.status_code == 200:
@@ -1060,9 +1061,12 @@ class SniperBot:
                     if 'results' in data and data['results']:
                         self.analyzer.inject_history(data['results'])
                         print(f"✅ [Warmup] {self.ticker} Ready! ({len(data['results'])} bars)", flush=True)
-                    else: print(f"⚠️ [Warmup] No data for {self.ticker}", flush=True)
-                else: print(f"❌ [Warmup] API Error: {resp.status_code}", flush=True)
-        except Exception as e: print(f"❌ [Warmup] Failed: {e}", flush=True)
+                    else: 
+                        print(f"⚠️ [Warmup] No data for {self.ticker}", flush=True)
+                else: 
+                    print(f"❌ [Warmup] API Error: {resp.status_code}", flush=True)
+        except Exception as e: 
+            print(f"❌ [Warmup] Failed: {e}", flush=True)
 
     # ==============================================================================
     # [Module 5] Dynamic Execution (동적 청산)
@@ -1326,15 +1330,13 @@ class STSPipeline:
             finally:
                 self.msg_queue.task_done()
 
-   # [STSPipeline 클래스 내부]
     async def task_global_scan(self):
         print("🔭 [Scanner] Started (Fast Mode: 20s)", flush=True)
-        # 현재 실행 중인 루프 가져오기
         loop = asyncio.get_running_loop()
-        
+
         while True:
             try:
-                # [수정] run_in_executor를 사용하여 DB 작업을 별도 쓰레드에서 실행
+                # [핵심 수정] DB 작업이 포함된 함수를 별도 스레드(DB_WORKER_POOL)로 격리
                 # 이렇게 해야 메인 루프가 차단(Block)되지 않습니다.
                 self.candidates = await loop.run_in_executor(
                     DB_WORKER_POOL, 
@@ -1345,14 +1347,15 @@ class STSPipeline:
                     print(f"📋 [Top 10 Candidates] {self.candidates}", flush=True)
                 
                 self.selector.garbage_collect()
-                await asyncio.sleep(20) # 20초 대기
+                await asyncio.sleep(20) 
             except Exception as e:
                 print(f"⚠️ Scanner Warning: {e}", flush=True)
+                # 에러 발생 시 상세 내용 출력 (디버깅용)
                 import traceback
-                traceback.print_exc() # 에러가 나면 어디서 났는지 자세히 출력
+                traceback.print_exc()
                 await asyncio.sleep(5)
 
-    # [7] Manager (5초 주기 & Warmup 적용)
+    # [STSPipeline 클래스 내부]
     async def task_focus_manager(self, ws, candidates=None):
         print("🎯 [Manager] Started (Fast Mode: 5s)", flush=True)
         while True:
@@ -1365,7 +1368,7 @@ class STSPipeline:
                 current_set = set(self.snipers.keys())
                 new_set = set(target_top3)
                 
-                # Detach
+                # Detach (감시 중단 종목 정리)
                 to_remove = current_set - new_set
                 if to_remove:
                     print(f"👋 Detach: {list(to_remove)}", flush=True)
@@ -1374,7 +1377,7 @@ class STSPipeline:
                     for t in to_remove: 
                         if t in self.snipers: del self.snipers[t]
 
-                # Attach
+                # Attach (새로운 종목 감시 시작)
                 to_add = new_set - current_set
                 if to_add:
                     print(f"🚀 Attach: {list(to_add)}", flush=True)
@@ -1382,15 +1385,12 @@ class STSPipeline:
                     await self.subscribe(ws, subscribe_params)
                     
                     for t in to_add:
-                        # 봇 생성
-                        new_bot = SniperBot(t, self.logger, self.selector, self.shared_model)
+                        # [핵심 수정] shared_model 대신 model_bytes 전달 (모델 충돌 방지)
+                        new_bot = SniperBot(t, self.logger, self.selector, self.model_bytes)
+                        self.snipers[t] = new_bot 
                         
-                        # [수정 후] 백그라운드 태스크로 실행 (멈추지 않고 바로 다음으로 넘어감)
-                        self.snipers[t] = new_bot # 봇 먼저 등록
-                        asyncio.create_task(new_bot.warmup()) # 웜업은 알아서 하라고 던져둠
-                        
-                        # 준비 완료된 봇 등록
-                        self.snipers[t] = new_bot
+                        # [핵심 수정] 웜업을 비동기 태스크로 실행 (봇이 멈추지 않음)
+                        asyncio.create_task(new_bot.warmup())
 
             except Exception as e:
                 print(f"❌ Manager Error: {e}", flush=True)
