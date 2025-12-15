@@ -324,12 +324,18 @@ def log_signal_to_db(ticker, price, score, entry=0, tp=0, sl=0, strategy=""):
     finally:
         if conn: db_pool.putconn(conn)
 
-# [수정된 알림 전송 함수] - 로직 유지 + 메시지 포맷 심플화
+# [STS_Engine.py 내부]
+
 def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=None):
-    # 1. Firebase 초기화 체크 (기존 유지)
+    # 1. Firebase 초기화 체크
     if not firebase_admin._apps:
         print(f"⚠️ [FCM] Firebase not initialized. Skipping alert for {ticker}.", flush=True)
         return
+
+    # 🟢 [핵심 수정] Numpy 타입을 Python 기본 타입으로 변환하는 헬퍼 함수
+    def sanitize(val):
+        if hasattr(val, 'item'): return val.item() # numpy 타입이면 python 타입으로 변환
+        return val
 
     conn = None
     try:
@@ -339,55 +345,50 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
         subscribers = cursor.fetchall()
         cursor.close()
         
-        # 구독자가 없으면 로그 남기고 종료 (기존 유지)
         if not subscribers:
             print(f"⚠️ [FCM] No subscribers found. Skipping alert for {ticker}.", flush=True)
             db_pool.putconn(conn)
             return
 
+        # 🟢 [데이터 정제] 모든 입력값을 안전한 파이썬 타입으로 변환
+        price = sanitize(price)
+        score_val = sanitize(probability_score)
+        entry = sanitize(entry)
+        tp = sanitize(tp)
+
         # =========================================================
-        # 🔥 [UI 수정] 알림 메시지 포맷 단순화 (SCAN / BUY)
+        # 알림 메시지 포맷 설정
         # =========================================================
         
-        # Case: 매수 진입 (BUY) - Entry와 TP가 존재할 때
+        # Case: 매수 진입 (BUY)
         if entry and tp:
-            # 제목: BUY 티커 (점수)
-            noti_title = f"BUY {ticker} ({probability_score})"
-            
-            # 본문: Entry와 TP만 깔끔하게 (SL, 손익비 제거)
-            noti_body = (
-                f"Entry: ${float(entry):.3f}\n"
-                f"TP: ${float(tp):.3f}"
-            )
-            
-        # Case: 단순 포착 (SCAN) - Entry 정보가 없을 때
+            noti_title = f"BUY {ticker} ({score_val})"
+            noti_body = f"Entry: ${float(entry):.3f}\nTP: ${float(tp):.3f}"
+        # Case: 단순 포착 (SCAN)
         else:
-            # 제목: SCAN 티커 (점수 제거)
             noti_title = f"SCAN {ticker}"
-            
-            # 본문: 현재가만 표시
             noti_body = f"Current: ${float(price):.4f}"
 
-        # 데이터 페이로드 구성 (기존 유지)
+        # 데이터 페이로드 구성 (모두 문자열로 변환)
         data_payload = {
-            'type': 'signal', 'ticker': ticker, 
-            'price': str(price), 'score': str(probability_score), 
-            'title': noti_title, 'body': noti_body
+            'type': 'signal', 
+            'ticker': str(ticker), 
+            'price': str(price), 
+            'score': str(score_val),
+            'title': str(noti_title), 
+            'body': str(noti_body)
         }
         
-        # 3. [로그 추가] 전송 시작 알림 (기존 유지)
         print(f"🔔 [FCM] Sending: {noti_title} to {len(subscribers)} devices...", flush=True)
 
         success_count = 0
         failed_tokens = []
         
-        # 4. 전송 루프 (기존 로직 100% 유지)
         for row in subscribers:
             token = row[0]
             user_min_score = row[1] if row[1] is not None else 0 
             
-            # 사용자 설정 점수 미달 시 스킵
-            if probability_score < user_min_score: continue
+            if score_val < user_min_score: continue
 
             try:
                 message = messaging.Message(
@@ -410,18 +411,17 @@ def _send_fcm_sync(ticker, price, probability_score, entry=None, tp=None, sl=Non
                 messaging.send(message)
                 success_count += 1
             except Exception as e:
-                # 전송 실패 시 로그 및 만료 토큰 수집
-                print(f"❌ [FCM Fail] Token: {token[:10]}... Error: {e}", flush=True)
+                # 🟢 [수정] 에러 메시지가 너무 길면 잘라서 출력 (로그 폭주 방지)
+                error_msg = str(e)[:100]
+                print(f"❌ [FCM Fail] Token: {token[:10]}... Error: {error_msg}", flush=True)
                 if "Requested entity was not found" in str(e) or "registration-token-not-registered" in str(e): 
                     failed_tokens.append(token)
         
-        # 5. 결과 리포트 (기존 유지)
         if success_count > 0:
             print(f"✅ [FCM] Successfully sent to {success_count} devices.", flush=True)
         else:
             print(f"⚠️ [FCM] Zero success. Check tokens or filters.", flush=True)
 
-        # 만료된 토큰 DB 삭제 처리 (기존 유지)
         if failed_tokens:
             c = conn.cursor()
             c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
