@@ -5,6 +5,7 @@ import json
 import os
 import time
 import redis.asyncio as redis
+import requests
 import numpy as np
 import pandas as pd
 import csv
@@ -46,7 +47,7 @@ OBI_LEVELS = 20               # [V5.3] 오더북 깊이 확장 (5 -> 20)
 
 # 후보 선정(Target Selector) 필터 기준
 STS_MIN_DOLLAR_VOL = 2_000_000 
-STS_MAX_PRICE = 200        
+STS_MAX_PRICE = 100        
 STS_MIN_CHANGE = 1.5             # [추가] 최소 등락률 1.5%
 STS_MIN_RVOL = 3.0           # (SniperBot 단계) 최소 상대 거래량
 STS_MAX_SPREAD_ENTRY = 0.9   # (SniperBot 단계) 진입 허용 스프레드
@@ -702,29 +703,82 @@ class MicrostructureAnalyzer:
         except Exception as e:
             print(f"❌ [Metrics Error] {e}")
             traceback.print_exc()
-            return None
-            
-# [V6.2] Target Selector (글로벌 설정 연동 + 유동성/FakePump 필터 강화)
+            return None           
+
+# [V7.2] Target Selector (Cold Start 해결: Snapshot API 연동)
 class TargetSelector:
-    def __init__(self):
+    def __init__(self, api_key=None): # 👈 [변경] api_key 인자 추가
         self.snapshots = {} 
         self.last_gc_time = time.time()
-        # 글로벌 상수(STS_...)를 직접 사용하므로 별도 멤버 변수 설정 불필요
+        self.api_key = api_key 
+        
+        # 🔥 [핵심] 봇 시작 시 Polygon Snapshot API로 오늘 누적 데이터 복구
+        if self.api_key:
+            self.fetch_initial_market_state()
+        else:
+            print("⚠️ [Selector] API Key missing. Cold Start protection disabled.", flush=True)
+
+    def fetch_initial_market_state(self):
+        """Polygon API를 통해 장중 재시작 시에도 누적 거래량(v)과 시가(o)를 복구함"""
+        print("🌍 [Selector] Fetching Market Snapshot (Recovering Data)...", flush=True)
+        try:
+            url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey={self.api_key}"
+            resp = requests.get(url, timeout=10)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                count = 0
+                if 'tickers' in data:
+                    for item in data['tickers']:
+                        t = item['ticker']
+                        day = item.get('day', {})
+                        min_bar = item.get('min', {}) 
+                        
+                        # 데이터가 부실하면(거래량/시가 없음) 스킵
+                        if not day.get('v') or not day.get('o'): continue
+                        
+                        # 현재가 추정 (Last Trade -> Min Close -> Day Close 순)
+                        curr_price = item.get('lastTrade', {}).get('p', min_bar.get('c', day.get('c')))
+                        if not curr_price: continue
+
+                        # 🔥 [메모리 복구] 누적 거래량과 시가를 정확히 세팅
+                        self.snapshots[t] = {
+                            'o': day['o'],      
+                            'h': day.get('h', curr_price),
+                            'l': day.get('l', curr_price),
+                            'c': curr_price,
+                            'v': day['v'],           # 오늘 누적 거래량 복구
+                            'vwap': day.get('vw', curr_price),
+                            'start_price': day['o'], # Fake Pump 계산용 시가 복구
+                            'last_updated': time.time()
+                        }
+                        count += 1
+                print(f"✅ [Selector] Snapshot Loaded! {count} tickers recovered.", flush=True)
+            else:
+                print(f"❌ [Selector] Snapshot Failed: {resp.status_code}", flush=True)
+        except Exception as e:
+            print(f"❌ [Selector] Snapshot Error: {e}", flush=True)
 
     def update(self, agg_data):
         t = agg_data['sym']
+        # 스냅샷에 없던 신규 종목이 들어오면 초기화
         if t not in self.snapshots: 
             self.snapshots[t] = {
                 'o': agg_data['o'], 'h': agg_data['h'], 'l': agg_data['l'], 
-                'c': agg_data['c'], 'v': 0, 'vwap': agg_data.get('vw', agg_data['c']),
-                'start_price': agg_data['o'], 'last_updated': time.time()
+                'c': agg_data['c'], 'v': 0, 
+                'vwap': agg_data.get('vw', agg_data['c']),
+                'start_price': agg_data['o'], 
+                'last_updated': time.time()
             }
         
         d = self.snapshots[t]
         d['c'] = agg_data['c']
         d['h'] = max(d['h'], agg_data['h'])
         d['l'] = min(d['l'], agg_data['l'])
+        
+        # 🔥 [수정] 복구된 v값 위에 실시간 거래량을 계속 누적
         d['v'] += agg_data['v']
+        
         d['vwap'] = agg_data.get('vw', d['c'])
         d['last_updated'] = time.time()
 
@@ -779,7 +833,7 @@ class TargetSelector:
         for t, d in self.snapshots.items():
             if now - d['last_updated'] > 60: continue 
             
-            # 1. 가격 & 유동성 필터 (글로벌 상수 STS_... 사용)
+            # 1. 가격 & 유동성 필터
             if d['c'] < 2.0 or d['c'] > STS_MAX_PRICE: continue
             
             dollar_vol = d['c'] * d['v']
@@ -789,12 +843,11 @@ class TargetSelector:
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
             if change_pct < STS_MIN_CHANGE: continue 
 
-            # 3. [핵심] Fake Pump 방지 (상승폭에 비례한 최소 거래량 요구)
-            # 예: 10% 올랐으면 기본(200만불) * 3배 = 600만불 이상 터져야 인정
+            # 3. Fake Pump 방지
             required_vol = STS_MIN_DOLLAR_VOL * (1 + (change_pct * 0.2))
             if dollar_vol < required_vol: continue
 
-            # 4. 점수 산정 (유동성 가중치 강화)
+            # 4. 점수 산정
             liquidity_score = np.log10(dollar_vol) * 10  
             momentum_score = change_pct * 2
             score = (momentum_score * 0.4) + (liquidity_score * 0.6)
@@ -1138,7 +1191,7 @@ class STSPipeline:
         self.snipers = {}       
         self.candidates = []    
         self.last_quotes = {}
-        
+        self.selector = TargetSelector(api_key=POLYGON_API_KEY)
         # [수정 1] 마지막 Agg(A) 데이터를 저장할 공간 초기화
         self.last_agg = {}      
         

@@ -23,6 +23,10 @@ except ImportError:
 # --- 설정 ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
 FIREBASE_ADMIN_SDK_JSON_STR = os.environ.get('FIREBASE_ADMIN_SDK_JSON')
+# 🔥 [추가] Cold Start 방지용 API Key 안전장치
+POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
+if not POLYGON_API_KEY:
+    print("⚠️ [Warning] 'POLYGON_API_KEY'가 없습니다! 재시작 시 데이터 복구(Snapshot) 기능이 작동하지 않습니다.", flush=True)
 r = redis.from_url(REDIS_URL)
 
 # [수정] Redis 블로킹 방지를 위한 스레드 풀 (시세 처리 + 알림 발송 = 최소 2개 필요)
@@ -170,9 +174,13 @@ async def redis_consumer():
     # DB 및 Firebase 초기화
     init_db()
     init_firebase_worker()
+
+    print("⏳ [System] Initializing Pipeline & Fetching Market Snapshot...", flush=True)
     
     # 파이프라인 생성
     pipeline = STSPipeline()
+    
+    print("✅ [System] Snapshot Loaded & Pipeline Ready.", flush=True)
     
     # 로컬 데이터 저장소
     last_agg = {}
