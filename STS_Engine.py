@@ -45,8 +45,9 @@ STS_MAX_VPIN = 0.80         # [V5.3] 필터 완화 (0.55 -> 0.65)
 OBI_LEVELS = 20               # [V5.3] 오더북 깊이 확장 (5 -> 20)
 
 # 후보 선정(Target Selector) 필터 기준
-STS_MIN_DOLLAR_VOL = 200000  # 최소 거래대금 $300k (약 4억원)
-STS_MAX_PRICE = 50.0         # 최대 가격 $30 (저가주 집중)
+STS_MIN_DOLLAR_VOL = 2_000_000 
+STS_MAX_PRICE = 200        
+STS_MIN_CHANGE = 1.5             # [추가] 최소 등락률 1.5%
 STS_MIN_RVOL = 3.0           # (SniperBot 단계) 최소 상대 거래량
 STS_MAX_SPREAD_ENTRY = 0.9   # (SniperBot 단계) 진입 허용 스프레드
 
@@ -158,7 +159,11 @@ def init_db():
             "stoch_k REAL DEFAULT 50",
             "fibo_pos REAL DEFAULT 0.5",
             "obi_rev INTEGER DEFAULT 0",
-            "regime_p REAL DEFAULT 0.5"
+            "regime_p REAL DEFAULT 0.5",
+            "ofi REAL DEFAULT 0",          
+            "weighted_obi REAL DEFAULT 0",
+            "dollar_vol_1m REAL DEFAULT 0", 
+            "top5_book_usd REAL DEFAULT 0"
         ]
 
         print("🔄 [DB] Checking and adding columns...")
@@ -239,11 +244,11 @@ def update_dashboard_db(ticker, metrics, score, status):
         query = """
         INSERT INTO sts_live_targets 
         (ticker, price, ai_score, obi, vpin, tick_speed, vwap_dist, status, 
-         obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread, 
-         rsi, stoch_k, fibo_pos, obi_rev, regime_p,last_updated)
+         obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread,ofi, weighted_obi, 
+         rsi, stoch_k, fibo_pos, obi_rev, regime_p,dollar_vol_1m, top5_book_usd,last_updated)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 
                 %s, %s, %s, %s, %s, %s, %s, %s, 
-                %s, %s, %s, %s,%s, NOW())
+                %s, %s, %s, %s,%s,%s, %s,%s, %s, NOW())
         ON CONFLICT (ticker) DO UPDATE SET
             price = EXCLUDED.price,
             ai_score = EXCLUDED.ai_score,
@@ -267,7 +272,10 @@ def update_dashboard_db(ticker, metrics, score, status):
             fibo_pos = EXCLUDED.fibo_pos,
             obi_rev = EXCLUDED.obi_rev,
             regime_p = EXCLUDED.regime_p,
-            
+            ofi = EXCLUDED.ofi,                   -- 🔥 [추가 3] 업데이트 구문 추가
+            weighted_obi = EXCLUDED.weighted_obi, -- 🔥 [추가 4] 업데이트 구문 추가
+            dollar_vol_1m = EXCLUDED.dollar_vol_1m, -- 🔥 [추가 3] 업데이트 구문
+            top5_book_usd = EXCLUDED.top5_book_usd, -- 🔥 [추가 4] 업데이트 구문
             last_updated = NOW();
         """
         
@@ -295,7 +303,11 @@ def update_dashboard_db(ticker, metrics, score, status):
             float(metrics.get('stoch_k', 50)),
             float(metrics.get('fibo_pos', 0.5)),
             int(metrics.get('obi_reversal_flag', 0)),
-            float(metrics.get('regime_p', 0.5))
+            float(metrics.get('regime_p', 0.5)),
+            float(metrics.get('ofi', 0)),
+            float(metrics.get('weighted_obi', 0)),
+            float(metrics.get('dollar_vol_1m', 0)),
+            float(metrics.get('top5_book_usd', 0))
         ))
         conn.commit()
         cursor.close()
@@ -505,176 +517,173 @@ class DataLogger:
                 f"{data.get('vpin', 0):.2f}", f"{data.get('ai_prob', 0):.4f}"
             ])
 
+# [V7.1] MicrostructureAnalyzer (유동성 지표 추가: 1분 거래대금, 호가 총액)
 class MicrostructureAnalyzer:
     def __init__(self):
         self.raw_ticks = deque(maxlen=3000) 
         self.quotes = {'bids': [], 'asks': []}
-        self.prev_tick_speed = 0
+        
+        # OFI 계산용 상태 변수
+        self.prev_best_bid_p = 0
+        self.prev_best_ask_p = 0
+        self.prev_best_bid_s = 0
+        self.prev_best_ask_s = 0
         self.prev_obi = 0
 
     def inject_history(self, aggs):
-        """Polygon 1초봉 데이터를 있는 그대로 주입 (가상 변환 X)"""
         if not aggs: return
-        
-        # 시간순 정렬
         aggs.sort(key=lambda x: x['t'])
-        
         for bar in aggs:
             ts = pd.to_datetime(bar['t'], unit='ms')
-            
-            # 1초봉(Agg) 하나를 하나의 '틱'처럼 그대로 사용
-            # 이렇게 하면 VWAP, 볼린저 밴드 계산 시 왜곡 없이 정확함
             self.raw_ticks.append({
-                't': ts,
-                'p': bar['c'],       # 종가(Close)를 기준 가격으로 사용
-                's': bar.get('v', 0), # 거래량(Volume)
-                'bid': bar['c'] - 0.01, 
-                'ask': bar['c'] + 0.01
+                't': ts, 'p': bar['c'], 's': bar.get('v', 0),
+                'bid': bar['c'] - 0.01, 'ask': bar['c'] + 0.01
             })
-            
-        print(f"📥 [Analyzer] History Loaded: {len(aggs)} seconds of data ready.", flush=True)
+        print(f"📥 [Analyzer] History Loaded: {len(aggs)} bars.", flush=True)
 
     def update_tick(self, tick_data, current_quotes):
-        best_bid = current_quotes['bids'][0]['p'] if current_quotes['bids'] else 0
-        best_ask = current_quotes['asks'][0]['p'] if current_quotes['asks'] else 0
+        best_bid = current_quotes['bids'][0]['p'] if current_quotes.get('bids') else 0
+        best_ask = current_quotes['asks'][0]['p'] if current_quotes.get('asks') else 0
         
-        # [수정 완료] 데이터가 없을 때를 대비해 .get() 사용 (안전장치)
         self.raw_ticks.append({
             't': pd.to_datetime(tick_data.get('t', time.time()*1000), unit='ms'), 
-            'p': tick_data.get('p', 0),  
-            's': tick_data.get('s', 0),  # 🔥 여기가 핵심 수정 포인트! ('s' 없으면 0 처리)
-            'bid': best_bid, 
-            'ask': best_ask
+            'p': tick_data.get('p', 0), 's': tick_data.get('s', 0),  
+            'bid': best_bid, 'ask': best_ask
         })
         self.quotes = current_quotes
 
-    def _resample_ohlc(self):
-        if len(self.raw_ticks) < 10: return None
-        df = pd.DataFrame(self.raw_ticks).set_index('t')
-        ohlcv = df['p'].resample('1s').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'})
-        volume = df['s'].resample('1s').sum()
-        tick_count = df['s'].resample('1s').count()
+    def _calculate_ofi(self, best_bid_p, best_bid_s, best_ask_p, best_ask_s):
+        if self.prev_best_bid_p == 0: return 0
         
-        df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
-        df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
-        df_res = df_res.ffill().fillna(0)
-        return df_res.dropna()
-    
+        e_n_bid = 0
+        if best_bid_p > self.prev_best_bid_p: e_n_bid = best_bid_s
+        elif best_bid_p == self.prev_best_bid_p: e_n_bid = best_bid_s - self.prev_best_bid_s
+        else: e_n_bid = -self.prev_best_bid_s
+
+        e_n_ask = 0
+        if best_ask_p > self.prev_best_ask_p: e_n_ask = -self.prev_best_ask_s
+        elif best_ask_p == self.prev_best_ask_p: e_n_ask = best_ask_s - self.prev_best_ask_s
+        else: e_n_ask = best_ask_s
+
+        return e_n_bid - e_n_ask
+
     def get_metrics(self):
-        # 1. 데이터 검증 (최소 5개 -> 20개로 상향: 지표 계산 최소량 확보)
-        if len(self.raw_ticks) < 20: return None
+        if len(self.raw_ticks) < 50: return None
         
-        # 2. DataFrame 생성
-        df = pd.DataFrame(self.raw_ticks).set_index('t')
-        
-        # 1초봉 리샘플링
-        ohlcv = df['p'].resample('1s').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'})
-        volume = df['s'].resample('1s').sum()
-        tick_count = df['s'].resample('1s').count()
-        
-        # 데이터 합치기 (최근 600초 유지)
-        df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
-        df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
-        
-        # 결측치 채우기
-        df = df_res.ffill().fillna(0)
-        
-        if len(df) < 20: return None 
+        # 변수 안전 초기화
+        vpin = 0; obi = 0; ofi = 0; weighted_obi = 0; obi_mom = 0
         
         try:
-            WIN_MAIN = 60
-            WIN_SQZ = 30
-            WIN_SLOPE = 5
+            df = pd.DataFrame(self.raw_ticks).set_index('t')
+            ohlcv = df['p'].resample('1s').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'})
+            volume = df['s'].resample('1s').sum()
+            tick_count = df['s'].resample('1s').count()
+            
+            df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
+            df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
+            df = df_res.ffill().fillna(0)
+            
+            if len(df) < 20: return None
 
-            # --- 기본 지표 계산 ---
+            WIN_MAIN = 60
             v = df['volume'].values
             p = df['close'].values
+            
+            # 🔥 [추가] 유동성 지표 (Liquidity Metrics)
+            # 1. 최근 1분(60초) 거래대금 합계
+            df['dollar_vol'] = df['close'] * df['volume']
+            dollar_vol_1m = df['dollar_vol'].iloc[-60:].sum()
+
+            # 기본 지표들
             df['vwap'] = (p * v).cumsum() / (v.cumsum() + 1e-9)
             df['vwap'] = df['vwap'].ffill() 
-            df['vwap_slope'] = (df['vwap'].diff(WIN_SLOPE) / (df['vwap'].shift(WIN_SLOPE) + 1e-9)) * 10000
+            df['vwap_slope'] = (df['vwap'].diff(5) / (df['vwap'].shift(5) + 1e-9)) * 10000
             
             df['vol_ma'] = df['volume'].rolling(WIN_MAIN).mean()
             df['rvol'] = df['volume'] / (df['vol_ma'] + 1e-9)
             df['rv_60'] = df['close'].pct_change().rolling(60).std()
             
-            # 🔥 [NEW] Volatility Ratio (단기/장기 변동성 비율) - 폭발 감지용
-            # 20초(단기) 변동성이 120초(장기)보다 크면 시장이 흥분 상태임
             df['realized_vol_20s'] = df['close'].pct_change().rolling(20).std()
             df['realized_vol_120s'] = df['close'].pct_change().rolling(120).std()
             df['vol_ratio'] = df['realized_vol_20s'] / (df['realized_vol_120s'] + 1e-9)
 
-            # 🔥 [NEW] Efficiency Ratio (Hurst 지수 대용) - 추세 강도용
-            # ER = (순수 가격 변화폭) / (전체 이동경로의 합)
-            # 1.0에 가까울수록 "일직선 상승(추세)", 0.0에 가까울수록 "지그재그(횡보)"
             change = df['close'].diff(20).abs()
             path = df['close'].diff().abs().rolling(20).sum()
             df['efficiency_ratio'] = change / (path + 1e-9)
-            
-            # Hurst 값으로 매핑 (0.5~1.0 범위로 변환하여 로직에 전달)
             df['hurst'] = 0.5 + (df['efficiency_ratio'] * 0.5)
 
-            # Squeeze Ratio
             df['squeeze_ratio'] = ind.compute_bb_bandwidth(df['close'], window=20)
-            
-            # Pump Accel
             df['pump_5m'] = df['close'].pct_change(300)
             df['pump_accel'] = df['pump_5m'].diff(60)
-            
-            # Tick Accel
             df['tick_accel'] = df['tick_speed'].diff().fillna(0)
 
-            # ATR
             prev_close = df['close'].shift(1)
-            tr1 = df['high'] - df['low']
-            tr2 = (df['high'] - prev_close).abs()
-            tr3 = (df['low'] - prev_close).abs()
-            df['tr'] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            df['atr'] = df['tr'].rolling(WIN_MAIN).mean()
+            tr = pd.concat([df['high']-df['low'], (df['high']-prev_close).abs(), (df['low']-prev_close).abs()], axis=1).max(axis=1)
+            df['atr'] = tr.rolling(WIN_MAIN).mean()
             
-            # Indicators (RSI, Stoch, Fibo)
             df['rsi'] = ind.compute_rsi_series(df['close'], period=14)
             df['stoch_k'] = ind.compute_stochastic_series(df['high'], df['low'], df['close'])
             df['fibo_pos'] = ind.compute_fibo_pos(df['high'], df['low'], df['close'], lookback=300)
 
-            # [Band Touch Logic]
-            df['ma_sqz'] = df['close'].rolling(WIN_SQZ).mean()
-            df['std_sqz'] = df['close'].rolling(WIN_SQZ).std()
-            df['lower_band'] = df['ma_sqz'] - (df['std_sqz'] * 2.0)
-            is_lower_touch = 1 if df['low'].iloc[-1] <= df['lower_band'].iloc[-1] else 0
-
             df = df.fillna(0)
             last = df.iloc[-1]
 
-            # OBI & VPIN Calculation
-            bids = np.array([q['s'] for q in self.quotes.get('bids', [])[:OBI_LEVELS]])
-            asks = np.array([q['s'] for q in self.quotes.get('asks', [])[:OBI_LEVELS]])
-            bid_vol = np.sum(bids) if len(bids) > 0 else 0
-            ask_vol = np.sum(asks) if len(asks) > 0 else 0
-            obi = (bid_vol - ask_vol) / (bid_vol + ask_vol) if (bid_vol + ask_vol) > 0 else 0
+            # --- 호가 분석 (Orderbook Analysis) ---
+            bids_list = self.quotes.get('bids', [])
+            asks_list = self.quotes.get('asks', [])
+
+            # 🔥 [추가] 상위 5호가 잔량 총액 ($)
+            top5_book_usd = 0
+            for q in bids_list[:5]: top5_book_usd += (q['p'] * q['s'])
+            for q in asks_list[:5]: top5_book_usd += (q['p'] * q['s'])
+
+            # OFI
+            curr_bid_p = bids_list[0]['p'] if bids_list else 0
+            curr_bid_s = bids_list[0]['s'] if bids_list else 0
+            curr_ask_p = asks_list[0]['p'] if asks_list else 0
+            curr_ask_s = asks_list[0]['s'] if asks_list else 0
+            ofi = self._calculate_ofi(curr_bid_p, curr_bid_s, curr_ask_p, curr_ask_s)
+            
+            self.prev_best_bid_p = curr_bid_p; self.prev_best_bid_s = curr_bid_s
+            self.prev_best_ask_p = curr_ask_p; self.prev_best_ask_s = curr_ask_s
+
+            # Weighted OBI
+            w_bid_sum = 0; w_ask_sum = 0
+            limit_level = min(len(bids_list), len(asks_list), OBI_LEVELS)
+            for i in range(limit_level):
+                weight = np.exp(-0.5 * i) 
+                w_bid_sum += bids_list[i]['s'] * weight
+                w_ask_sum += asks_list[i]['s'] * weight
+            weighted_obi = (w_bid_sum - w_ask_sum) / (w_bid_sum + w_ask_sum + 1e-9)
+
+            # Simple OBI
+            bids_arr = np.array([q['s'] for q in bids_list[:OBI_LEVELS]])
+            asks_arr = np.array([q['s'] for q in asks_list[:OBI_LEVELS]])
+            bid_vol = np.sum(bids_arr) if len(bids_arr) > 0 else 0
+            ask_vol = np.sum(asks_arr) if len(asks_arr) > 0 else 0
+            obi = (bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-9)
             
             obi_mom = obi - self.prev_obi
             prev_obi_val = obi - obi_mom
             obi_reversal_flag = 1 if (obi > 0 and prev_obi_val < 0) else 0
             self.prev_obi = obi 
             
-            # VPIN (100 ticks sample)
+            # VPIN
             raw_df = pd.DataFrame(list(self.raw_ticks)[-100:])
-            if not raw_df.empty:
+            if not raw_df.empty and 'ask' in raw_df.columns:
                 buy_vol = raw_df[raw_df['p'] >= raw_df['ask']]['s'].sum()
                 sell_vol = raw_df[raw_df['p'] <= raw_df['bid']]['s'].sum()
-                total_vol = buy_vol + sell_vol
-                vpin = abs(buy_vol - sell_vol) / total_vol if total_vol > 0 else 0
-            else:
-                vpin = 0
+                total = buy_vol + sell_vol
+                vpin = abs(buy_vol - sell_vol) / total if total > 0 else 0
 
-            # Spread & Dist
             vwap_dist = (last['close'] - last['vwap']) / last['vwap'] * 100 if last['vwap'] > 0 else 0
             best_bid = self.raw_ticks[-1]['bid']
             best_ask = self.raw_ticks[-1]['ask']
             spread = (best_ask - best_bid) / best_bid * 100 if best_bid > 0 else 0
 
             return {
-                'obi': obi, 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'], 'vpin': vpin, 
+                'obi': obi, 'weighted_obi': weighted_obi, 'ofi': ofi,
+                'obi_mom': obi_mom, 'tick_accel': last['tick_accel'], 'vpin': vpin, 
                 'vwap_dist': vwap_dist, 'vwap_slope': last['vwap_slope'], 'rvol': last['rvol'],
                 'squeeze_ratio': last['squeeze_ratio'], 'pump_accel': last['pump_accel'],
                 'atr': last['atr'] if last['atr'] > 0 else last['close'] * 0.005,
@@ -682,32 +691,33 @@ class MicrostructureAnalyzer:
                 'timestamp': raw_df.iloc[-1]['t'] if not raw_df.empty else pd.Timestamp.now(), 
                 'vwap': last['vwap'], 'rv_60': last['rv_60'], 'fibo_pos': last['fibo_pos'],
                 'bb_width_norm': last['squeeze_ratio'], 'rsi': last['rsi'], 'stoch_k': last['stoch_k'],
-                'obi_reversal_flag': obi_reversal_flag, 'lower_touch': is_lower_touch,
+                'obi_reversal_flag': obi_reversal_flag, 
+                'vol_ratio': last['vol_ratio'], 'hurst': last['hurst'],
                 
-                # 🔥 [NEW] SniperBot V6.0을 위해 반드시 넘겨줘야 할 데이터
-                'vol_ratio': last['vol_ratio'],
-                'hurst': last['hurst']
+                # 🔥 [필수] SniperBot에게 넘겨줄 유동성 지표
+                'dollar_vol_1m': dollar_vol_1m,
+                'top5_book_usd': top5_book_usd
             }
-            
+
         except Exception as e:
-            # print(f"Metric Error: {e}") 
+            print(f"❌ [Metrics Error] {e}")
+            traceback.print_exc()
             return None
             
+# [V6.2] Target Selector (글로벌 설정 연동 + 유동성/FakePump 필터 강화)
 class TargetSelector:
     def __init__(self):
         self.snapshots = {} 
         self.last_gc_time = time.time()
-        self.market_vol_tracker = defaultdict(float)
+        # 글로벌 상수(STS_...)를 직접 사용하므로 별도 멤버 변수 설정 불필요
 
     def update(self, agg_data):
         t = agg_data['sym']
-        # 데이터 수신 및 스냅샷 업데이트
         if t not in self.snapshots: 
             self.snapshots[t] = {
                 'o': agg_data['o'], 'h': agg_data['h'], 'l': agg_data['l'], 
                 'c': agg_data['c'], 'v': 0, 'vwap': agg_data.get('vw', agg_data['c']),
-                'start_price': agg_data['o'], 
-                'last_updated': time.time()
+                'start_price': agg_data['o'], 'last_updated': time.time()
             }
         
         d = self.snapshots[t]
@@ -721,7 +731,8 @@ class TargetSelector:
     def get_atr(self, ticker):
         if ticker in self.snapshots:
             d = self.snapshots[ticker]
-            return (d['h'] - d['l']) * 0.1 
+            range_vol = d['h'] - d['l']
+            return max(range_vol * 0.1, d['c'] * 0.005)
         return 0.05
 
     def save_candidates_to_db(self, candidates):
@@ -729,21 +740,14 @@ class TargetSelector:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-
-            # [핵심 수정] 리스트에서 올바른 튜플(4개 이상)만 필터링
+            
             valid_list = []
             for item in candidates:
-                # 문자열이면 건너뜀 (가장 중요)
-                if isinstance(item, str):
-                    continue
                 if isinstance(item, (list, tuple)) and len(item) >= 4:
                     valid_list.append(item)
 
-            # 유효한 데이터가 없으면 종료
-            if not valid_list:
-                return
+            if not valid_list: return
 
-            # 검증된 데이터만 처리
             for t, score, change, vol, *rest in valid_list:
                 d = self.snapshots.get(t)
                 if not d: continue
@@ -753,9 +757,8 @@ class TargetSelector:
                 (ticker, price, ai_score, day_change, dollar_vol, rvol, status, last_updated)
                 VALUES (%s, %s, %s, %s, %s, 0, 'SCANNING', NOW()) 
                 ON CONFLICT (ticker) DO UPDATE SET
-                    price = EXCLUDED.price,
-                    day_change = EXCLUDED.day_change,
-                    dollar_vol = EXCLUDED.dollar_vol,
+                    price = EXCLUDED.price, day_change = EXCLUDED.day_change,
+                    dollar_vol = EXCLUDED.dollar_vol, ai_score = EXCLUDED.ai_score,
                     last_updated = NOW()
                 WHERE sts_live_targets.status = 'SCANNING'; 
                 """
@@ -764,38 +767,44 @@ class TargetSelector:
             conn.commit()
             cursor.close()
         except Exception as e:
-            # DB 오류가 나도 봇은 멈추지 않음
-            print(f"⚠️ [Scanner DB Save Error] {e}", flush=True)
             if conn: conn.rollback()
+            print(f"⚠️ [Scanner DB Error] {e}")
         finally:
             if conn: db_pool.putconn(conn)
 
-    # 🟢 [기존 로직 유지] 4개 데이터 포장 및 DB 저장 호출
     def get_top_gainers_candidates(self, limit=10):
         scored = []
         now = time.time()
         
         for t, d in self.snapshots.items():
             if now - d['last_updated'] > 60: continue 
-            if d['c'] > STS_MAX_PRICE: continue
+            
+            # 1. 가격 & 유동성 필터 (글로벌 상수 STS_... 사용)
+            if d['c'] < 2.0 or d['c'] > STS_MAX_PRICE: continue
             
             dollar_vol = d['c'] * d['v']
-            if dollar_vol < 30000: continue 
+            if dollar_vol < STS_MIN_DOLLAR_VOL: continue 
 
+            # 2. 변동성 필터
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
-            if change_pct < 1.0: continue 
+            if change_pct < STS_MIN_CHANGE: continue 
 
-            score = change_pct * np.log1p(dollar_vol)
+            # 3. [핵심] Fake Pump 방지 (상승폭에 비례한 최소 거래량 요구)
+            # 예: 10% 올랐으면 기본(200만불) * 3배 = 600만불 이상 터져야 인정
+            required_vol = STS_MIN_DOLLAR_VOL * (1 + (change_pct * 0.2))
+            if dollar_vol < required_vol: continue
+
+            # 4. 점수 산정 (유동성 가중치 강화)
+            liquidity_score = np.log10(dollar_vol) * 10  
+            momentum_score = change_pct * 2
+            score = (momentum_score * 0.4) + (liquidity_score * 0.6)
             
-            # (티커, 점수, 등락률, 거래대금)
             scored.append((t, score, change_pct, dollar_vol))
         
         scored.sort(key=lambda x: x[1], reverse=True)
         top_list = scored[:limit]
 
-        if top_list:
-            self.save_candidates_to_db(top_list)
-
+        if top_list: self.save_candidates_to_db(top_list)
         return [x[0] for x in top_list]
 
     def get_best_snipers(self, candidates, limit=3):
@@ -805,7 +814,6 @@ class TargetSelector:
             d = self.snapshots[t]
             dollar_vol = d['c'] * d['v']
             scored.append((t, dollar_vol))
-        
         scored.sort(key=lambda x: x[1], reverse=True)
         return [x[0] for x in scored[:limit]]
 
@@ -815,141 +823,138 @@ class TargetSelector:
         to_remove = [t for t, d in self.snapshots.items() if now - d['last_updated'] > GC_TTL]
         for t in to_remove: del self.snapshots[t]
         self.last_gc_time = now
-
+# [V7.1] SniperBot (Hard Kill Filter, Strict Fast-Track, Emergency Exit 적용)
 class SniperBot:
-    # 🟢 [수정됨] 4번째 인자가 shared_model -> model_bytes 로 변경되었습니다.
     def __init__(self, ticker, logger, selector, model_bytes):
         self.ticker = ticker
         self.logger = logger
         self.selector = selector
         
-        # 🟢 [신규 로직] 공유 모델을 쓰는 게 아니라, 바이트 데이터를 복제해서 '내 전용 모델'을 만듭니다.
-        # 이렇게 하면 100개의 봇이 동시에 계산해도 절대 충돌나지 않습니다.
+        self.CONFIG = {
+            'weights': {
+                'speed': 0.25, 'vwap': 0.20, 'vol': 0.20, 
+                'hurst': 0.15, 'rvol': 0.15, 'sqz': 0.05
+            },
+            'thresh': {
+                'fast_track': 85,      
+                'entry': 70,           
+                'confirm_window': 0.2, 
+                'max_slip': -0.1       
+            }
+        }
+
         self.model = None
         if model_bytes:
             try:
                 self.model = xgb.Booster()
-                self.model.load_model(model_bytes) # 메모리에서 바로 로드 (고속 복제)
+                self.model.load_model(model_bytes)
             except Exception as e:
-                print(f"⚠️ {ticker}: Failed to clone AI model - {e}")
+                print(f"⚠️ {ticker}: Model Load Error - {e}")
 
         self.analyzer = MicrostructureAnalyzer()
+        
         self.state = "WATCHING"
-        self.vwap = 0
-        self.atr = 0.05 
-        self.position = {} 
+        self.vwap = 0.0
+        self.atr = 0.05
+        self.position = {}
         self.prob_history = deque(maxlen=5)
+        self.regime_p = 0.5  
+        
         self.last_db_update = 0
         self.last_logged_state = "WATCHING"
         self.last_ready_alert = 0
-        self.last_calc_time = 0
-        self.aiming_start_time = 0
-        self.aiming_start_price = 0
         
-        # 🔥 [V6.0 New] Regime Probability p (초기값 0.5 중립)
-        self.regime_p = 0.5
+        self.aiming_start_time = 0.0
+        self.aiming_start_price = 0.0
 
-    # ==============================================================================
-    # [Module 1] Scoring Engines (기존 엔진 유지)
-    # ==============================================================================
     def _calc_rebound_score(self, m):
         score = 0; reasons = []
-        if m.get('rsi', 50) < 30: score += 40; reasons.append(f"Oversold")
-        elif m.get('rsi', 50) < 40: score += 20
-        if m['squeeze_ratio'] <= 1.0: score += 30; reasons.append("Squeeze")
-        if m['vwap_dist'] < -1.0: score += 20; reasons.append("Cheap")
-        if m['vwap_dist'] < -0.5 and m['rvol'] > 1.5 and m['tick_accel'] > 0:
+        rsi = m.get('rsi', 50)
+        if rsi < 30: score += 40; reasons.append(f"Oversold")
+        elif rsi < 40: score += 20
+        if m.get('squeeze_ratio', 1.5) <= 1.0: score += 30; reasons.append("Squeeze")
+        if m.get('vwap_dist', 0) < -1.0: score += 20; reasons.append("Cheap")
+        if m.get('vwap_dist', 0) < -0.5 and m.get('rvol', 0) > 1.5 and m.get('tick_accel', 0) > 0:
             score += 10; reasons.append("DipRev")
         return max(score, 0), reasons
 
     def _calc_momentum_score(self, m):
         score = 0; reasons = []
-        if 50 <= m.get('rsi', 50) <= 80: score += 30; reasons.append("MomZone")
-        if m['squeeze_ratio'] > 2.0:
-            if m['tick_accel'] > 0 and m['rvol'] > 2.0: score += 40; reasons.append("Breakout")
+        rsi = m.get('rsi', 50)
+        if 50 <= rsi <= 80: score += 30; reasons.append("MomZone")
+        
+        if m.get('squeeze_ratio', 1.0) > 2.0:
+            if m.get('tick_accel', 0) > 0 and m.get('rvol', 0) > 2.0: score += 40; reasons.append("Breakout")
             else: score -= 10
-        if m['last_price'] > m['vwap']: score += 20; reasons.append("TrendUp")
-        if m['rvol'] > 3.0: score += 30; reasons.append("VolSpike")
-        elif m['rvol'] > 2.0: score += 15
+            
+        if m.get('last_price', 0) > m.get('vwap', 0): score += 20; reasons.append("TrendUp")
+        if m.get('rvol', 0) > 3.0: score += 30; reasons.append("VolSpike")
+        elif m.get('rvol', 0) > 2.0: score += 15
         return max(score, 0), reasons
 
-    # ==============================================================================
-    # [Module 2] Regime Probability Engine (회장님 지시 사항 구현)
-    # ==============================================================================
     def _calculate_regime_p(self, m):
-        """
-        0.0 (Rebound 장세) <-----> 1.0 (Momentum 장세)
-        """
         def clamp(x): return max(0.0, min(1.0, x))
         def sigmoid(x): return 1 / (1 + np.exp(-x))
-
+        
         try:
-            # 1) 지표 표준화 (0~1 Scaling)
-            p_speed = clamp((m['tick_speed'] - 2) / 6.0)
-            p_vwap = sigmoid(m['vwap_dist'])
+            w = self.CONFIG['weights']
+            p_speed = clamp((m.get('tick_speed', 0) - 2) / 6.0)
+            p_vwap = sigmoid(m.get('vwap_dist', 0))
             p_vol = clamp((m.get('vol_ratio', 1.0) - 0.8) / 0.7)
             p_hurst = clamp((m.get('hurst', 0.5) - 0.45) / 0.20)
-            p_rvol = clamp((m['rvol'] - 1.5) / 3.0)
-            p_squeeze = clamp((m['squeeze_ratio'] - 1.0) / 1.5)
+            p_rvol = clamp((m.get('rvol', 1.0) - 1.5) / 3.0)
+            p_squeeze = clamp((m.get('squeeze_ratio', 1.0) - 1.0) / 1.5)
 
-            # 2) 가중 평균 (Weighted Sum) - 논문 기반 최적 비율
             p_new = (
-                0.25 * p_speed +
-                0.20 * p_vwap +
-                0.20 * p_vol +
-                0.15 * p_hurst +
-                0.15 * p_rvol +
-                0.05 * p_squeeze
+                w['speed'] * p_speed + w['vwap'] * p_vwap + 
+                w['vol'] * p_vol + w['hurst'] * p_hurst + 
+                w['rvol'] * p_rvol + w['sqz'] * p_squeeze
             )
-            
-            # 3) 스무딩 (Smoothing)
             self.regime_p = (0.7 * self.regime_p) + (0.3 * p_new)
-            
             return clamp(self.regime_p)
+        except Exception:
+            return 0.5
 
-        except:
-            return 0.5 # 에러 시 중립
-
-    # ==============================================================================
-    # [Module 3] Adaptive Filtering
-    # ==============================================================================
     def _check_filters(self, m, strategy, final_score):
-        if m['spread'] > 1.2: return False, f"Spread({m['spread']:.2f}%)"
-        if m['tick_speed'] < 2: return False, "Dead Zone"
+        # 🔥 [V7.1 Hard Kill Filter] 유동성/호가 불량 종목 최종 차단
+        if m.get('spread', 0) > 1.2: return False, "Wide Spread"
+        if m.get('tick_speed', 0) < 2: return False, "Low Tick"
+        
+        # 1분 거래대금 100만불 미만 -> 탈락
+        if m.get('dollar_vol_1m', 0) < 1_000_000: return False, "Low Liquidity (1m)"
+        # 상위 5호가 총액 50만불 미만 -> 탈락
+        if m.get('top5_book_usd', 0) < 500_000: return False, "Thin Orderbook"
 
         if strategy == "REBOUND":
-            if m['vpin'] > 0.8: return False, f"High VPIN({m['vpin']:.2f})"
-            if m['rvol'] < 1.0: return False, "Low Vol"
-            
+            if m.get('vpin', 0) > 0.8: return False, "High VPIN"
+            if m.get('rvol', 0) < 1.0: return False, "Low Vol"
         elif strategy in ["MOMENTUM", "DIP_AND_RIP"]:
-            if m['vpin'] > 1.5: return False, f"Toxic({m['vpin']:.2f})"
-            if m['rvol'] < 2.5: return False, f"Weak Vol({m['rvol']:.1f})"
-                
+            if m.get('vpin', 0) > 1.5: return False, "Toxic Flow"
+            if m.get('rvol', 0) < 2.5: return False, "Weak Vol"
         return True, "PASS"
 
-    # ==============================================================================
-    # [Module 4] Main Logic (p-Value Blending & Integration)
-    # ==============================================================================
     def update_dashboard_db(self, tick_data, quote_data, agg_data):
-        # 1. [필수] 데이터 수집은 틱이 들어올 때마다 무조건 실행 (데이터 유실 방지)
         self.analyzer.update_tick(tick_data, quote_data)
-        if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
-        if self.vwap == 0: self.vwap = tick_data['p']
-
-        # 2. 여기서부터 무거운 연산 시작 (이제 0.5초마다 한 번만 실행됨)
-        m = self.analyzer.get_metrics()
         
-        if not m or m['tick_speed'] == 0: return 
+        if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
+        if self.vwap == 0 and tick_data.get('p'): self.vwap = tick_data['p']
+
+        m = self.analyzer.get_metrics()
+        if not m or m.get('tick_speed', 0) == 0: return 
+        
         if m.get('atr') and m['atr'] > 0: self.atr = m['atr']
-        else: self.atr = max(self.selector.get_atr(self.ticker), tick_data['p'] * 0.01)
+        else: self.atr = max(self.selector.get_atr(self.ticker), m['last_price'] * 0.01)
 
         # 1. AI Score
         ai_prob = 0.0
         if self.model:
             try:
-                features = [m['obi'], m['obi_mom'], m['tick_accel'], m['vpin'], m['vwap_dist'],
-                            m['fibo_pos'], abs(m['fibo_pos'] - 0.382), m['bb_width_norm'],
-                            1 if m['squeeze_ratio'] < 0.7 else 0, m['rv_60'], m['rvol']]
+                features = [
+                    m.get('obi', 0), m.get('obi_mom', 0), m.get('tick_accel', 0), m.get('vpin', 0), 
+                    m.get('vwap_dist', 0), m.get('fibo_pos', 0.5), abs(m.get('fibo_pos', 0.5) - 0.382), 
+                    m.get('bb_width_norm', 0), 1 if m.get('squeeze_ratio', 1) < 0.7 else 0, 
+                    m.get('rv_60', 0), m.get('rvol', 0)
+                ]
                 features = [0 if (np.isnan(x) or np.isinf(x)) else x for x in features]
                 dtest = xgb.DMatrix(np.array([features]), feature_names=['obi', 'obi_mom', 'tick_accel', 'vpin', 'vwap_dist','fibo_pos', 'fibo_dist_382', 'bb_width_norm', 'squeeze_flag', 'rv_60', 'vol_ratio_60'])
                 ai_prob = self.model.predict(dtest)[0]
@@ -957,107 +962,85 @@ class SniperBot:
                 ai_prob = sum(self.prob_history) / len(self.prob_history)
             except: pass
 
-        # 2. Dual Scoring
-        score_rebound, reasons_reb = self._calc_rebound_score(m)
-        score_momentum, reasons_mom = self._calc_momentum_score(m)
-        
-        # 🔥 [V6.0 CORE] Regime Probability p 계산
+        # 2. Strategy
+        score_reb, _ = self._calc_rebound_score(m)
+        score_mom, _ = self._calc_momentum_score(m)
         p = self._calculate_regime_p(m)
         
-        # 🔥 [Dynamic Blending] p값에 따라 비중 조절
-        quant_score = (score_momentum * p) + (score_rebound * (1 - p))
-        
+        quant_score = (score_mom * p) + (score_reb * (1 - p))
         strategy = "WATCHING"
-        active_reasons = []
+        if p > 0.7: strategy = "MOMENTUM"
+        elif p < 0.3: strategy = "REBOUND"
+        else: strategy = "DIP_AND_RIP" if (score_reb > 50 and score_mom > 50) else "MOMENTUM"
 
-        # 전략 태그 및 로그 결정
-        if p > 0.7: 
-            strategy = "MOMENTUM"
-            active_reasons = reasons_mom + [f"Regime:Trend({p:.2f})"]
-        elif p < 0.3: 
-            strategy = "REBOUND"
-            active_reasons = reasons_reb + [f"Regime:Dip({p:.2f})"]
-        else: 
-            if score_rebound > 50 and score_momentum > 50:
-                strategy = "DIP_AND_RIP"
-                quant_score = (score_rebound + score_momentum) * 0.6 
-            elif score_rebound > score_momentum:
-                strategy = "REBOUND"
-                active_reasons = reasons_reb
-            else:
-                strategy = "MOMENTUM"
-                active_reasons = reasons_mom
-
-        # 최종 점수 (AI 4 : Quant 6)
         final_score = (ai_prob * 100 * 0.4) + (quant_score * 0.6)
-
-        # 3. Filtering
-        is_pass, filter_msg = self._check_filters(m, strategy, final_score)
+        is_pass, _ = self._check_filters(m, strategy, final_score)
         
-        # Warm-up 예외
         if len(self.analyzer.raw_ticks) < 50:
-            if m['rvol'] > 5.0:
-                final_score = max(final_score, 80)
-                is_pass = True
-                active_reasons.append("Early Pump Bypass")
-            else:
-                final_score = 0; is_pass = False; self.state = "WARM_UP"
+            if m.get('rvol', 0) > 5.0: is_pass = True 
+            else: final_score = 0; is_pass = False; self.state = "WARM_UP"
 
         display_score = final_score if is_pass else 0
 
-        # 4. Notification
+        # 3. Notification
         if final_score >= 65 and is_pass and self.state != "FIRED":
             if (time.time() - self.last_ready_alert) > 180:
                 self.last_ready_alert = time.time()
                 asyncio.create_task(send_fcm_notification(self.ticker, m['last_price'], int(final_score)))
 
-        # 5. DB Update
+        # 4. DB Update
         now = time.time()
         if (self.state != self.last_logged_state) or (now - self.last_db_update > 1.5):
-            try:
-                metrics_copy = copy.deepcopy(m) 
-                metrics_copy['regime_p'] = p
-                asyncio.get_running_loop().run_in_executor(
-                    DB_WORKER_POOL, 
-                    partial(update_dashboard_db, self.ticker, metrics_copy, display_score, self.state)
-                )
-            except: pass
+            metrics_copy = copy.deepcopy(m)
+            metrics_copy['regime_p'] = p
+            asyncio.get_running_loop().run_in_executor(
+                DB_WORKER_POOL, 
+                partial(update_dashboard_db, self.ticker, metrics_copy, display_score, self.state)
+            )
             self.last_db_update = now
             self.last_logged_state = self.state
-
+            
         self.logger.log_replay({
             'timestamp': m['timestamp'], 'ticker': self.ticker, 'price': m['last_price'], 
             'vwap': self.vwap, 'atr': self.atr, 'obi': m['obi'], 
-            'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': ai_prob, 'regime_p': p
+            'tick_speed': m['tick_speed'], 'vpin': m['vpin'], 'ai_prob': ai_prob, 'regime_p': p,
+            'ofi': m.get('ofi', 0), 'weighted_obi': m.get('weighted_obi', 0)
         })
 
-        # 6. Execution
+        # 5. Zero-Latency Execution
+        thresh = self.CONFIG['thresh']
+
         if self.state == "WATCHING":
-            if final_score >= 60 and is_pass and m['tick_accel'] > 0:
+            if final_score >= 60 and is_pass and m.get('tick_accel', 0) > 0:
                 self.state = "AIMING"
-
-        elif self.state == "AIMING":
-            if final_score >= 80 and is_pass:
-                 print(f"⚡ [FAST-TRACK] {self.ticker} ({strategy}) Score:{final_score:.1f}")
-                 self.fire(m['last_price'], ai_prob, m, strategy=strategy)
-                 return
-
-            if self.aiming_start_time == 0:
                 self.aiming_start_time = time.time()
                 self.aiming_start_price = m['last_price']
-                return 
+                print(f"👀 [AIM] {self.ticker} Start Aiming...", flush=True)
+
+        elif self.state == "AIMING":
+            # 🔥 [V7.1 Strict Fast-Track] 고득점 과신 금지
+            # 점수가 높아도 OFI(체결강도)와 OBI(호가)가 뒷받침되어야 즉시 발사
+            if final_score >= thresh['fast_track'] and is_pass:
+                 if m.get('ofi', 0) > 0 and m.get('weighted_obi', 0) > 0.4 and m.get('spread', 100) < 0.6:
+                     print(f"⚡ [FAST] {self.ticker} Verified Trigger!", flush=True)
+                     self.fire(m['last_price'], ai_prob, m, strategy=strategy)
+                     return
+
+            # Micro-Confirmation
+            price_change_pct = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
+            
+            if final_score >= thresh['entry'] and is_pass:
+                if price_change_pct >= 0 or (price_change_pct > -0.05 and m.get('obi', 0) > 0.3):
+                    self.fire(m['last_price'], ai_prob, m, strategy=strategy)
+                    return
 
             elapsed = time.time() - self.aiming_start_time
-            if elapsed >= 0.5:
-                price_drop = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
-                if final_score >= 70 and is_pass and price_drop > -0.2: 
-                    self.fire(m['last_price'], ai_prob, m, strategy=strategy)
-                else:
-                    self.state = "WATCHING"
-                    self.aiming_start_time = 0
+            if elapsed > thresh['confirm_window'] or price_change_pct < thresh['max_slip']:
+                self.state = "WATCHING"
+                self.aiming_start_time = 0
 
         elif self.state == "FIRED":
-            self.manage_position(m['last_price'])
+            self.manage_position(m, m['last_price']) # m 전체 전달
     
     async def warmup(self):
         print(f"🔥 [Warmup] Fetching history for {self.ticker}...", flush=True)
@@ -1066,94 +1049,87 @@ class SniperBot:
             from_ts = to_ts - (180 * 1000) 
             url = f"https://api.polygon.io/v2/aggs/ticker/{self.ticker}/range/1/second/{from_ts}/{to_ts}"
             params = {"adjusted": "true", "sort": "asc", "limit": 500, "apiKey": POLYGON_API_KEY}
-            
-            # [핵심 수정] asyncio.run() 대신 httpx.AsyncClient 사용 (올바른 비동기 호출)
             async with httpx.AsyncClient() as client:
                 resp = await client.get(url, params=params, timeout=5.0)
                 if resp.status_code == 200:
                     data = resp.json()
-                    if 'results' in data and data['results']:
-                        self.analyzer.inject_history(data['results'])
-                        print(f"✅ [Warmup] {self.ticker} Ready! ({len(data['results'])} bars)", flush=True)
-                    else: 
-                        print(f"⚠️ [Warmup] No data for {self.ticker}", flush=True)
-                else: 
-                    print(f"❌ [Warmup] API Error: {resp.status_code}", flush=True)
+                    if 'results' in data: self.analyzer.inject_history(data['results'])
+                    print(f"✅ [Warmup] {self.ticker} Ready!", flush=True)
         except Exception as e: 
             print(f"❌ [Warmup] Failed: {e}", flush=True)
 
-    # ==============================================================================
-    # [Module 5] Dynamic Execution (동적 청산)
-    # ==============================================================================
     def fire(self, price, prob, metrics, strategy="MOMENTUM"):
-        print(f"🔫 [FIRE] {self.ticker} ({strategy}) AI:{prob:.2f} Price:${price:.4f}", flush=True)
+        print(f"🔫 [FIRE] {self.ticker} ({strategy}) AI:{prob:.2f}", flush=True)
         self.state = "FIRED"
         
-        if strategy == "REBOUND":
-            tp_mult = 1.0; sl_mult = 0.8; desc = "Tight Stop"
-        elif strategy == "MOMENTUM":
-            tp_mult = 3.0; sl_mult = 1.5; desc = "Trend Follow"
-        elif strategy == "DIP_AND_RIP":
-            tp_mult = 2.5; sl_mult = 1.2; desc = "Hybrid V-Shape"
-        else:
-            tp_mult = 1.5; sl_mult = 1.0; desc = "Default"
-
+        tp_mult = 3.0 if strategy == "MOMENTUM" else 1.0
+        sl_mult = 1.5 if strategy == "MOMENTUM" else 0.8
         volatility = max(self.atr, price * 0.005)
         tp_price = price + (volatility * tp_mult)
         sl_price = price - (volatility * sl_mult)
 
         self.position = {
-            'entry': price, 'high': price,
-            'sl': sl_price, 'tp': tp_price,
+            'entry': price, 'high': price, 'sl': sl_price, 'tp': tp_price,
             'atr': self.atr, 'strategy': strategy
         }
         
-        try:
-            loop = asyncio.get_running_loop()
-            loop.run_in_executor(
-                DB_WORKER_POOL, 
-                partial(log_signal_to_db, 
-                        self.ticker, price, prob*100, 
-                        entry=price, tp=tp_price, sl=sl_price, strategy=f"{strategy} ({desc})")
-            )
-        except Exception as e: print(f"⚠️ [DB Async Error] {e}")
+        asyncio.get_running_loop().run_in_executor(
+            DB_WORKER_POOL, 
+            partial(log_signal_to_db, self.ticker, price, prob*100, 
+                    entry=price, tp=tp_price, sl=sl_price, strategy=strategy)
+        )
         
         asyncio.create_task(send_fcm_notification(
-            self.ticker, price, int(prob*100), 
-            entry=price, tp=tp_price, sl=sl_price
+            self.ticker, price, int(prob*100), entry=price, tp=tp_price, sl=sl_price
         ))
         
         self.logger.log_trade({
             'ticker': self.ticker, 'action': 'ENTRY', 'price': price, 'ai_prob': prob,
-            'obi': metrics['obi'], 'obi_mom': metrics['obi_mom'],
-            'tick_accel': metrics['tick_accel'], 'vpin': metrics['vpin'], 
-            'vwap_dist': metrics['vwap_dist'], 'profit': 0
+            'obi': metrics.get('obi', 0), 'obi_mom': metrics.get('obi_mom', 0),
+            'tick_accel': metrics.get('tick_accel', 0), 'vpin': metrics.get('vpin', 0), 
+            'vwap_dist': metrics.get('vwap_dist', 0), 'profit': 0
         })
 
-    def manage_position(self, curr_price):
+    def manage_position(self, metrics, curr_price):
         pos = self.position
+        if not pos: return 
+
+        # 🔥 [V7.1 Emergency Exit] 시장 미시구조 악화 시 긴급 탈출
+        # 1. VPIN(주문 독성)이 너무 높으면 -> 세력 이탈 가능성 -> 즉시 매도
+        if metrics.get('vpin', 0) > 1.2:
+            print(f"🚨 [EMERGENCY] {self.ticker} High VPIN ({metrics['vpin']:.2f})", flush=True)
+            self._close_position(curr_price, "VPIN Alert")
+            return
+
+        # 2. OFI(주문 흐름)가 음수이고 가속도가 꺾이면 -> 힘 빠짐 -> Scale Out (전량 매도)
+        if metrics.get('ofi', 0) < 0 and metrics.get('tick_accel', 0) < -1:
+            if curr_price > pos['entry']:
+                print(f"📉 [WEAK] {self.ticker} OFI Negative - Securing Profit", flush=True)
+                self._close_position(curr_price, "Flow Weakness")
+                return
+
+        # 기존 Trailing Stop
         if curr_price > pos['high']: pos['high'] = curr_price
-            
-        trail_mult = ATR_TRAIL_MULT
-        if pos.get('strategy') == "MOMENTUM":
-            trail_mult = 2.0 
-            
-        exit_price = pos['high'] - (pos['atr'] * trail_mult)
         
-        is_tp_hit = (curr_price >= pos['tp']) and (pos.get('strategy') == "REBOUND")
-        is_stop_hit = (curr_price < max(exit_price, pos['sl']))
+        trail = 2.0 if pos.get('strategy') == "MOMENTUM" else ATR_TRAIL_MULT
+        exit_price = pos['high'] - (pos['atr'] * trail)
         
-        if is_tp_hit or is_stop_hit:
-            profit_pct = (curr_price - pos['entry']) / pos['entry'] * 100
-            print(f"💰 [청산] {self.ticker} ({pos.get('strategy')}) Profit: {profit_pct:.2f}%", flush=True)
-            self.state = "WATCHING"
-            self.position = {}
-            self.logger.log_trade({
-                'ticker': self.ticker, 'action': 'EXIT', 'price': curr_price,
-                'ai_prob': 0, 'obi': 0, 'obi_mom': 0, 'tick_accel': 0, 'vpin': 0,
-                'vwap_dist': 0, 'profit': profit_pct
-            })
-# ==============================================================================
+        is_tp = (curr_price >= pos['tp']) and (pos.get('strategy') == "REBOUND")
+        is_sl = (curr_price < max(exit_price, pos['sl']))
+        
+        if is_tp or is_sl:
+            self._close_position(curr_price, "TP/SL Hit")
+
+    def _close_position(self, curr_price, reason):
+        profit = (curr_price - self.position['entry']) / self.position['entry'] * 100
+        print(f"💰 [EXIT] {self.ticker} ({reason}) Profit: {profit:.2f}%", flush=True)
+        self.state = "WATCHING"
+        self.position = {}
+        self.logger.log_trade({
+            'ticker': self.ticker, 'action': 'EXIT', 'price': curr_price, 'profit': profit,
+            'ai_prob': 0, 'obi': 0, 'obi_mom': 0, 'tick_accel': 0, 'vpin': 0, 'vwap_dist': 0
+        })
+#=============================================================================
 # 4. PIPELINE MANAGER
 # ==============================================================================
 class STSPipeline:

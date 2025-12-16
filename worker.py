@@ -148,6 +148,20 @@ def process_fcm_job():
     except Exception as e:
         print(f"❌ [Worker FCM Error] {e}", flush=True)
 
+        # [여기에 붙여넣기]
+# 🔥 알림만 전담하는 독립적인 비동기 루프 (새로 추가됨)
+async def fcm_consumer_loop():
+    print("📨 [FCM Worker] Started independent notification loop", flush=True)
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            # 0.1초마다 큐 확인 (메인 시세 처리와 상관없이 독립적으로 실행됨)
+            await loop.run_in_executor(REDIS_POOL, process_fcm_job)
+            await asyncio.sleep(0.1) 
+        except Exception as e:
+            print(f"❌ [FCM Loop Error] {e}", flush=True)
+            await asyncio.sleep(1)
+
 
 # 메인 루프를 비동기 함수로 변경
 async def redis_consumer():
@@ -172,6 +186,7 @@ async def redis_consumer():
     bot_attach_times = {}
 
     print("🧠 [Worker] Ready. Listening to 'ticker_stream' & 'fcm_queue'...", flush=True)
+    asyncio.create_task(fcm_consumer_loop())
 
     # 현재 실행 중인 루프 가져오기
     loop = asyncio.get_running_loop()
@@ -215,14 +230,6 @@ async def redis_consumer():
                             last_quotes.get(t, {'bids':[],'asks':[]}), 
                             last_agg.get(t)
                         )
-
-            # =========================================================
-            # 2. 🔥 [추가] 알림 큐 처리 (우체통 확인)
-            # =========================================================
-            await loop.run_in_executor(
-                REDIS_POOL,
-                process_fcm_job
-            )
 
             # =========================================================
             # 3. Manager 로직 (종목 관리)

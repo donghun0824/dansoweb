@@ -147,6 +147,32 @@ def compute_stochastic_series(highs, lows, closes, k_period=14):
     k = 100 * ((closes - low_min) / (high_max - low_min + 1e-9))
     return k.fillna(50)
 
+# [V6.1 NEW] 엔진 업데이트로 추가된 필수 지표들
+
+def compute_volatility_ratio(series, short_win=20, long_win=120):
+    """
+    [V6.1] 단기/장기 변동성 비율 (Vol Ratio)
+    - 엔진의 df['vol_ratio'] 계산 로직과 동일
+    """
+    short_vol = series.pct_change().rolling(short_win).std()
+    long_vol = series.pct_change().rolling(long_win).std()
+    
+    # 0으로 나누기 방지
+    ratio = short_vol / (long_vol + 1e-9)
+    return ratio.fillna(1.0)
+
+def compute_efficiency_ratio(series, window=20):
+    """
+    [V6.1] 효율성 지수 (Efficiency Ratio)
+    - 엔진의 df['hurst'] 계산을 위한 기초 값
+    - (순수 이동 거리 / 전체 이동 경로)
+    """
+    change = series.diff(window).abs()
+    path = series.diff().abs().rolling(window).sum()
+    
+    er = change / (path + 1e-9)
+    return er.fillna(0.5)
+
 
 # =============================================================================
 # PART 2. Live Bot Functions (Numpy 기반 - 실시간 봇용)
