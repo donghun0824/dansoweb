@@ -25,7 +25,7 @@ import pytz
 # 커스텀 지표 모듈 임포트
 import indicators_sts as ind 
 import sys
-sys.setrecursionlimit(2000)  # [수정] 기본값(1000)을 2000으로 상향 조정
+sys.setrecursionlimit(10000) # [수정] 기본값(1000)을 2000으로 상향 조정
 
 # ==============================================================================
 # 1. CONFIGURATION & CONSTANTS
@@ -723,7 +723,11 @@ class TargetSelector:
         print("🌍 [Selector] Fetching Market Snapshot (Recovering Data)...", flush=True)
         try:
             url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey={self.api_key}"
-            resp = requests.get(url, timeout=10)
+            
+            # 🔥 [수정] requests 대신 httpx 사용 (재귀 에러 해결의 핵심)
+            # httpx는 이미 코드 상단에 import 되어 있으니 바로 쓰시면 됩니다.
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.get(url)
             
             if resp.status_code == 200:
                 data = resp.json()
