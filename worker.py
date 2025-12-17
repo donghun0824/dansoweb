@@ -8,14 +8,18 @@ import asyncio
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 import firebase_admin
-from firebase_admin import credentials, messaging # [수정] messaging 모듈 추가
-
-# [필수] DB 설정 가져오기
-from app import init_db, get_db_connection # [수정] get_db_connection 추가 (토큰 조회용)
+from firebase_admin import credentials, messaging
 
 try:
-    # 우리가 수정한 STS_Engine에서 필요한 클래스와 변수들 가져오기
-    from STS_Engine import STSPipeline, STS_TARGET_COUNT, SniperBot, DB_WORKER_POOL
+    # ✅ [수정] STS_Engine에서 DB 관련 함수(init_db, get_db_connection)까지 모두 가져옵니다.
+    from STS_Engine import (
+        STSPipeline, 
+        STS_TARGET_COUNT, 
+        SniperBot, 
+        DB_WORKER_POOL, 
+        init_db,             # 추가됨
+        get_db_connection    # 추가됨
+    )
 except ImportError:
     print("❌ [Worker Error] 'STS_Engine.py'를 찾을 수 없습니다. 경로를 확인하세요.")
     sys.exit(1)
@@ -181,7 +185,7 @@ async def redis_consumer():
     pipeline = STSPipeline()
     
     print("✅ [System] Snapshot Loaded & Pipeline Ready.", flush=True)
-    
+
     # 로컬 데이터 저장소
     last_agg = {}
     last_quotes = {}

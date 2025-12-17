@@ -112,7 +112,7 @@ def get_sts_status():
                 obi, vpin, tick_speed, vwap_dist,
                 obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread,
                 -- ▼▼▼ 여기 4개 컬럼을 추가했습니다 ▼▼▼
-                rsi, stoch_k, fibo_pos, obi_rev
+                rsi, stoch_k, fibo_pos, obi_rev,
                 vol_ratio, hurst  -- 🔥 [NEW] 추가됨
             FROM sts_live_targets
             WHERE last_updated > NOW() - INTERVAL '1 minute'

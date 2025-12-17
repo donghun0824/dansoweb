@@ -5,7 +5,6 @@ import json
 import os
 import time
 import redis.asyncio as redis
-import requests
 import numpy as np
 import pandas as pd
 import csv
@@ -25,10 +24,10 @@ import pytz
 # 커스텀 지표 모듈 임포트
 import indicators_sts as ind 
 import sys
-sys.setrecursionlimit(10000) # [수정] 기본값(1000)을 2000으로 상향 조정
+sys.setrecursionlimit(1000)
 
 # ==============================================================================
-# 1. CONFIGURATION & CONSTANTS
+# 1. CONFIGURATION & CONSTANTS (Refactored)
 # ==============================================================================
 POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -38,21 +37,27 @@ WS_URI = "wss://socket.polygon.io/stocks"
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
 r = redis.from_url(REDIS_URL)
 
-# 전략 설정
-STS_TARGET_COUNT = 3
-STS_MIN_VOLUME_DOLLAR = 1e6
-STS_MAX_SPREAD_PCT = 1.0      
-STS_MAX_VPIN = 0.80         # [V5.3] 필터 완화 (0.55 -> 0.65)
-OBI_LEVELS = 20               # [V5.3] 오더북 깊이 확장 (5 -> 20)
+# [A] 스캐너 설정 (Target Selector) - 종목 발굴 기준
+STS_SCAN_MIN_DOLLAR_VOL = 5_000_000  # 최소 거래대금 (500만불)
+STS_SCAN_MIN_PRICE = 1.0            # 최소 주가 (1.0불 - 잡주 차단)
+STS_SCAN_MAX_PRICE = 100          # 최대 주가 (100불)
+STS_SCAN_MIN_CHANGE = 1.5            # 최소 등락률 (1.5%)
+STS_TARGET_COUNT = 3                 # 최종 감시할 종목 수
 
-# 후보 선정(Target Selector) 필터 기준
-STS_MIN_DOLLAR_VOL = 2_000_000 
-STS_MAX_PRICE = 100        
-STS_MIN_CHANGE = 1.5             # [추가] 최소 등락률 1.5%
-STS_MIN_RVOL = 3.0           # (SniperBot 단계) 최소 상대 거래량
-STS_MAX_SPREAD_ENTRY = 0.9   # (SniperBot 단계) 진입 허용 스프레드
+# [B] 스나이퍼 봇 설정 (SniperBot) - 진입 필터 (Hard Kill)
+STS_BOT_MAX_SPREAD = 1.2             # 허용 스프레드 (1.2% 초과시 진입 금지)
+STS_BOT_MIN_TICK_SPEED = 2           # 최소 체결 속도 (초당 2건 이상)
+STS_BOT_MIN_LIQUIDITY_1M = 1_000_000 # 1분 최소 거래대금 (100만불)
+STS_BOT_MIN_BOOK_USD = 500_000       # 호가창 최소 잔량 (50만불)
 
-# AI & Risk Params
+# [C] 전략별 세부 임계값 (Sensitivity)
+STS_VPIN_LIMIT_REBOUND = 0.8         # 리바운드 전략 VPIN 한계
+STS_VPIN_LIMIT_MOMENTUM = 1.5        # 모멘텀 전략 VPIN 한계 (더 관대함)
+STS_RVOL_MIN_REBOUND = 1.0           # 리바운드 최소 RVOL
+STS_RVOL_MIN_MOMENTUM = 2.5          # 모멘텀 최소 RVOL (폭발적 거래량 필요)
+
+# [D] 시스템 설정
+OBI_LEVELS = 20               # 오더북 깊이
 MODEL_FILE = "sts_xgboost_model.json"
 AI_PROB_THRESHOLD = 0.85      
 ATR_TRAIL_MULT = 1.5        
@@ -63,17 +68,12 @@ TRADE_LOG_FILE = "sts_trade_log_v5.csv"
 REPLAY_LOG_FILE = "sts_replay_data_v5.csv"
 
 # System Optimization
-DB_UPDATE_INTERVAL = 3.0      # 3초
+DB_UPDATE_INTERVAL = 3.0
 GC_INTERVAL = 300             
 GC_TTL = 600                  
 
-# [변경] 기존 단일 풀(max=3)을 폐기하고 용도별로 분리
-# DB 작업용 (빠르고 빈번함) -> 10개 레인
 DB_WORKER_POOL = ThreadPoolExecutor(max_workers=10) 
-# 알림 발송용 (느리고 가끔 발생) -> 5개 레인
 NOTI_WORKER_POOL = ThreadPoolExecutor(max_workers=5)
-
-# Global DB Pool
 db_pool = None
 
 # ==============================================================================
@@ -837,24 +837,37 @@ class TargetSelector:
         for t, d in self.snapshots.items():
             if now - d['last_updated'] > 60: continue 
             
-            # 1. 가격 & 유동성 필터
-            if d['c'] < 2.0 or d['c'] > STS_MAX_PRICE: continue
+            # 🔥 [Refactor] 상단 상수(STS_SCAN_*) 적용으로 일원화
             
+            # 1. 가격 필터 (잡주 차단)
+            # 기존: 2.0 (하드코딩) -> 변경: STS_SCAN_MIN_PRICE (설정값 5.0)
+            if d['c'] < STS_SCAN_MIN_PRICE or d['c'] > STS_SCAN_MAX_PRICE: continue
+            
+            # 2. 유동성 필터 (최소 거래대금)
             dollar_vol = d['c'] * d['v']
-            if dollar_vol < STS_MIN_DOLLAR_VOL: continue 
+            # 기존: STS_MIN_DOLLAR_VOL -> 변경: STS_SCAN_MIN_DOLLAR_VOL
+            if dollar_vol < STS_SCAN_MIN_DOLLAR_VOL: continue 
 
-            # 2. 변동성 필터
+            # 3. 변동성 필터 (최소 등락률)
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
-            if change_pct < STS_MIN_CHANGE: continue 
+            # 기존: STS_MIN_CHANGE -> 변경: STS_SCAN_MIN_CHANGE
+            if change_pct < STS_SCAN_MIN_CHANGE: continue 
 
-            # 3. Fake Pump 방지
-            required_vol = STS_MIN_DOLLAR_VOL * (1 + (change_pct * 0.2))
+            # 4. Fake Pump 방지 (급등할수록 더 많은 거래량 요구)
+            required_vol = STS_SCAN_MIN_DOLLAR_VOL * (1 + (change_pct * 0.1))
             if dollar_vol < required_vol: continue
 
-            # 4. 점수 산정
+            # 🔥 [핵심 수정] 점수 거품 제거
+            # 기존: change_pct * 2 (30% 오르면 60점 먹고 들어감 -> 잡주 1등 원인)
+            # 변경: change_pct * 0.5 (30% 올라도 15점만 인정 -> 나머지는 유동성으로 증명해야 함)
             liquidity_score = np.log10(dollar_vol) * 10  
-            momentum_score = change_pct * 2
-            score = (momentum_score * 0.4) + (liquidity_score * 0.6)
+            momentum_score = change_pct * 0.5 
+            
+            # 유동성 점수 비중을 70%로 높여서 '돈 많은 종목' 우대
+            score = (momentum_score * 0.3) + (liquidity_score * 0.7)
+            
+            # 100점 초과 방지
+            score = min(score, 99)
             
             scored.append((t, score, change_pct, dollar_vol))
         
@@ -973,21 +986,35 @@ class SniperBot:
             return 0.5
 
     def _check_filters(self, m, strategy, final_score):
-        # 🔥 [V7.1 Hard Kill Filter] 유동성/호가 불량 종목 최종 차단
-        if m.get('spread', 0) > 1.2: return False, "Wide Spread"
-        if m.get('tick_speed', 0) < 2: return False, "Low Tick"
+        # 🔥 [Refactor] 하드코딩 제거 -> 상단 상수(STS_*) 사용으로 통일
         
-        # 1분 거래대금 100만불 미만 -> 탈락
-        if m.get('dollar_vol_1m', 0) < 1_000_000: return False, "Low Liquidity (1m)"
-        # 상위 5호가 총액 50만불 미만 -> 탈락
-        if m.get('top5_book_usd', 0) < 500_000: return False, "Thin Orderbook"
+        # 1. 스프레드 체크 (설정값: 1.2%)
+        if m.get('spread', 0) > STS_BOT_MAX_SPREAD: 
+            return False, f"Wide Spread ({m.get('spread',0):.2f}%)"
+        
+        # 2. 틱 속도 체크 (설정값: 2)
+        if m.get('tick_speed', 0) < STS_BOT_MIN_TICK_SPEED: 
+            return False, "Low Tick Speed"
+        
+        # 3. 유동성 체크 (설정값: 100만불)
+        if m.get('dollar_vol_1m', 0) < STS_BOT_MIN_LIQUIDITY_1M: 
+            return False, "Low Liquidity (1m)"
+            
+        # 4. 호가창 두께 체크 (설정값: 50만불)
+        if m.get('top5_book_usd', 0) < STS_BOT_MIN_BOOK_USD: 
+            return False, "Thin Orderbook"
 
+        # 5. 전략별 상세 필터
         if strategy == "REBOUND":
-            if m.get('vpin', 0) > 0.8: return False, "High VPIN"
-            if m.get('rvol', 0) < 1.0: return False, "Low Vol"
+            if m.get('vpin', 0) > STS_VPIN_LIMIT_REBOUND: return False, "High VPIN (Rebound)"
+            if m.get('rvol', 0) < STS_RVOL_MIN_REBOUND: return False, "Low Vol (Rebound)"
+            
         elif strategy in ["MOMENTUM", "DIP_AND_RIP"]:
-            if m.get('vpin', 0) > 1.5: return False, "Toxic Flow"
-            if m.get('rvol', 0) < 2.5: return False, "Weak Vol"
+            # 모멘텀은 VPIN이 높아도(매수세가 강해도) 허용폭이 큼
+            if m.get('vpin', 0) > STS_VPIN_LIMIT_MOMENTUM: return False, "Toxic Flow (Momentum)"
+            # 모멘텀은 폭발적인 거래량이 필수
+            if m.get('rvol', 0) < STS_RVOL_MIN_MOMENTUM: return False, "Weak Vol (Momentum)"
+            
         return True, "PASS"
 
     def update_dashboard_db(self, tick_data, quote_data, agg_data):
@@ -1191,7 +1218,6 @@ class SniperBot:
 # ==============================================================================
 class STSPipeline:
     def __init__(self):
-        self.selector = TargetSelector()
         self.snipers = {}       
         self.candidates = []    
         self.last_quotes = {}
