@@ -51,10 +51,10 @@ STS_BOT_MIN_LIQUIDITY_1M = 1_000_000 # 1분 최소 거래대금 (100만불)
 STS_BOT_MIN_BOOK_USD = 500_000       # 호가창 최소 잔량 (50만불)
 
 # [C] 전략별 세부 임계값 (Sensitivity)
-STS_VPIN_LIMIT_REBOUND = 0.8         # 리바운드 전략 VPIN 한계
-STS_VPIN_LIMIT_MOMENTUM = 1.5        # 모멘텀 전략 VPIN 한계 (더 관대함)
+STS_VPIN_LIMIT_REBOUND = 0.9         # 리바운드 전략 VPIN 한계
+STS_VPIN_LIMIT_MOMENTUM = 2.0        # 모멘텀 전략 VPIN 한계 (더 관대함)
 STS_RVOL_MIN_REBOUND = 1.0           # 리바운드 최소 RVOL
-STS_RVOL_MIN_MOMENTUM = 2.5          # 모멘텀 최소 RVOL (폭발적 거래량 필요)
+STS_RVOL_MIN_MOMENTUM = 2.0          # 모멘텀 최소 RVOL (폭발적 거래량 필요)
 
 # [D] 시스템 설정
 OBI_LEVELS = 20               # 오더북 깊이
@@ -69,8 +69,8 @@ REPLAY_LOG_FILE = "sts_replay_data_v5.csv"
 
 # System Optimization
 DB_UPDATE_INTERVAL = 3.0
-GC_INTERVAL = 300             
-GC_TTL = 600                  
+GC_INTERVAL = 60             
+GC_TTL = 300                  
 
 DB_WORKER_POOL = ThreadPoolExecutor(max_workers=10) 
 NOTI_WORKER_POOL = ThreadPoolExecutor(max_workers=5)
@@ -888,11 +888,47 @@ class TargetSelector:
         return [x[0] for x in scored[:limit]]
 
     def garbage_collect(self):
+        """
+        메모리와 DB에서 오래된 데이터를 주기적으로 삭제합니다.
+        """
         now = time.time()
+        # GC 주기가 안 되었으면 패스
         if now - self.last_gc_time < GC_INTERVAL: return
+        
+        # 1. [메모리 청소] 오랫동안 업데이트 없는 스냅샷 제거
         to_remove = [t for t, d in self.snapshots.items() if now - d['last_updated'] > GC_TTL]
-        for t in to_remove: del self.snapshots[t]
+        for t in to_remove: 
+            del self.snapshots[t]
+            
+        # 2. [DB 청소] 🔥 여기가 핵심! (죽은 데이터 즉시 삭제)
+        # 갱신이 멈춘 'SCANNING' 상태의 종목을 DB에서 날려버려서 웹페이지에서 사라지게 함
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # "마지막 업데이트가 1분(60초) 이상 지난 스캔 종목은 삭제하라"
+            query = """
+                DELETE FROM sts_live_targets 
+                WHERE status = 'SCANNING' 
+                AND last_updated < NOW() - INTERVAL '1 minute';
+            """
+            cursor.execute(query)
+            conn.commit()
+            
+            # 삭제된 게 있으면 로그 출력
+            if cursor.rowcount > 0:
+                print(f"🧹 [GC] Cleaned up {cursor.rowcount} stale targets from DB.", flush=True)
+                
+            cursor.close()
+        except Exception as e:
+            print(f"⚠️ [GC Error] DB Cleanup failed: {e}", flush=True)
+            if conn: conn.rollback()
+        finally:
+            if conn: db_pool.putconn(conn)
+            
         self.last_gc_time = now
+
 # [V7.1] SniperBot (Hard Kill Filter, Strict Fast-Track, Emergency Exit 적용)
 class SniperBot:
     def __init__(self, ticker, logger, selector, model_bytes):
@@ -906,9 +942,9 @@ class SniperBot:
                 'hurst': 0.15, 'rvol': 0.15, 'sqz': 0.05
             },
             'thresh': {
-                'fast_track': 85,      
-                'entry': 70,           
-                'confirm_window': 0.2, 
+                'fast_track': 80,      
+                'entry': 60,           
+                'confirm_window': 1.0, 
                 'max_slip': -0.1       
             }
         }
@@ -1067,7 +1103,7 @@ class SniperBot:
         display_score = final_score if is_pass else 0
 
         # 3. Notification
-        if final_score >= 65 and is_pass and self.state != "FIRED":
+        if final_score >= 60 and is_pass and self.state != "FIRED":
             if (time.time() - self.last_ready_alert) > 180:
                 self.last_ready_alert = time.time()
                 asyncio.create_task(send_fcm_notification(self.ticker, m['last_price'], int(final_score)))
@@ -1095,7 +1131,7 @@ class SniperBot:
         thresh = self.CONFIG['thresh']
 
         if self.state == "WATCHING":
-            if final_score >= 60 and is_pass and m.get('tick_accel', 0) > 0:
+            if final_score >= 60 and is_pass:
                 self.state = "AIMING"
                 self.aiming_start_time = time.time()
                 self.aiming_start_price = m['last_price']
@@ -1114,7 +1150,7 @@ class SniperBot:
             price_change_pct = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
             
             if final_score >= thresh['entry'] and is_pass:
-                if price_change_pct >= 0 or (price_change_pct > -0.05 and m.get('obi', 0) > 0.3):
+                if price_change_pct > -0.02 or m.get('obi', 0) > 0.2:
                     self.fire(m['last_price'], ai_prob, m, strategy=strategy)
                     return
 

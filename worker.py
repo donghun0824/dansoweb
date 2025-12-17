@@ -176,16 +176,23 @@ async def redis_consumer():
     print("🧠 [Worker] Starting Logic Engine (Async Redis Mode)...", flush=True)
     
     # DB 및 Firebase 초기화
+    # (반드시 STS_Engine에서 가져온 init_db여야 함)
     init_db()
     init_firebase_worker()
 
-    print("⏳ [System] Initializing Pipeline & Fetching Market Snapshot...", flush=True)
+    print("⏳ [System] Initializing Pipeline...", flush=True)
     
-    # 파이프라인 생성
+    # 파이프라인 생성 (여기서 TargetSelector가 스냅샷 로딩 시도)
     pipeline = STSPipeline()
     
-    print("✅ [System] Snapshot Loaded & Pipeline Ready.", flush=True)
-
+    # 🔥 [수정] 스냅샷이 진짜로 로드됐는지 확인하는 로직 추가
+    snapshot_count = len(pipeline.selector.snapshots)
+    if snapshot_count > 0:
+        print(f"✅ [System] Snapshot Loaded Successfully! ({snapshot_count} tickers ready)", flush=True)
+    else:
+        print("⚠️ [Warning] Snapshot is EMPTY! (Cold Start)", flush=True)
+        print("   -> 장중 데이터가 쌓일 때까지 봇이 종목을 잘 못 잡을 수 있습니다.", flush=True)
+    
     # 로컬 데이터 저장소
     last_agg = {}
     last_quotes = {}
@@ -206,9 +213,8 @@ async def redis_consumer():
     while True:
         try:
             # =========================================================
-            # 1. 시세 데이터 처리 (기존 로직)
+            # 1. 시세 데이터 처리
             # =========================================================
-            # [핵심 수정 1] Redis brpop을 별도 스레드에서 실행
             pop_result = await loop.run_in_executor(
                 REDIS_POOL, 
                 partial(r.brpop, 'ticker_stream', timeout=1)
@@ -249,7 +255,6 @@ async def redis_consumer():
             now = time.time()
 
             if now - last_manager_run > 5.0:
-                # [핵심 수정 2] 무거운 DB 읽기 작업을 스레드 풀로 격리
                 candidates = await loop.run_in_executor(
                     DB_WORKER_POOL,
                     partial(pipeline.selector.get_top_gainers_candidates, limit=10)
@@ -281,12 +286,10 @@ async def redis_consumer():
                         if add not in pipeline.snipers:
                             print(f"🚀 [Worker] Attach: {add}", flush=True)
                             
-                            # [수정] model_bytes 사용 (Engine 업데이트 반영)
                             new_bot = SniperBot(add, pipeline.logger, pipeline.selector, pipeline.model_bytes)
                             pipeline.snipers[add] = new_bot
                             bot_attach_times[add] = time.time()
                             
-                            # [핵심 수정 3] 웜업을 비동기 태스크로 실행 (스레드 생성 에러 해결)
                             run_warmup_task(new_bot)
                             r.sadd('focused_tickers', add)
 
@@ -296,13 +299,11 @@ async def redis_consumer():
                 pipeline.selector.garbage_collect()
                 last_scan_run = now
             
-            # Redis 데이터가 없어서 빨리 돌 때 CPU 과부하 방지
             if not pop_result:
                 await asyncio.sleep(0.01)
 
         except Exception as e:
             print(f"❌ [Worker Error] {e}", flush=True)
-            # 에러가 나면 잠시 대기
             await asyncio.sleep(1)
 
 if __name__ == "__main__":
