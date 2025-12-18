@@ -230,7 +230,7 @@
         /* Utility */
         .live-indicator { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; box-shadow: 0 0 8px var(--accent-green); display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        /* 기존 코드의 약 215라인 쯤에 있는 미디어 쿼리 수정 */
+        
         @media (max-width: 1024px) {
         /* [핵심 수정] 모바일에서는 body의 고정을 풀어야 스크롤이 됨 */
         body {
@@ -244,10 +244,14 @@
             flex-direction: column; 
             height: auto; 
             overflow-y: visible; 
-            padding-bottom: 40px; /* 맨 아래 여백 확보 */
+            padding-bottom: 40px; 
         }
     
-        .center-col { min-height: 500px; }
+       /* 1. 중앙 컬럼: 비율 대신 내용물만큼 길어지게 설정 */
+        .center-col { 
+            min-height: auto !important; /* 기존 500px 제한 해제 */
+            height: auto !important;
+        }
     
         /* [추가 팁] 모바일에서 패널들 간격 조정 */
         .panel, .right-sub-panel {
