@@ -233,6 +233,8 @@ function renderMiniChange(item) {
     return `<div style="font-size:10px; font-weight:500; color:${color};">${chg > 0 ? '+' : ''}${parseFloat(chg).toFixed(2)}%</div>`;
 }
 
+// [sts.js] updateKeyStats 함수 전체 교체
+
 function updateKeyStats(data) {
     if (!data) return;
 
@@ -244,223 +246,145 @@ function updateKeyStats(data) {
         return num.toFixed(fixed);
     };
 
-    // [Helper 2] 색상 처리 (양수:초록, 음수:빨강, 0:검정)
+    // [Helper 2] 색상 처리 (양수:초록, 음수:빨강)
     const color = (val) => {
         const v = parseFloat(val);
         if (isNaN(v)) return '#333';
-        return v > 0 ? '#00C076' : (v < 0 ? '#FF3B30' : '#333');
-    };
-
-    // [Helper 3] RSI용 색상 (낮을수록 좋음 = 초록색 / 높으면 과열 = 빨강)
-    const getRsiColor = (val) => {
-        if (val <= 30) return '#00C076'; // 과매도(매수 기회)
-        if (val >= 70) return '#FF3B30'; // 과매수(과열)
-        return '#333';
+        return v > 0 ? '#00C076' : (v < 0 ? '#FF3B30' : '#86868B');
     };
 
     // -------------------------------------------------------
-    // 1. 상단 오버레이 (티커/가격)
+    // 1. 텍스트 데이터 업데이트 (기존 로직 유지)
     // -------------------------------------------------------
+    
+    // 상단 오버레이
     if(els.overlayTicker) els.overlayTicker.innerText = data.ticker || "WAITING";
     if(els.overlayPrice) {
         els.overlayPrice.innerText = `$${fmt(data.price)}`;
         if(data.day_change) els.overlayPrice.style.color = color(data.day_change);
     }
 
-    // -------------------------------------------------------
-    // 2. 핵심 지표 매핑 (백엔드 키 -> 화면)
-    // -------------------------------------------------------
-
-    // OBI
-    if(els.indObi) { 
-        els.indObi.innerText = fmt(data.obi); 
-        els.indObi.style.color = color(data.obi); 
-    }
-    // OBI MOM
-    if(els.indObiMom) { 
-        const val = data.obi_mom ?? data.obi_momentum ?? 0;
-        els.indObiMom.innerText = fmt(val); 
-        els.indObiMom.style.color = color(val); 
-    }
-    // VPIN
-    if(els.indVpin) { 
-        els.indVpin.innerText = fmt(data.vpin); 
-        els.indVpin.style.color = parseFloat(data.vpin) > 0.8 ? '#FF3B30' : '#333'; 
-        els.indVpin.style.fontWeight = parseFloat(data.vpin) > 0.8 ? '800' : '400';
-    }
-    // Tick Speed & Accel
-    if(els.indTickSpeed) els.indTickSpeed.innerText = data.tick_speed || '0';
-    if(els.indTickAccel) { 
-        els.indTickAccel.innerText = fmt(data.tick_accel, 1); 
-        els.indTickAccel.style.color = color(data.tick_accel); 
-    }
-    // VWAP Dist & Slope
-    if(els.indVwapDist) { 
-        els.indVwapDist.innerText = fmt(data.vwap_dist) + '%'; 
-        els.indVwapDist.style.color = color(data.vwap_dist); 
-    }
-    if(els.indVwapSlope) { 
-        els.indVwapSlope.innerText = fmt(data.vwap_slope, 2); 
-        els.indVwapSlope.style.color = color(data.vwap_slope); 
-    }
-    // Squeeze
-    if(els.indSqueeze) {
-        const sqz = data.squeeze_ratio ?? data.squeeze ?? 0;
-        els.indSqueeze.innerText = fmt(sqz);
-        els.indSqueeze.style.color = parseFloat(sqz) < 0.8 ? '#FF3B30' : '#333';
-        els.indSqueeze.style.fontWeight = parseFloat(sqz) < 0.8 ? '800' : '400';
-    }
-    // RVOL
-    if(els.indRvol) { 
-        els.indRvol.innerText = fmt(data.rvol, 1) + 'x'; 
-        const rvolVal = parseFloat(data.rvol);
-        els.indRvol.style.color = rvolVal > 3.0 ? '#007AFF' : '#333';
-        els.indRvol.style.fontWeight = rvolVal > 3.0 ? '800' : '400';
-    }
-    // ATR
-    if(els.indAtr) els.indAtr.innerText = fmt(data.atr, 3);
-    
-   // -------------------------------------------------------
-    // 🔥 [NEW] 신규 유동성/수급 지표 업데이트 (OFI, W-OBI, Vol, Book)
-    // -------------------------------------------------------
-
-    // 1. OFI (주문 흐름)
-    if (els.indOfi) {
-        const ofi = parseFloat(data.ofi || 0);
-        els.indOfi.innerText = fmt(ofi, 2);
-        // 양수면 초록(매수우위), 음수면 빨강(매도우위)
-        els.indOfi.style.color = color(ofi);
-        // 수치가 크면(±500 이상) 굵게 표시해서 강조
-        els.indOfi.style.fontWeight = Math.abs(ofi) > 500 ? '800' : '400'; 
-    }
-
-    // 2. Weighted OBI (가중 호가 불균형)
-    if (els.indWObi) {
-        const wObi = parseFloat(data.weighted_obi || 0);
-        els.indWObi.innerText = fmt(wObi, 2);
-        els.indWObi.style.color = color(wObi);
-    }
-
-    // 3. 1분 거래대금 ($Vol 1m)
-    if (els.indLiq1m) {
-        const val = parseFloat(data.dollar_vol_1m || 0);
-        
-        // 단위 변환: 1M(백만), K(천)
-        let text = '';
-        if (val >= 1000000) text = (val / 1000000).toFixed(1) + 'M';
-        else text = (val / 1000).toFixed(0) + 'K';
-        
-        els.indLiq1m.innerText = '$' + text;
-        
-        // 색상 로직: $500k 이상(안전권)=파랑, $200k 미만(위험)=빨강
-        if (val >= 500000) els.indLiq1m.style.color = '#007AFF'; 
-        else if (val < 200000) els.indLiq1m.style.color = '#FF3B30'; 
-        else els.indLiq1m.style.color = '#333';
-    }
-
-    // 4. 상위 5호가 잔량 (Book Depth)
-    if (els.indBook) {
-        const val = parseFloat(data.top5_book_usd || 0);
-        
-        let text = '';
-        if (val >= 1000000) text = (val / 1000000).toFixed(1) + 'M';
-        else text = (val / 1000).toFixed(0) + 'K';
-
-        els.indBook.innerText = '$' + text;
-        
-        // 색상 로직: $100k 이상=초록, $40k 미만=빨강
-        if (val >= 100000) {
-            els.indBook.style.color = '#00C076'; 
-            els.indBook.style.fontWeight = '800';
-        } else if (val < 40000) {
-            els.indBook.style.color = '#FF3B30';
-        } else {
-            els.indBook.style.color = '#333';
-        }
-    }
-
-    // 1. RSI
-    if(els.indRsi) {
-        els.indRsi.innerText = fmt(data.rsi, 1);
-        els.indRsi.style.color = getRsiColor(data.rsi);
-        els.indRsi.style.fontWeight = data.rsi <= 30 ? '800' : '600';
-    }
-
-    // 2. Stochastic
-    if(els.indStoch) {
-        els.indStoch.innerText = fmt(data.stoch, 1);
-        els.indStoch.style.color = data.stoch <= 20 ? '#00C076' : '#333';
-    }
-
-    // 3. Fibonacci
-    if(els.indFibo) {
-        els.indFibo.innerText = fmt(data.fibo_pos, 2);
-        const f = parseFloat(data.fibo_pos);
-        if (f >= 0.38 && f <= 0.62) {
-            els.indFibo.style.color = '#007AFF';
-            els.indFibo.style.fontWeight = '800';
-        } else {
-            els.indFibo.style.color = '#333';
-            els.indFibo.style.fontWeight = '400';
-        }
-    }
-
-    // 4. OBI Reversal 연결 (이름 불일치 해결 로직 포함)
-    if(els.indObiRev) {
-        // DB 컬럼명(obi_rev)과 JS 변수명(obi_reversal_flag) 둘 다 체크
-        const isRev = (data.obi_rev === 1) || (data.obi_reversal_flag === 1);
-        
-        if (isRev) {
-            els.indObiRev.innerHTML = '<span style="background:#00C076; color:white; padding:2px 4px; border-radius:4px; font-size:10px;">TURN</span>';
-        } else {
-            els.indObiRev.innerText = '-';
-        }
-    }
-
-    // -------------------------------------------------------
-    // 3. 점수 (Hybrid Score)
-    // -------------------------------------------------------
+    // TIER 1: SCORE
     if(els.indScore) {
-        let rawScore = data.ai_score ?? data.score ?? 0;
-        if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
-        const s = Math.round(rawScore);
-        
-        els.indScore.innerText = s;
+        let s = data.ai_score ?? data.score ?? 0;
+        if (s <= 1 && s > 0) s *= 100; // 0.85 -> 85 변환
+        els.indScore.innerText = Math.round(s);
         els.indScore.style.color = s >= 80 ? '#007AFF' : (s >= 50 ? '#FF9500' : '#333');
-        
-        if(els.indProb) {
-            els.indProb.innerText = s >= 1 ? `${Math.min(99, Math.round(s * 0.95))}%` : '--';
-        }
+    }
+    if(els.indProb) {
+        let p = data.ai_score ?? 0;
+        if (p <= 1 && p > 0) p *= 100;
+        els.indProb.innerText = p > 0 ? `${Math.round(p)}%` : '--%';
+    }
+
+    // TIER 2: MONEY FLOW (텍스트)
+    if(els.indOfi) { els.indOfi.innerText = fmt(data.ofi, 2); els.indOfi.style.color = color(data.ofi); }
+    if(els.indBook) {
+        const val = parseFloat(data.top5_book_usd || 0);
+        let text = val >= 1000000 ? (val/1000000).toFixed(1)+'M' : (val/1000).toFixed(0)+'K';
+        els.indBook.innerText = '$' + text;
+        els.indBook.style.color = val >= 100000 ? '#00C076' : (val < 40000 ? '#FF3B30' : '#888');
+    }
+    if(els.indLiq1m) {
+        const val = parseFloat(data.dollar_vol_1m || 0);
+        let text = val >= 1000000 ? (val/1000000).toFixed(1)+'M' : (val/1000).toFixed(0)+'K';
+        els.indLiq1m.innerText = '$' + text;
+    }
+
+    // TIER 3: TECHNICALS (텍스트)
+    if(els.indRsi) { els.indRsi.innerText = fmt(data.rsi, 1); }
+    if(els.indRvol) { els.indRvol.innerText = fmt(data.rvol, 1) + 'x'; }
+    if(els.indVpin) { els.indVpin.innerText = fmt(data.vpin, 2); }
+
+
+    // -------------------------------------------------------
+    // 🔥 [NEW] 게이지 바 시각화 로직 (여기서부터 추가됨)
+    // -------------------------------------------------------
+
+    // 1. AI Score Bar (0~100)
+    if(els.barScore) {
+        let s = data.ai_score ?? 0;
+        if (s <= 1 && s > 0) s *= 100;
+        els.barScore.style.width = `${Math.min(100, Math.max(0, s))}%`;
+        // 색상: 80이상 파랑, 50이상 주황, 나머지 회색
+        els.barScore.style.background = s >= 80 ? '#007AFF' : (s >= 50 ? '#FF9500' : '#333');
     }
     
-    if(els.indTimestamp) els.indTimestamp.innerText = new Date().toLocaleTimeString();
-}
+    // 2. Win Prob Bar
+    if(els.barProb) {
+        let p = data.ai_score ?? 0;
+        if (p <= 1 && p > 0) p *= 100;
+        els.barProb.style.width = `${Math.min(100, p)}%`;
+        els.barProb.style.background = '#5856D6'; // 보라색
+    }
 
-// [추가] 신호(Signals) 피드를 그리는 함수
-function renderSignals(logs) {
-    if (!els.signals) return;
-    els.signals.innerHTML = '';
-    
-    // 로그가 없으면 리턴
-    if (!logs || logs.length === 0) return;
-
-    logs.forEach(log => {
-        // 타임스탬프 처리 (시:분:초만 자르기)
-        const timeStr = log.timestamp ? log.timestamp.split(' ')[1] : '--:--:--';
+    // 3. OFI Bar (중앙 기준, 핵심!)
+    if(els.barOfi) {
+        const ofi = parseFloat(data.ofi || 0);
+        // 최대치 설정을 ±5000 정도로 잡음 (상황에 따라 조절)
+        const MAX_OFI = 2000; 
+        let pct = (ofi / MAX_OFI) * 50; // 절반(50%) 기준 비율 계산
+        pct = Math.min(50, Math.max(-50, pct)); // ±50% 넘지 않게 제한
         
-        const html = `
-            <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05);">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span style="background:rgba(52, 199, 89, 0.15); color:#34C759; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY</span>
-                    <span style="font-size:10px; color:#999;">${timeStr}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-weight:bold; color:#1D1D1F;">${log.ticker}</span>
-                    <span style="font-family:'JetBrains Mono'; font-size:13px;">$${parseFloat(log.price).toFixed(2)}</span>
-                </div>
-            </div>`;
-        els.signals.insertAdjacentHTML('beforeend', html);
-    });
+        if (pct >= 0) {
+            // 양수: 중앙(50%)에서 오른쪽으로
+            els.barOfi.style.left = '50%';
+            els.barOfi.style.width = `${pct}%`;
+            els.barOfi.style.background = '#00ff9d'; // Green
+        } else {
+            // 음수: 중앙에서 왼쪽으로 (width는 양수여야 함)
+            els.barOfi.style.left = `${50 + pct}%`; 
+            els.barOfi.style.width = `${Math.abs(pct)}%`;
+            els.barOfi.style.background = '#ff3b30'; // Red
+        }
+    }
+
+    // 4. Book Depth Bar ($500k 기준)
+    if(els.barBook) {
+        const val = parseFloat(data.top5_book_usd || 0);
+        const MAX_BOOK = 500000; // 50만불이면 꽉 참
+        const fill = Math.min(100, (val / MAX_BOOK) * 100);
+        els.barBook.style.width = `${fill}%`;
+        // $100k 이상이면 안전(초록), 아니면 위험(빨강)
+        els.barBook.style.background = val >= 100000 ? '#00C076' : '#FF3B30';
+    }
+
+    // 5. Vol 1M Bar ($2M 기준)
+    if(els.barLiq1m) {
+        const val = parseFloat(data.dollar_vol_1m || 0);
+        const MAX_VOL = 2000000; // 200만불이면 꽉 참
+        const fill = Math.min(100, (val / MAX_VOL) * 100);
+        els.barLiq1m.style.width = `${fill}%`;
+        els.barLiq1m.style.background = '#007AFF';
+    }
+
+    // 6. RSI Bar (0~100)
+    if(els.barRsi) {
+        const rsi = parseFloat(data.rsi || 50);
+        els.barRsi.style.width = `${rsi}%`;
+        // 과매도(<30):초록, 과매수(>70):빨강, 중립:회색
+        if(rsi <= 30) els.barRsi.style.background = '#00ff9d';
+        else if(rsi >= 70) els.barRsi.style.background = '#ff3b30';
+        else els.barRsi.style.background = '#555';
+    }
+
+    // 7. RVOL Bar (0~5배)
+    if(els.barRvol) {
+        const rvol = parseFloat(data.rvol || 0);
+        const fill = Math.min(100, (rvol / 5.0) * 100);
+        els.barRvol.style.width = `${fill}%`;
+        // 3배 이상이면 보라색(폭발), 아니면 파란색
+        els.barRvol.style.background = rvol >= 3.0 ? '#AF52DE' : '#007AFF';
+    }
+
+    // 8. VPIN Bar (0~1.0)
+    if(els.barVpin) {
+        const vpin = parseFloat(data.vpin || 0);
+        const fill = Math.min(100, vpin * 100); // 1.0이면 100%
+        els.barVpin.style.width = `${fill}%`;
+        // 높을수록 위험(빨강)
+        els.barVpin.style.background = '#ff3b30';
+    }
 }
 
 /* ==========================================================================
