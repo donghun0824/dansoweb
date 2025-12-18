@@ -187,7 +187,15 @@
         /* --- Center Column: Chart & Stats --- */
         .center-col { grid-column: 2; display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
         
-        .chart-section { flex: 65; background: #fff; /* 차트는 흰 배경 */ box-shadow: var(--shadow-depth-2); }
+        .chart-section { 
+            flex: none !important;        
+            height: 400px !important;     
+            min-height: 400px !important; 
+            background: #fff !important;         /* 🤍 흰 배경 복구 */
+            box-shadow: var(--shadow-depth-2);   /* 🌑 그림자 복구 */
+        }
+
+
         .chart-overlay {
             position: absolute; top: 20px; left: 20px; z-index: 10;
             background: rgba(255,255,255,0.8); backdrop-filter: blur(8px);
@@ -195,7 +203,11 @@
             box-shadow: var(--shadow-depth-1);
         }
 
-        .indicator-section { flex: 35; }
+        .indicator-section { 
+            flex: none !important;        
+            height: auto !important;      
+        }
+     
         .metrics-grid {
             flex: 1; display: grid; grid-template-columns: repeat(6, 1fr);
             gap: 1px; background: rgba(0,0,0,0.06); border-top: 1px solid rgba(0,0,0,0.06); overflow-y: auto;
