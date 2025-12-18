@@ -595,7 +595,7 @@ class MicrostructureAnalyzer:
                 spread_series = pd.Series(0, index=ohlcv.index)
             
             df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
-            df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
+            df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed','spread_avg']
             df = df_res.ffill().fillna(0) # 여기서 df가 1초봉 데이터로 바뀜
             
             if len(df) < 20: return None
