@@ -53,46 +53,44 @@ let currentTicker = null;
 let marketDataMap = {}; // Stores real-time data for quick access
 
 // Map HTML IDs from your Webull-style layout
+// Map HTML IDs (Terminal UI Version)
 const els = {
+    // 1. 공통 요소 (스캐너, 차트, 시그널)
     scannerList: document.getElementById('ticker-list-container'),
     chartContainer: document.getElementById('chart-container'),
     signals: document.getElementById('signal-feed-container'),
     
-    // Status Bar
+    // 2. 상단 상태바 & 차트 오버레이
     statusText: document.getElementById('scan-status-text'),
     countText: document.getElementById('scan-watching-count'),
-    
-    // Chart Overlay
     overlayTicker: document.getElementById('overlay-ticker'),
     overlayPrice: document.getElementById('overlay-price'),
     
-    // 🔥 [NEW] Key Statistics Metrics (Webull Panel)
-    indObi: document.getElementById('ind-obi'),
-    indObiMom: document.getElementById('ind-obi-mom'),
-    indVpin: document.getElementById('ind-vpin'),
-    indTickSpeed: document.getElementById('ind-tick-speed'),
-    indTickAccel: document.getElementById('ind-tick-accel'),
-    
-    indVwapDist: document.getElementById('ind-vwap-dist'),
-    indVwapSlope: document.getElementById('ind-vwap-slope'),
-    indSqueeze: document.getElementById('ind-squeeze'),
-    indRvol: document.getElementById('ind-rvol'),
-    indAtr: document.getElementById('ind-atr'),
-    
-    indPumpAccel: document.getElementById('ind-pump-accel'),
-    indSpread: document.getElementById('ind-spread'),
-    indTimestamp: document.getElementById('ind-timestamp'),
+    // 3. [터미널 UI] 텍스트 값 (Text Values)
     indScore: document.getElementById('ind-score'),
     indProb: document.getElementById('ind-prob'),
-    // 🔥 [NEW] 여기에 새로 만든 지표 ID 추가
-    indRsi: document.getElementById('ind-rsi'),
-    indStoch: document.getElementById('ind-stoch'),
-    indFibo: document.getElementById('ind-fibo'),
-    indObiRev: document.getElementById('ind-obi-rev'),
     indOfi: document.getElementById('ind-ofi'),
-    indWObi: document.getElementById('ind-w-obi'),
-    indLiq1m: document.getElementById('ind-liq-1m'),
     indBook: document.getElementById('ind-book'),
+    indLiq1m: document.getElementById('ind-liq-1m'),
+    indRsi: document.getElementById('ind-rsi'),
+    indRvol: document.getElementById('ind-rvol'),
+    indVpin: document.getElementById('ind-vpin'),
+
+    // 4. [터미널 UI] 게이지 바 (Gauge Bars)
+    barScore: document.getElementById('bar-score'),
+    barProb: document.getElementById('bar-prob'),
+    barOfi: document.getElementById('bar-ofi'),
+    barBook: document.getElementById('bar-book'),
+    barLiq1m: document.getElementById('bar-liq-1m'),
+    barRsi: document.getElementById('bar-rsi'),
+    barRvol: document.getElementById('bar-rvol'),
+    barVpin: document.getElementById('bar-vpin'),
+    
+    // 5. [팝업] 설명창 (Modal)
+    modal: document.getElementById('info-modal'),
+    modalTerm: document.getElementById('modal-term'),
+    modalKr: document.getElementById('modal-desc-kr'),
+    modalEn: document.getElementById('modal-desc-en'),
 };
 
 /* ==========================================================================
@@ -676,4 +674,55 @@ async function getFCMToken() {
             alert("✅ Alerts Enabled! (Real-time notifications active)");
        }
     } catch(e) { console.error("🚨 FCM Token Error:", e); }
+}
+// ==========================================
+// [POPUP] 지표 설명 데이터 및 함수
+// ==========================================
+const METRIC_DICT = {
+    'SCORE': {
+        kr: "AI와 퀀트 모델이 분석한 종합 점수입니다. 80점 이상이면 강력한 매수 신호입니다.",
+        en: "Comprehensive score by AI & Quant models. >80 indicates a strong buy signal."
+    },
+    'PROB': {
+        kr: "과거 패턴 학습을 통해 예측한 상승 확률입니다. 높을수록 신뢰도가 높습니다.",
+        en: "Predicted win probability based on historical patterns."
+    },
+    'OFI': {
+        kr: "주문 흐름 불균형(Order Flow Imbalance). 양수(초록)면 공격적 매수세, 음수(빨강)면 매도세입니다.",
+        en: "Order Flow Imbalance. Positive values indicate aggressive buying pressure."
+    },
+    'BOOK': {
+        kr: "상위 5호가에 쌓인 매수 잔량 총액입니다. 호가가 두터워야 가격이 쉽게 밀리지 않습니다.",
+        en: "Total value of top 5 bid orders. Thicker books prevent slippage."
+    },
+    'VOL': {
+        kr: "최근 1분간 체결된 거래대금입니다. 유동성이 공급되어야 급등이 가능합니다.",
+        en: "Dollar volume traded in the last minute. Liquidity fuels momentum."
+    },
+    'RSI': {
+        kr: "상대강도지수. 70 이상은 과매수, 30 이하는 과매도 구간입니다.",
+        en: "Relative Strength Index. >70 Overbought, <30 Oversold."
+    },
+    'RVOL': {
+        kr: "상대 거래량. 평소 대비 거래량이 몇 배 터졌는지 보여줍니다. 3.0x 이상이면 폭발적입니다.",
+        en: "Relative Volume. Shows how many times current volume exceeds the average."
+    },
+    'VPIN': {
+        kr: "주문 독성(Toxicity). 수치가 높으면(>1.0) 정보 비대칭이 심해 급락 위험이 큽니다.",
+        en: "Volume-Synchronized Probability of Informed Trading. High values indicate toxic flow."
+    }
+};
+
+window.showInfo = function(key) {
+    if(!els.modal) return;
+    const info = METRIC_DICT[key];
+    if(info) {
+        els.modalTerm.innerText = key;
+        els.modalKr.innerText = info.kr;
+        els.modalEn.innerText = info.en;
+        els.modal.style.display = 'block';
+    }
+}
+window.closeInfo = function() {
+    if(els.modal) els.modal.style.display = 'none';
 }

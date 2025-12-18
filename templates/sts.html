@@ -262,6 +262,105 @@
         .text-flat { color: #333333 !important; font-weight: 600; } /* 보합: 검정 */
         .text-blue { color: #007AFF !important; font-weight: 800; } /* 강조: 파랑 */
     }
+    /* ==========================================================================
+   TERMINAL UI STYLES (NEW)
+   ========================================================================== */
+.terminal-container {
+    background: #0d1117; /* 터미널 블랙 배경 */
+    padding: 12px;
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #e6edf3;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.term-section { display: flex; flex-direction: column; gap: 6px; }
+
+.term-header {
+    font-size: 10px;
+    color: #8b949e;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 2px;
+    margin-bottom: 4px;
+    letter-spacing: 1px;
+    font-weight: 700;
+}
+
+.term-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 24px;
+}
+
+.term-label-area {
+    width: 90px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 600;
+    color: #c9d1d9;
+}
+
+.info-trigger {
+    cursor: pointer;
+    color: #58a6ff;
+    font-size: 10px;
+    opacity: 0.6;
+}
+.info-trigger:hover { opacity: 1; text-decoration: underline; }
+
+.term-gauge-area {
+    flex: 1;
+    height: 6px;
+    background: #21262d; /* 게이지 트랙 배경 */
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+}
+
+.gauge-track { width: 100%; height: 100%; position: relative; }
+.gauge-fill {
+    height: 100%;
+    background: #00ff9d; /* 기본 형광 초록 */
+    width: 0%;
+    transition: width 0.3s ease, background 0.3s ease, left 0.3s ease;
+}
+
+/* OFI 처럼 중앙 기준인 경우 */
+.gauge-track.center-axis .gauge-fill {
+    position: absolute;
+    left: 50%; 
+}
+
+.term-value {
+    width: 50px;
+    text-align: right;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* 팝업 스타일 */
+.info-modal {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 280px;
+    background: rgba(13, 17, 23, 0.95);
+    border: 1px solid #58a6ff;
+    border-radius: 8px;
+    padding: 16px;
+    z-index: 999;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    backdrop-filter: blur(5px);
+}
+.info-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.info-title { font-weight: 800; color: #58a6ff; letter-spacing: 1px; }
+.close-btn { background: none; border: none; color: #888; cursor: pointer; font-size: 18px; }
     </style>   
 </head>
 <body>
@@ -322,28 +421,120 @@
                     <span>Key Statistics</span>
                     <span class="status-badge" style="background:#eee; padding:2px 6px; border-radius:4px; float:right;">REAL-TIME</span>
                 </div>
-<div class="metrics-grid">
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">OBI</span><span class="metric-value" id="ind-obi">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">W-OBI</span><span class="metric-value" id="ind-w-obi">--</span></div> <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">OBI MOM</span><span class="metric-value" id="ind-obi-mom">--</span></div> <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">OFI (Flow)</span><span class="metric-value" id="ind-ofi">--</span></div> <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">VPIN</span><span class="metric-value" id="ind-vpin">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Tick Speed</span><span class="metric-value" id="ind-tick-speed">--</span></div>
+<div class="terminal-container">
     
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Tick Accel</span><span class="metric-value" id="ind-tick-accel">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">RVOL</span><span class="metric-value" id="ind-rvol">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">$Vol (1m)</span><span class="metric-value" id="ind-liq-1m">--</span></div> <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">ATR</span><span class="metric-value" id="ind-atr">--</span></div> <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Book Depth</span><span class="metric-value" id="ind-book">--</span></div> <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Squeeze</span><span class="metric-value" id="ind-squeeze">--</span></div>
+    <div id="info-modal" class="info-modal" style="display:none;">
+        <div class="info-header">
+            <span class="info-title">METRIC INFO</span>
+            <button onclick="closeInfo()" class="close-btn">×</button>
+        </div>
+        <div class="info-body">
+            <h3 id="modal-term" style="color:#00ff9d;">--</h3>
+            <p id="modal-desc-kr" style="color:#fff; margin:10px 0; font-size:13px;">--</p>
+            <hr style="border-color:#333; opacity:0.3;">
+            <p id="modal-desc-en" style="color:#888; font-size:11px; margin-top:10px;">--</p>
+        </div>
+    </div>
 
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">VWAP Dist</span><span class="metric-value" id="ind-vwap-dist">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">VWAP Slope</span><span class="metric-value" id="ind-vwap-slope">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">RSI (14s)</span><span class="metric-value" id="ind-rsi">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Stoch %K</span><span class="metric-value" id="ind-stoch">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Fibo Pos</span><span class="metric-value" id="ind-fibo">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">OBI Rev</span><span class="metric-value" id="ind-obi-rev">--</span></div>
+    <div class="term-section">
+        <div class="term-header">/// TIER 1 : CRITICAL SIGNAL ///</div>
+        
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label">AI_SCORE</span>
+                <span class="info-trigger" onclick="showInfo('SCORE')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track"><div class="gauge-fill" id="bar-score" style="width:0%;"></div></div>
+            </div>
+            <div class="term-value" id="ind-score">--</div>
+        </div>
 
-    <div class="metric-cell" style="background:#F2F8FF;"><span class="metric-label" style="font-size:10px; color:#007AFF;">Hybrid Score</span><span class="metric-value" id="ind-score" style="color:#007AFF; font-size:18px; font-weight:bold;">--</span></div>
-    <div class="metric-cell"><span class="metric-label" style="font-size:10px; color:#666;">Win Prob</span><span class="metric-value" id="ind-prob">--%</span></div>
-    <div class="metric-cell" style="background:transparent; border:none;"></div>
-    <div class="metric-cell" style="background:transparent; border:none;"></div>
-    <div class="metric-cell" style="background:transparent; border:none;"></div>
-    <div class="metric-cell" style="background:transparent; border:none;"></div>
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label">WIN_PROB</span>
+                <span class="info-trigger" onclick="showInfo('PROB')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track"><div class="gauge-fill" id="bar-prob" style="width:0%;"></div></div>
+            </div>
+            <div class="term-value" id="ind-prob">--%</div>
+        </div>
+    </div>
+
+    <div class="term-section">
+        <div class="term-header">/// TIER 2 : MONEY FLOW ///</div>
+
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label" style="color:#00ff9d;">OFI_FLOW</span>
+                <span class="info-trigger" onclick="showInfo('OFI')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track center-axis"><div class="gauge-fill" id="bar-ofi" style="width:0%; left:50%;"></div></div>
+            </div>
+            <div class="term-value" id="ind-ofi">--</div>
+        </div>
+
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label">BOOK_DEPTH</span>
+                <span class="info-trigger" onclick="showInfo('BOOK')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track"><div class="gauge-fill" id="bar-book" style="width:0%;"></div></div>
+            </div>
+            <div class="term-value" id="ind-book">--</div>
+        </div>
+
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label">$VOL_1M</span>
+                <span class="info-trigger" onclick="showInfo('VOL')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track"><div class="gauge-fill" id="bar-liq-1m" style="width:0%;"></div></div>
+            </div>
+            <div class="term-value" id="ind-liq-1m">--</div>
+        </div>
+    </div>
+
+    <div class="term-section">
+        <div class="term-header">/// TIER 3 : TECHNICALS ///</div>
+
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label">RSI_14</span>
+                <span class="info-trigger" onclick="showInfo('RSI')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track"><div class="gauge-fill" id="bar-rsi" style="width:0%;"></div></div>
+            </div>
+            <div class="term-value" id="ind-rsi">--</div>
+        </div>
+
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label">RVOL</span>
+                <span class="info-trigger" onclick="showInfo('RVOL')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track"><div class="gauge-fill" id="bar-rvol" style="width:0%;"></div></div>
+            </div>
+            <div class="term-value" id="ind-rvol">--</div>
+        </div>
+        
+        <div class="term-row">
+            <div class="term-label-area">
+                <span class="term-label" style="color:#ff3b30;">VPIN_RISK</span>
+                <span class="info-trigger" onclick="showInfo('VPIN')">[+]</span>
+            </div>
+            <div class="term-gauge-area">
+                <div class="gauge-track"><div class="gauge-fill" id="bar-vpin" style="width:0%; background:#ff3b30;"></div></div>
+            </div>
+            <div class="term-value" id="ind-vpin">--</div>
+        </div>
+    </div>
 </div>
  </div> </div> <aside class="right-panel" style="display:flex; flex-direction:column; gap:12px;">
             <div class="right-sub-panel" style="flex:1;">
