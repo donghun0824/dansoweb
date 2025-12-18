@@ -104,16 +104,18 @@ def get_sts_status():
         # 딕셔너리 형태로 데이터를 받기 위해 RealDictCursor 사용
         cursor = conn.cursor(cursor_factory=RealDictCursor) 
         
-        # [수정됨] 쿼리문 맨 끝에 rsi, stoch, fibo_pos, obi_rev 추가
+        # 🔥 [수정 1] SELECT 쿼리에 새로운 컬럼 4개 추가
+        # (ofi, weighted_obi, dollar_vol_1m, top5_book_usd)
         query = """
             SELECT 
                 ticker, price, ai_score, status, last_updated,
                 day_change, 
                 obi, vpin, tick_speed, vwap_dist,
                 obi_mom, tick_accel, vwap_slope, squeeze_ratio, rvol, atr, pump_accel, spread,
-                -- ▼▼▼ 여기 4개 컬럼을 추가했습니다 ▼▼▼
                 rsi, stoch_k, fibo_pos, obi_rev,
-                vol_ratio, hurst  -- 🔥 [NEW] 추가됨
+                vol_ratio, hurst,
+                -- ▼▼▼ 새로 추가된 핵심 지표들 ▼▼▼
+                ofi, weighted_obi, dollar_vol_1m, top5_book_usd
             FROM sts_live_targets
             WHERE last_updated > NOW() - INTERVAL '1 minute'
             ORDER BY 
@@ -154,13 +156,18 @@ def get_sts_status():
                 'pump_accel': r.get('pump_accel') or 0,
                 'spread': r.get('spread') or 0,
 
-                # ▼▼▼ [중요] 프론트엔드로 보내는 데이터에도 추가 ▼▼▼
                 'rsi': r.get('rsi') or 0,
                 'stoch': r.get('stoch_k') or 0,
                 'fibo_pos': r.get('fibo_pos') or 0,
                 'obi_rev': r.get('obi_rev') or 0,
-                'vol_ratio': r.get('vol_ratio') or 0, # 🔥 [NEW]
-                'hurst': r.get('hurst') or 0.5        # 🔥 [NEW] 기본값 0.5
+                'vol_ratio': r.get('vol_ratio') or 0, 
+                'hurst': r.get('hurst') or 0.5,
+
+                # 🔥 [수정 2] 신규 지표 JSON 매핑 (프론트엔드 전달용)
+                'ofi': r.get('ofi') or 0,
+                'weighted_obi': r.get('weighted_obi') or 0,
+                'dollar_vol_1m': r.get('dollar_vol_1m') or 0, # 1분 거래대금
+                'top5_book_usd': r.get('top5_book_usd') or 0  # 상위 5호가 잔량
             })
             
         # 2. 최근 신호 로그 (기존 로직 유지)

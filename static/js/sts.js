@@ -89,6 +89,10 @@ const els = {
     indStoch: document.getElementById('ind-stoch'),
     indFibo: document.getElementById('ind-fibo'),
     indObiRev: document.getElementById('ind-obi-rev'),
+    indOfi: document.getElementById('ind-ofi'),
+    indWObi: document.getElementById('ind-w-obi'),
+    indLiq1m: document.getElementById('ind-liq-1m'),
+    indBook: document.getElementById('ind-book'),
 };
 
 /* ==========================================================================
@@ -318,11 +322,64 @@ function updateKeyStats(data) {
     // ATR
     if(els.indAtr) els.indAtr.innerText = fmt(data.atr, 3);
     
-    // -------------------------------------------------------
-    // 🔥 [NEW] 신규 반등 지표 업데이트 (여기 추가!)
+   // -------------------------------------------------------
+    // 🔥 [NEW] 신규 유동성/수급 지표 업데이트 (OFI, W-OBI, Vol, Book)
     // -------------------------------------------------------
 
-    
+    // 1. OFI (주문 흐름)
+    if (els.indOfi) {
+        const ofi = parseFloat(data.ofi || 0);
+        els.indOfi.innerText = fmt(ofi, 2);
+        // 양수면 초록(매수우위), 음수면 빨강(매도우위)
+        els.indOfi.style.color = color(ofi);
+        // 수치가 크면(±500 이상) 굵게 표시해서 강조
+        els.indOfi.style.fontWeight = Math.abs(ofi) > 500 ? '800' : '400'; 
+    }
+
+    // 2. Weighted OBI (가중 호가 불균형)
+    if (els.indWObi) {
+        const wObi = parseFloat(data.weighted_obi || 0);
+        els.indWObi.innerText = fmt(wObi, 2);
+        els.indWObi.style.color = color(wObi);
+    }
+
+    // 3. 1분 거래대금 ($Vol 1m)
+    if (els.indLiq1m) {
+        const val = parseFloat(data.dollar_vol_1m || 0);
+        
+        // 단위 변환: 1M(백만), K(천)
+        let text = '';
+        if (val >= 1000000) text = (val / 1000000).toFixed(1) + 'M';
+        else text = (val / 1000).toFixed(0) + 'K';
+        
+        els.indLiq1m.innerText = '$' + text;
+        
+        // 색상 로직: $500k 이상(안전권)=파랑, $200k 미만(위험)=빨강
+        if (val >= 500000) els.indLiq1m.style.color = '#007AFF'; 
+        else if (val < 200000) els.indLiq1m.style.color = '#FF3B30'; 
+        else els.indLiq1m.style.color = '#333';
+    }
+
+    // 4. 상위 5호가 잔량 (Book Depth)
+    if (els.indBook) {
+        const val = parseFloat(data.top5_book_usd || 0);
+        
+        let text = '';
+        if (val >= 1000000) text = (val / 1000000).toFixed(1) + 'M';
+        else text = (val / 1000).toFixed(0) + 'K';
+
+        els.indBook.innerText = '$' + text;
+        
+        // 색상 로직: $100k 이상=초록, $40k 미만=빨강
+        if (val >= 100000) {
+            els.indBook.style.color = '#00C076'; 
+            els.indBook.style.fontWeight = '800';
+        } else if (val < 40000) {
+            els.indBook.style.color = '#FF3B30';
+        } else {
+            els.indBook.style.color = '#333';
+        }
+    }
 
     // 1. RSI
     if(els.indRsi) {

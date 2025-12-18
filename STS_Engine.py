@@ -47,8 +47,10 @@ STS_TARGET_COUNT = 3                 # 최종 감시할 종목 수
 # [B] 스나이퍼 봇 설정 (SniperBot) - 진입 필터 (Hard Kill)
 STS_BOT_MAX_SPREAD = 1.2             # 허용 스프레드 (1.2% 초과시 진입 금지)
 STS_BOT_MIN_TICK_SPEED = 2           # 최소 체결 속도 (초당 2건 이상)
-STS_BOT_MIN_LIQUIDITY_1M = 1_000_000 # 1분 최소 거래대금 (100만불)
-STS_BOT_MIN_BOOK_USD = 500_000       # 호가창 최소 잔량 (50만불)
+STS_BOT_MIN_LIQUIDITY_1M = 200_000 # 1분 최소 거래대금 (100만불)
+STS_BOT_SAFE_LIQUIDITY_1M = 500_000 # 안전 50만불
+STS_BOT_MIN_BOOK_USD = 50_000       # 호가창 최소 잔량 (50만불)
+STS_BOT_MIN_BOOK_RATIO = 0.05       # [비율 기준] 최소 5% (1분 거래대금 대비 호가 잔량 비율)
 
 # [C] 전략별 세부 임계값 (Sensitivity)
 STS_VPIN_LIMIT_REBOUND = 0.9         # 리바운드 전략 VPIN 한계
@@ -573,29 +575,57 @@ class MicrostructureAnalyzer:
         
         # 변수 안전 초기화
         vpin = 0; obi = 0; ofi = 0; weighted_obi = 0; obi_mom = 0
+        ofi_accel = 0.0 # 🔥 [초기화] OFI 가속도 변수 추가
         
         try:
-            df = pd.DataFrame(self.raw_ticks).set_index('t')
+            # 1. 기본 OHLCV 데이터 생성 (리샘플링)
+            df_raw = pd.DataFrame(self.raw_ticks).set_index('t') # 원본 보존용
+            df = df_raw.copy() # 리샘플링용 복사본
+            
             ohlcv = df['p'].resample('1s').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'})
             volume = df['s'].resample('1s').sum()
             tick_count = df['s'].resample('1s').count()
+
+            # 🔥 [추가] 스프레드 평균 계산 (Raw Tick에서 bid/ask 차이를 계산 후 평균)
+            # 호가 스프레드가 급격히 좁아지는지(수렴) 확인하기 위함
+            if 'bid' in df.columns and 'ask' in df.columns:
+                df['raw_spread'] = (df['ask'] - df['bid']) / df['bid'] * 100
+                spread_series = df['raw_spread'].resample('1s').mean()
+            else:
+                spread_series = pd.Series(0, index=ohlcv.index)
             
             df_res = pd.concat([ohlcv, volume, tick_count], axis=1).iloc[-600:]
             df_res.columns = ['open', 'high', 'low', 'close', 'volume', 'tick_speed']
-            df = df_res.ffill().fillna(0)
+            df = df_res.ffill().fillna(0) # 여기서 df가 1초봉 데이터로 바뀜
             
             if len(df) < 20: return None
 
             WIN_MAIN = 60
             v = df['volume'].values
             p = df['close'].values
+
+            # 🔥 [핵심 추가 1] Zero-Latency용 10초 이동평균 & 직전 고점 계산
+            # 1) 10초 평균 Tick Speed & Spread (평소 상태 측정)
+            tick_speed_10s_avg = df['tick_speed'].rolling(10).mean().iloc[-1]
+            spread_10s_avg = df['spread_avg'].rolling(10).mean().iloc[-1]
+            
+            # 2) 직전 1분봉 고점 (Breakout 확인용)
+            current_time = df.index[-1]
+            # 현재 1분봉이 아닌, '직전' 1분봉의 고점을 구함
+            last_minute_start = (current_time - pd.Timedelta(minutes=1)).floor('1min')
+            last_minute_end = current_time.floor('1min')
+            
+            mask = (df.index >= last_minute_start) & (df.index < last_minute_end)
+            if mask.any():
+                prev_1m_high = df.loc[mask, 'high'].max()
+            else:
+                prev_1m_high = df['high'].max() # 데이터 없으면 전체 고점 사용
             
             # 🔥 [추가] 유동성 지표 (Liquidity Metrics)
-            # 1. 최근 1분(60초) 거래대금 합계
             df['dollar_vol'] = df['close'] * df['volume']
             dollar_vol_1m = df['dollar_vol'].iloc[-60:].sum()
 
-            # 기본 지표들
+            # 기본 지표들 (VWAP, RVOL 등)
             df['vwap'] = (p * v).cumsum() / (v.cumsum() + 1e-9)
             df['vwap'] = df['vwap'].ffill() 
             df['vwap_slope'] = (df['vwap'].diff(5) / (df['vwap'].shift(5) + 1e-9)) * 10000
@@ -629,16 +659,49 @@ class MicrostructureAnalyzer:
             df = df.fillna(0)
             last = df.iloc[-1]
 
+            # ------------------------------------------------------------------
+            # 🔥 [추가] 2.1 OFI 가속도 계산 (원본 df_raw 사용)
+            # ------------------------------------------------------------------
+            # 최근 30초 vs 직전 30초의 순매수 체결량(OFI) 비교
+            now = df_raw.index[-1]
+            t_30s = now - pd.Timedelta(seconds=30)
+            t_60s = now - pd.Timedelta(seconds=60)
+            
+            # 시간대별 슬라이싱
+            slice_curr = df_raw[df_raw.index >= t_30s]
+            slice_prev = df_raw[(df_raw.index >= t_60s) & (df_raw.index < t_30s)]
+            
+            # 간이 OFI 계산: (체결가 >= 매도호가 ? 매수체결) - (체결가 <= 매수호가 ? 매도체결)
+            # raw_ticks에는 'bid', 'ask'가 기록되어 있다고 가정
+            def calc_simple_ofi(slice_df):
+                if slice_df.empty: return 0
+                buy_vol = slice_df[slice_df['p'] >= slice_df['ask']]['s'].sum()
+                sell_vol = slice_df[slice_df['p'] <= slice_df['bid']]['s'].sum()
+                return buy_vol - sell_vol
+
+            curr_ofi_sum = calc_simple_ofi(slice_curr)
+            prev_ofi_sum = calc_simple_ofi(slice_prev)
+            
+            # 가속도 산출 (이전 30초 대비 현재 30초가 얼마나 폭발했는가)
+            if prev_ofi_sum > 0:
+                ofi_accel = curr_ofi_sum / prev_ofi_sum
+            elif prev_ofi_sum <= 0 and curr_ofi_sum > 0:
+                ofi_accel = 10.0 # 음수나 0에서 양수 폭발은 아주 강력한 신호로 간주
+            else:
+                ofi_accel = 0.0
+
+            # ------------------------------------------------------------------
+
             # --- 호가 분석 (Orderbook Analysis) ---
             bids_list = self.quotes.get('bids', [])
             asks_list = self.quotes.get('asks', [])
 
-            # 🔥 [추가] 상위 5호가 잔량 총액 ($)
+            # 상위 5호가 잔량 총액 ($)
             top5_book_usd = 0
             for q in bids_list[:5]: top5_book_usd += (q['p'] * q['s'])
             for q in asks_list[:5]: top5_book_usd += (q['p'] * q['s'])
 
-            # OFI
+            # OFI (Standard)
             curr_bid_p = bids_list[0]['p'] if bids_list else 0
             curr_bid_s = bids_list[0]['s'] if bids_list else 0
             curr_ask_p = asks_list[0]['p'] if asks_list else 0
@@ -685,6 +748,13 @@ class MicrostructureAnalyzer:
             return {
                 'obi': obi, 'weighted_obi': weighted_obi, 'ofi': ofi,
                 'obi_mom': obi_mom, 'tick_accel': last['tick_accel'], 'vpin': vpin, 
+                'ofi_accel': ofi_accel, # 🔥 [NEW] 반환값에 추가
+
+                # 🔥 [NEW] Zero-Latency용 신규 지표들
+                'tick_speed_avg_10s': tick_speed_10s_avg,
+                'spread_avg_10s': spread_10s_avg,
+                'prev_1m_high': prev_1m_high,
+                
                 'vwap_dist': vwap_dist, 'vwap_slope': last['vwap_slope'], 'rvol': last['rvol'],
                 'squeeze_ratio': last['squeeze_ratio'], 'pump_accel': last['pump_accel'],
                 'atr': last['atr'] if last['atr'] > 0 else last['close'] * 0.005,
@@ -695,7 +765,7 @@ class MicrostructureAnalyzer:
                 'obi_reversal_flag': obi_reversal_flag, 
                 'vol_ratio': last['vol_ratio'], 'hurst': last['hurst'],
                 
-                # 🔥 [필수] SniperBot에게 넘겨줄 유동성 지표
+                # SniperBot에게 넘겨줄 유동성 지표
                 'dollar_vol_1m': dollar_vol_1m,
                 'top5_book_usd': top5_book_usd
             }
@@ -703,7 +773,7 @@ class MicrostructureAnalyzer:
         except Exception as e:
             print(f"❌ [Metrics Error] {e}")
             traceback.print_exc()
-            return None           
+            return None      
 
 # [V7.2] Target Selector (Cold Start 해결: Snapshot API 연동)
 class TargetSelector:
@@ -1022,34 +1092,85 @@ class SniperBot:
             return 0.5
 
     def _check_filters(self, m, strategy, final_score):
-        # 🔥 [Refactor] 하드코딩 제거 -> 상단 상수(STS_*) 사용으로 통일
+        # -------------------------------------------------------------
+        # 0. 데이터 준비 (Metrics Setup)
+        # -------------------------------------------------------------
+        rvol = m.get('rvol', 0)
+        vpin = m.get('vpin', 0)
+        ofi_accel = m.get('ofi_accel', 0) # get_metrics에서 계산된 값
+        liq_1m = m.get('dollar_vol_1m', 0)
+        book_usd = m.get('top5_book_usd', 0)
+        spread = m.get('spread', 0)
+
+        # -------------------------------------------------------------
+        # 🔥 [1. Safety Net] VPIN 독성 체크 (최우선 차단)
+        # -------------------------------------------------------------
+        # 아무리 좋아 보여도 독성(VPIN)이 1.2를 넘으면 폭탄 돌리기임 -> 즉시 차단
+        if vpin > 1.2:
+            return False, f"Toxic VPIN ({vpin:.2f})"
+
+        # -------------------------------------------------------------
+        # 🔥 [2. Super Momentum Flag] 야수 모드 판별
+        # -------------------------------------------------------------
+        # RVOL이 2.5배 넘고 + OFI 가속도가 꺾이지 않았으면 -> '슈퍼 모멘텀'
+        # 이 경우엔 호가가 좀 얇거나 스프레드가 커도 봐줍니다 (Bypass)
+        is_super_momentum = (rvol >= 2.5 and ofi_accel >= 0)
+
+        # -------------------------------------------------------------
+        # 3. [유동성 필터] 절대 기준 (Hard Floor)
+        # -------------------------------------------------------------
+        # 최소 20만불(2.8억)은 무조건 넘어야 함
+        if liq_1m < STS_BOT_MIN_LIQUIDITY_1M: 
+            return False, f"Dead Liquidity (${int(liq_1m/1000)}k)"
+
+        # -------------------------------------------------------------
+        # 4. [호가창 필터] 절대금액 + 비율 (Smart Orderbook)
+        # -------------------------------------------------------------
+        # (A) 절대 금액 기준
+        # 평소엔 $50k, 슈퍼 모멘텀이면 $40k까지 허용
+        min_book_abs = 40_000 if is_super_momentum else STS_BOT_MIN_BOOK_USD
+        if book_usd < min_book_abs:
+            return False, f"Thin Book (${int(book_usd/1000)}k)"
+
+        # (B) 비율 기준 (거래대금 대비 5% 룰)
+        if liq_1m > 0:
+            book_ratio = book_usd / liq_1m
+            # 평소엔 5%, 슈퍼 모멘텀이면 3%까지 허용
+            min_ratio = 0.03 if is_super_momentum else STS_BOT_MIN_BOOK_RATIO
+            
+            if book_ratio < min_ratio:
+                # 단, 점수가 80점 이상이면 살려줌
+                if final_score < 80:
+                    return False, f"Unstable Book Ratio ({book_ratio*100:.1f}%)"
+
+        # -------------------------------------------------------------
+        # 5. [구간별 유동성] Tiered Liquidity
+        # -------------------------------------------------------------
+        # 유동성이 $200k ~ $500k 사이(위험 구간)라면 -> 확실한 거래량(RVOL)이나 점수 필요
+        if liq_1m < STS_BOT_SAFE_LIQUIDITY_1M:
+            if rvol < 3.0 and final_score < 75:
+                return False, f"Risky Zone (${int(liq_1m/1000)}k) - Need higher Vol/Score"
+
+        # -------------------------------------------------------------
+        # 6. [스프레드 & 속도]
+        # -------------------------------------------------------------
+        # 평소엔 1.2%, 슈퍼 모멘텀이면 2.5%까지 허용 (야수 모드)
+        max_spread = 2.5 if is_super_momentum else STS_BOT_MAX_SPREAD
+        if spread > max_spread:
+            return False, f"Wide Spread ({spread:.2f}%)"
         
-        # 1. 스프레드 체크 (설정값: 1.2%)
-        if m.get('spread', 0) > STS_BOT_MAX_SPREAD: 
-            return False, f"Wide Spread ({m.get('spread',0):.2f}%)"
-        
-        # 2. 틱 속도 체크 (설정값: 2)
         if m.get('tick_speed', 0) < STS_BOT_MIN_TICK_SPEED: 
             return False, "Low Tick Speed"
-        
-        # 3. 유동성 체크 (설정값: 100만불)
-        if m.get('dollar_vol_1m', 0) < STS_BOT_MIN_LIQUIDITY_1M: 
-            return False, "Low Liquidity (1m)"
-            
-        # 4. 호가창 두께 체크 (설정값: 50만불)
-        if m.get('top5_book_usd', 0) < STS_BOT_MIN_BOOK_USD: 
-            return False, "Thin Orderbook"
 
-        # 5. 전략별 상세 필터
+        # -------------------------------------------------------------
+        # 7. 전략별 추가 필터 (기존 유지)
+        # -------------------------------------------------------------
         if strategy == "REBOUND":
-            if m.get('vpin', 0) > STS_VPIN_LIMIT_REBOUND: return False, "High VPIN (Rebound)"
-            if m.get('rvol', 0) < STS_RVOL_MIN_REBOUND: return False, "Low Vol (Rebound)"
-            
+            if vpin > STS_VPIN_LIMIT_REBOUND: return False, "High VPIN (Rebound)"
+            if rvol < STS_RVOL_MIN_REBOUND: return False, "Low Vol (Rebound)"
         elif strategy in ["MOMENTUM", "DIP_AND_RIP"]:
-            # 모멘텀은 VPIN이 높아도(매수세가 강해도) 허용폭이 큼
-            if m.get('vpin', 0) > STS_VPIN_LIMIT_MOMENTUM: return False, "Toxic Flow (Momentum)"
-            # 모멘텀은 폭발적인 거래량이 필수
-            if m.get('rvol', 0) < STS_RVOL_MIN_MOMENTUM: return False, "Weak Vol (Momentum)"
+            # 모멘텀 전략의 VPIN/RVOL 필터는 위에서 이미 처리했거나 완화됨
+            if rvol < STS_RVOL_MIN_MOMENTUM: return False, "Weak Vol (Momentum)"
             
         return True, "PASS"
 
@@ -1138,15 +1259,64 @@ class SniperBot:
                 print(f"👀 [AIM] {self.ticker} Start Aiming...", flush=True)
 
         elif self.state == "AIMING":
-            # 🔥 [V7.1 Strict Fast-Track] 고득점 과신 금지
-            # 점수가 높아도 OFI(체결강도)와 OBI(호가)가 뒷받침되어야 즉시 발사
+            # ---------------------------------------------------------
+            # 🔥 [Step 1] Zero-Latency Fire (초단타 돌파 전략)
+            # ---------------------------------------------------------
+            # 전략: 10초 평균 대비 속도/스프레드 급변 + 직전 고점 돌파 + VWAP 지지
+            
+            # 1. 지표 추출 (Analyzer에서 계산해준 값들 사용)
+            tick_speed = m.get('tick_speed', 0)
+            tick_speed_avg = m.get('tick_speed_avg_10s', 1) 
+            spread = m.get('spread', 0)
+            spread_avg = m.get('spread_avg_10s', 100)
+            book_usd = m.get('top5_book_usd', 0)
+            prev_high = m.get('prev_1m_high', 99999)
+            
+            # 2. 상세 조건 체크 (4대 조건)
+            
+            # (A) 속도 & 수급: 속도가 평소의 3배 & OFI 가속도 양수 (세력 급습)
+            cond_speed = (tick_speed >= tick_speed_avg * 3.0) and (m.get('ofi_accel', 0) > 0)
+            
+            # (B) 스프레드 수렴: 평소의 0.7배로 좁아짐 + 호가 잔량 안전판($100k, 급등시 $50k)
+            # 논리: 스프레드가 좁아진다는 건 '발사 직전'의 응축 신호
+            min_book_zl = 100_000 if m.get('rvol', 0) < 5.0 else 50_000
+            cond_spread = (spread <= spread_avg * 0.7) and (book_usd >= min_book_zl)
+            
+            # (C) RVOL & VPIN: 거래량 폭발(2.5배↑) + 독성 건전(0.6~1.0)
+            cond_vol = (m.get('rvol', 0) >= 2.5) and (0.6 <= m.get('vpin', 0) <= 1.0)
+            
+            # (D) 가격 & 추세 안전장치 (Safety Guard)
+            # - Breakout: 직전 1분 고점 돌파
+            # - Cap: VWAP +1% ~ +3% 구간 (너무 비싸면 추격매수 금지)
+            # - Regime: Hurst > 0.55 (확실한 추세장)
+            cond_price = (
+                m['last_price'] > prev_high and         
+                1.0 <= m.get('vwap_dist', 0) <= 3.0 and 
+                m.get('hurst', 0.5) > 0.55             
+            )
+            
+            # 3. 최종 판단 (조건 만족 시 즉시 진입)
+            if cond_speed and cond_spread and cond_vol and cond_price and is_pass:
+                 print(f"⚡ [ZERO-LATENCY] {self.ticker} BREAKOUT! (Spd:{tick_speed} Spr:{spread:.2f}%)", flush=True)
+                 # 전략명을 'ZERO_LATENCY'로 명시하여 발사
+                 self.fire(m['last_price'], ai_prob, m, strategy="ZERO_LATENCY")
+                 return
+
+            # ---------------------------------------------------------
+            # [Step 2] 표준 패스트트랙 (Standard Fast-Track)
+            # ---------------------------------------------------------
+            # 기존 로직 유지: 점수가 아주 높으면(80점↑) 안전하게 진입
             if final_score >= thresh['fast_track'] and is_pass:
-                 if m.get('ofi', 0) > 0 and m.get('weighted_obi', 0) > 0.4 and m.get('spread', 100) < 0.6:
-                     print(f"⚡ [FAST] {self.ticker} Verified Trigger!", flush=True)
+                 # 최소한의 수급(OFI 양수)과 호가(OBI) 확인
+                 if m.get('ofi', 0) > 0 and m.get('weighted_obi', 0) > 0.4:
+                     print(f"⚡ [FAST] {self.ticker} High Score Trigger!", flush=True)
                      self.fire(m['last_price'], ai_prob, m, strategy=strategy)
                      return
 
-            # Micro-Confirmation
+            # ---------------------------------------------------------
+            # [Step 3] 일반 확인 사살 (Micro-Confirmation)
+            # ---------------------------------------------------------
+            # 가격이 1초 동안 안 빠지고 버티거나, 호가가 좋으면 진입
             price_change_pct = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
             
             if final_score >= thresh['entry'] and is_pass:
@@ -1154,11 +1324,15 @@ class SniperBot:
                     self.fire(m['last_price'], ai_prob, m, strategy=strategy)
                     return
 
+            # ---------------------------------------------------------
+            # [Step 4] 포기 (Timeout)
+            # ---------------------------------------------------------
             elapsed = time.time() - self.aiming_start_time
+            # 1초 지났거나 가격이 미끄러지면 조준 해제
             if elapsed > thresh['confirm_window'] or price_change_pct < thresh['max_slip']:
                 self.state = "WATCHING"
                 self.aiming_start_time = 0
-
+            
         elif self.state == "FIRED":
             self.manage_position(m, m['last_price']) # m 전체 전달
     
