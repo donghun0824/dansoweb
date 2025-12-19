@@ -775,21 +775,19 @@ class MicrostructureAnalyzer:
             traceback.print_exc()
             return None      
 
-# [STS_Engine.py] TargetSelector 클래스 (최종 수정본)
+# [STS_Engine.py] TargetSelector 클래스 (Hybrid Mode 적용 - 최종 수정본)
 
 class TargetSelector:
     def __init__(self, api_key=None):
         self.snapshots = {} 
-        self.static_stats = {}  # 🔥 [NEW] 정적 데이터(전일 거래량 등) 저장소
+        self.static_stats = {}  # 정적 데이터(전일 거래량 등) 저장소
         self.last_gc_time = time.time()
         self.api_key = api_key 
         
-        # 🔥 [핵심] 봇 시작 시 데이터 복구 절차
+        # 🔥 [핵심] 봇 시작 시 데이터 로딩 및 초기 스냅샷
         if self.api_key:
-            # 1. 참조 데이터(전일 거래량) 먼저 로딩 (RVOL 분모 확보)
-            self.load_static_data()
-            # 2. 오늘 장중 스냅샷 데이터 복구
-            self.fetch_initial_market_state()
+            self.load_static_data()       # 전일 거래량 (RVOL용)
+            self.refresh_market_snapshot() # 🔥 [변경] API 폴링 함수 호출
         else:
             print("⚠️ [Selector] API Key missing. Cold Start protection disabled.", flush=True)
 
@@ -836,28 +834,36 @@ class TargetSelector:
         except Exception as e:
             print(f"❌ [Error] Reference Data Load Exception: {e}", flush=True)
 
-    def fetch_initial_market_state(self):
-        """Polygon API를 통해 장중 재시작 시에도 누적 거래량(v)과 시가(o)를 복구함"""
-        print("🌍 [Selector] Fetching Market Snapshot (Recovering Data)...", flush=True)
+    # 🔥 [핵심 변경] 함수 이름 변경 & 타임아웃 단축 (5초)
+    def refresh_market_snapshot(self):
+        """
+        [Hybrid Mode] 유료 플랜의 강력함을 이용해 API를 직접 호출하여 데이터 갱신
+        웹소켓이 끊겨도 이 함수가 돌면 봇은 죽지 않습니다.
+        """
+        # print("🌍 [Selector] API Snapshot Polling...", flush=True) # 로그 너무 많으면 주석 처리
         try:
+            # 유료 플랜이므로 타임아웃 짧게(5초) 잡고 빠르게 치고 빠짐
             url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey={self.api_key}"
             
-            with httpx.Client(timeout=30.0) as client:
+            with httpx.Client(timeout=5.0) as client:
                 resp = client.get(url)
             
             if resp.status_code == 200:
                 data = resp.json()
-                count = 0
                 if 'tickers' in data:
                     for item in data['tickers']:
                         t = item['ticker']
                         day = item.get('day', {})
                         min_bar = item.get('min', {}) 
                         
+                        # 거래량 없으면 무시
                         if not day.get('v') or not day.get('o'): continue
+                        
+                        # 현재가 계산
                         curr_price = item.get('lastTrade', {}).get('p', min_bar.get('c', day.get('c')))
                         if not curr_price: continue
 
+                        # 딕셔너리가 없으면 생성, 있으면 갱신 (덮어쓰기)
                         self.snapshots[t] = {
                             'o': day['o'],      
                             'h': day.get('h', curr_price),
@@ -866,14 +872,12 @@ class TargetSelector:
                             'v': day['v'],           
                             'vwap': day.get('vw', curr_price),
                             'start_price': day['o'], 
-                            'last_updated': time.time()
+                            'last_updated': time.time() # 🔥 시간 갱신 (생존 신고)
                         }
-                        count += 1
-                print(f"✅ [Selector] Snapshot Loaded! {count} tickers recovered.", flush=True)
             else:
-                print(f"❌ [Selector] Snapshot Failed: {resp.status_code}", flush=True)
+                print(f"⚠️ Snapshot Poll Failed: {resp.status_code}", flush=True)
         except Exception as e:
-            print(f"❌ [Selector] Snapshot Error: {e}", flush=True)
+            print(f"❌ Snapshot Poll Error: {e}", flush=True)
 
     def update(self, agg_data):
         t = agg_data['sym']
@@ -918,8 +922,7 @@ class TargetSelector:
                 d = self.snapshots.get(t)
                 if not d: continue
                 
-                # 🔥 [수정] DB에 저장할 때 RVOL 값도 계산해서 넣음
-                # 0으로 넣으면 웹 대시보드에서 RVOL을 못 봅니다.
+                # DB 저장 시 rvol 값도 계산해서 넣음
                 ref = self.static_stats.get(t, {'prev_vol': 1000000})
                 rvol_est = d['v'] / ref['prev_vol']
                 

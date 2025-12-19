@@ -1,4 +1,5 @@
-# worker.py
+# [worker.py] 최종 수정본 (Hybrid Mode + Data-only FCM + Async Scan)
+
 import redis
 import json
 import os
@@ -11,14 +12,14 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 
 try:
-    # ✅ [수정] STS_Engine에서 DB 관련 함수(init_db, get_db_connection)까지 모두 가져옵니다.
+    # STS_Engine에서 필요한 클래스 및 함수 임포트
     from STS_Engine import (
         STSPipeline, 
         STS_TARGET_COUNT, 
         SniperBot, 
         DB_WORKER_POOL, 
-        init_db,             # 추가됨
-        get_db_connection    # 추가됨
+        init_db,             
+        get_db_connection    
     )
 except ImportError:
     print("❌ [Worker Error] 'STS_Engine.py'를 찾을 수 없습니다. 경로를 확인하세요.")
@@ -27,13 +28,12 @@ except ImportError:
 # --- 설정 ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
 FIREBASE_ADMIN_SDK_JSON_STR = os.environ.get('FIREBASE_ADMIN_SDK_JSON')
-# 🔥 [추가] Cold Start 방지용 API Key 안전장치
 POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
-if not POLYGON_API_KEY:
-    print("⚠️ [Warning] 'POLYGON_API_KEY'가 없습니다! 재시작 시 데이터 복구(Snapshot) 기능이 작동하지 않습니다.", flush=True)
-r = redis.from_url(REDIS_URL)
 
-# [수정] Redis 블로킹 방지를 위한 스레드 풀 (시세 처리 + 알림 발송 = 최소 2개 필요)
+if not POLYGON_API_KEY:
+    print("⚠️ [Warning] 'POLYGON_API_KEY'가 없습니다! 데이터 복구 기능이 작동하지 않습니다.", flush=True)
+
+r = redis.from_url(REDIS_URL)
 REDIS_POOL = ThreadPoolExecutor(max_workers=2)
 
 def init_firebase_worker():
@@ -53,19 +53,15 @@ def init_firebase_worker():
     except Exception as e:
         print(f"⚠️ [Worker] Firebase Init Warning: {e}", flush=True)
 
-# 웜업을 안전한 비동기 태스크로 실행하는 헬퍼 (기존 코드 유지)
 def run_warmup_task(bot):
     try:
-        # threading.Thread 대신 asyncio.create_task 사용 (충돌 해결 핵심)
         asyncio.create_task(bot.warmup())
     except Exception as e:
         print(f"⚠️ [Warmup Start Error] {e}")
 
-# [worker.py] process_fcm_job 함수 (Data-only Message 방식 - 최종 수정)
-
+# [알림 처리] 데이터 전용 메시지 발송 함수
 def process_fcm_job():
     try:
-        # 1. 큐에서 데이터 꺼내기
         packed_data = r.rpop('fcm_queue')
         if not packed_data: return 
 
@@ -73,7 +69,6 @@ def process_fcm_job():
         ticker = task['ticker']
         score = task['score']
         
-        # 2. DB에서 토큰 가져오기
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT token, min_score FROM fcm_tokens")
@@ -83,7 +78,6 @@ def process_fcm_job():
 
         if not subscribers: return
 
-        # 3. 제목/내용 생성
         if task.get('entry') and task.get('tp'):
             title = f"BUY {ticker} (Score: {score})"
             body = f"Entry: ${task['entry']} / TP: ${task['tp']}"
@@ -91,8 +85,7 @@ def process_fcm_job():
             title = f"SCAN {ticker} (Score: {score})"
             body = f"Current: ${task['price']}"
 
-        # 🔥 [핵심 변경] notification 옵션을 쓰지 않기 위해
-        # 제목(title)과 내용(body)을 data_payload 안에 다 집어넣습니다.
+        # 🔥 [핵심] notification 없음, data에 모든 정보 포함
         data_payload = {
             'title': title,   
             'body': body,     
@@ -118,12 +111,9 @@ def process_fcm_job():
             except: pass
 
             try:
-                # 🔥 [핵심] notification=... 을 완전히 삭제했습니다.
-                # 오직 data=... 만 보냅니다. 
-                # 이렇게 해야 웹(Service Worker)에서 알림을 100% 제어할 수 있습니다.
                 msg = messaging.Message(
                     token=token,
-                    data=data_payload
+                    data=data_payload # Only Data!
                 )
                 messaging.send(msg)
                 success += 1
@@ -141,64 +131,120 @@ def process_fcm_job():
     except Exception as e:
         print(f"❌ [Worker FCM Error] {e}", flush=True)
 
-# 🔥 알림만 전담하는 독립적인 비동기 루프 (새로 추가됨)
 async def fcm_consumer_loop():
     print("📨 [FCM Worker] Started independent notification loop", flush=True)
     loop = asyncio.get_running_loop()
     while True:
         try:
-            # 0.1초마다 큐 확인 (메인 시세 처리와 상관없이 독립적으로 실행됨)
             await loop.run_in_executor(REDIS_POOL, process_fcm_job)
             await asyncio.sleep(0.1) 
         except Exception as e:
             print(f"❌ [FCM Loop Error] {e}", flush=True)
             await asyncio.sleep(1)
 
+async def send_test_notification():
+    """앱 켜지면 무조건 알림 하나 보내서 테스트"""
+    print("🔔 [Test] Sending startup notification...", flush=True)
+    try:
+        payload = {
+            'ticker': "TEST-BOT",
+            'price': "123.45",
+            'score': "99",
+            'entry': "120.00",
+            'tp': "130.00"
+        }
+        await r.lpush('fcm_queue', json.dumps(payload))
+    except Exception as e:
+        print(f"❌ [Test] Failed: {e}")
 
-# 메인 루프를 비동기 함수로 변경
+# 🔥 [핵심 추가] 스캐너 루프 (별도 태스크로 분리)
+# 여기서 2초마다 API를 때리고(refresh_market_snapshot), 종목을 고릅니다.
+async def task_global_scan(pipeline, bot_attach_times):
+    print("🔭 [Scanner] Started (Hybrid Mode: 2s Interval)", flush=True)
+    loop = asyncio.get_running_loop()
+    
+    while True:
+        try:
+            # 1. [API Polling] 데이터 강제 갱신
+            await loop.run_in_executor(
+                DB_WORKER_POOL, 
+                pipeline.selector.refresh_market_snapshot # 👈 2초마다 호출됨
+            )
+
+            # 2. [Scanning] 후보군 선별
+            candidates = await loop.run_in_executor(
+                DB_WORKER_POOL,
+                partial(pipeline.selector.get_top_gainers_candidates, limit=10)
+            )
+            
+            # 3. [Management] 봇 붙이기/떼기
+            if candidates:
+                target_top3 = pipeline.selector.get_best_snipers(candidates, limit=STS_TARGET_COUNT)
+                current_set = set(pipeline.snipers.keys())
+                new_set = set(target_top3)
+                
+                # Detach
+                to_remove = current_set - new_set
+                now = time.time()
+                for rem in to_remove:
+                    attach_time = bot_attach_times.get(rem, 0)
+                    if now - attach_time < 60: continue 
+                    
+                    if rem in pipeline.snipers: 
+                        print(f"👋 [Worker] Detach: {rem}", flush=True)
+                        del pipeline.snipers[rem]
+                        if rem in bot_attach_times: del bot_attach_times[rem]
+                        r.srem('focused_tickers', rem)
+                
+                # Attach
+                for add in (new_set - current_set):
+                    if add not in pipeline.snipers:
+                        print(f"🚀 [Worker] Attach: {add}", flush=True)
+                        new_bot = SniperBot(add, pipeline.logger, pipeline.selector, pipeline.model_bytes)
+                        pipeline.snipers[add] = new_bot
+                        bot_attach_times[add] = now
+                        run_warmup_task(new_bot)
+                        r.sadd('focused_tickers', add)
+
+            # 4. [Cleanup]
+            pipeline.selector.garbage_collect()
+            
+            # 5. [Wait] 2초 대기 (유료 플랜이라 2초도 널널함)
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            print(f"⚠️ Scanner Error: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            await asyncio.sleep(5)
+
+# 메인 루프 (이제는 시세 처리만 담당)
 async def redis_consumer():
     print("🧠 [Worker] Starting Logic Engine (Async Redis Mode)...", flush=True)
     
-    # DB 및 Firebase 초기화
-    # (반드시 STS_Engine에서 가져온 init_db여야 함)
     init_db()
     init_firebase_worker()
+    await send_test_notification()
 
     print("⏳ [System] Initializing Pipeline...", flush=True)
-    
-    # 파이프라인 생성 (여기서 TargetSelector가 스냅샷 로딩 시도)
     pipeline = STSPipeline()
-    
-    # 🔥 [수정] 스냅샷이 진짜로 로드됐는지 확인하는 로직 추가
-    snapshot_count = len(pipeline.selector.snapshots)
-    if snapshot_count > 0:
-        print(f"✅ [System] Snapshot Loaded Successfully! ({snapshot_count} tickers ready)", flush=True)
-    else:
-        print("⚠️ [Warning] Snapshot is EMPTY! (Cold Start)", flush=True)
-        print("   -> 장중 데이터가 쌓일 때까지 봇이 종목을 잘 못 잡을 수 있습니다.", flush=True)
     
     # 로컬 데이터 저장소
     last_agg = {}
     last_quotes = {}
-    
-    # 타이머
-    last_manager_run = time.time()
-    last_scan_run = time.time()
-    
-    # 입사 시간 기록부
     bot_attach_times = {}
 
     print("🧠 [Worker] Ready. Listening to 'ticker_stream' & 'fcm_queue'...", flush=True)
+    
+    # 🔥 태스크 분리 실행
     asyncio.create_task(fcm_consumer_loop())
+    asyncio.create_task(task_global_scan(pipeline, bot_attach_times)) # 스캐너 별도 실행
 
-    # 현재 실행 중인 루프 가져오기
     loop = asyncio.get_running_loop()
 
     while True:
         try:
-            # =========================================================
-            # 1. 시세 데이터 처리
-            # =========================================================
+            # 시세 데이터 처리 (WebSocket에서 넘어온 데이터)
             pop_result = await loop.run_in_executor(
                 REDIS_POOL, 
                 partial(r.brpop, 'ticker_stream', timeout=1)
@@ -232,56 +278,6 @@ async def redis_consumer():
                             last_quotes.get(t, {'bids':[],'asks':[]}), 
                             last_agg.get(t)
                         )
-
-            # =========================================================
-            # 3. Manager 로직 (종목 관리)
-            # =========================================================
-            now = time.time()
-
-            if now - last_manager_run > 5.0:
-                candidates = await loop.run_in_executor(
-                    DB_WORKER_POOL,
-                    partial(pipeline.selector.get_top_gainers_candidates, limit=10)
-                )
-                
-                if candidates:
-                    target_top3 = pipeline.selector.get_best_snipers(candidates, limit=STS_TARGET_COUNT)
-                    
-                    current_set = set(pipeline.snipers.keys())
-                    new_set = set(target_top3)
-                    
-                    # Detach (60초 보호)
-                    to_remove = current_set - new_set
-                    for rem in to_remove:
-                        attach_time = bot_attach_times.get(rem, 0)
-                        alive_time = now - attach_time
-                        
-                        if alive_time < 60:
-                            continue 
-                        
-                        if rem in pipeline.snipers: 
-                            print(f"👋 [Worker] Detach: {rem}", flush=True)
-                            del pipeline.snipers[rem]
-                            if rem in bot_attach_times: del bot_attach_times[rem]
-                            r.srem('focused_tickers', rem)
-                    
-                    # Attach
-                    for add in (new_set - current_set):
-                        if add not in pipeline.snipers:
-                            print(f"🚀 [Worker] Attach: {add}", flush=True)
-                            
-                            new_bot = SniperBot(add, pipeline.logger, pipeline.selector, pipeline.model_bytes)
-                            pipeline.snipers[add] = new_bot
-                            bot_attach_times[add] = time.time()
-                            
-                            run_warmup_task(new_bot)
-                            r.sadd('focused_tickers', add)
-
-                last_manager_run = now
-
-            if now - last_scan_run > 300:
-                pipeline.selector.garbage_collect()
-                last_scan_run = now
             
             if not pop_result:
                 await asyncio.sleep(0.01)
@@ -291,12 +287,10 @@ async def redis_consumer():
             await asyncio.sleep(1)
 
 if __name__ == "__main__":
-    # 윈도우 호환성
     if os.name == 'nt':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         
     try:
-        # 비동기 루프 시작
         asyncio.run(redis_consumer())
     except KeyboardInterrupt:
         print("🛑 [Worker] Stopped by user.")
