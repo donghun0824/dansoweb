@@ -1,6 +1,6 @@
-# [worker.py] 최종 수정본 (Hybrid Mode + Data-only FCM + Async Scan)
+# [worker.py] 최종 수정본 (Async Redis Fix + Hybrid Logic)
 
-import redis
+import redis.asyncio as redis  # 비동기 Redis 라이브러리
 import json
 import os
 import time
@@ -12,7 +12,6 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 
 try:
-    # STS_Engine에서 필요한 클래스 및 함수 임포트
     from STS_Engine import (
         STSPipeline, 
         STS_TARGET_COUNT, 
@@ -22,7 +21,7 @@ try:
         get_db_connection    
     )
 except ImportError:
-    print("❌ [Worker Error] 'STS_Engine.py'를 찾을 수 없습니다. 경로를 확인하세요.")
+    print("❌ [Worker Error] 'STS_Engine.py'를 찾을 수 없습니다.", flush=True)
     sys.exit(1)
 
 # --- 설정 ---
@@ -31,10 +30,10 @@ FIREBASE_ADMIN_SDK_JSON_STR = os.environ.get('FIREBASE_ADMIN_SDK_JSON')
 POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
 
 if not POLYGON_API_KEY:
-    print("⚠️ [Warning] 'POLYGON_API_KEY'가 없습니다! 데이터 복구 기능이 작동하지 않습니다.", flush=True)
+    print("⚠️ [Warning] 'POLYGON_API_KEY' Missing!", flush=True)
 
+# 비동기 Redis 클라이언트 생성
 r = redis.from_url(REDIS_URL)
-REDIS_POOL = ThreadPoolExecutor(max_workers=2)
 
 def init_firebase_worker():
     if firebase_admin._apps: return
@@ -59,22 +58,33 @@ def run_warmup_task(bot):
     except Exception as e:
         print(f"⚠️ [Warmup Start Error] {e}")
 
-# [알림 처리] 데이터 전용 메시지 발송 함수
-def process_fcm_job():
+# [알림 처리] 비동기 함수로 변경 (Redis await 사용 위함)
+async def process_fcm_job():
     try:
-        packed_data = r.rpop('fcm_queue')
+        # 1. [수정] 비동기 Redis 사용 (await 필수)
+        packed_data = await r.rpop('fcm_queue')
         if not packed_data: return 
 
         task = json.loads(packed_data)
         ticker = task['ticker']
         score = task['score']
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT token, min_score FROM fcm_tokens")
-        subscribers = cursor.fetchall()
-        cursor.close()
-        conn.close() 
+        # 2. DB 작업은 동기식이므로 별도 스레드에서 실행 (스캐너 멈춤 방지)
+        loop = asyncio.get_running_loop()
+        
+        # DB 읽기 헬퍼 함수
+        def fetch_subscribers():
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT token, min_score FROM fcm_tokens")
+                subs = cursor.fetchall()
+                cursor.close()
+                return subs
+            finally:
+                pass # 커넥션 풀 사용 중이므로 닫지 않음
+
+        subscribers = await loop.run_in_executor(DB_WORKER_POOL, fetch_subscribers)
 
         if not subscribers: return
 
@@ -85,7 +95,7 @@ def process_fcm_job():
             title = f"SCAN {ticker} (Score: {score})"
             body = f"Current: ${task['price']}"
 
-        # 🔥 [핵심] notification 없음, data에 모든 정보 포함
+        # [유지] Data-only Payload (New content available 방지)
         data_payload = {
             'title': title,   
             'body': body,     
@@ -97,53 +107,55 @@ def process_fcm_job():
 
         print(f"📨 [Worker] Sending Data-only FCM: {title}", flush=True)
 
+        init_firebase_worker()
+        
         success = 0
         failed_tokens = []
-        
-        if not firebase_admin._apps: init_firebase_worker()
 
         for row in subscribers:
             token = row[0]
-            user_min = row[1] if (len(row) > 1 and row[1] is not None) else 0
-            
             try:
+                user_min = int(row[1]) if row[1] is not None else 0
                 if float(score) < user_min: continue
             except: pass
 
             try:
-                msg = messaging.Message(
-                    token=token,
-                    data=data_payload # Only Data!
-                )
+                # notification 없이 data만 보냄
+                msg = messaging.Message(token=token, data=data_payload)
                 messaging.send(msg)
                 success += 1
             except Exception as e:
                 if "registration-token-not-registered" in str(e) or "not-found" in str(e): 
                     failed_tokens.append(token)
 
+        # 토큰 청소 (비동기 래핑)
         if failed_tokens:
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (failed_tokens,))
-            conn.commit()
-            conn.close()
+            def clean_tokens(tokens):
+                conn = get_db_connection()
+                try:
+                    c = conn.cursor()
+                    c.execute("DELETE FROM fcm_tokens WHERE token = ANY(%s)", (tokens,))
+                    conn.commit()
+                    c.close()
+                finally:
+                    pass
+            await loop.run_in_executor(DB_WORKER_POOL, partial(clean_tokens, failed_tokens))
 
     except Exception as e:
         print(f"❌ [Worker FCM Error] {e}", flush=True)
 
 async def fcm_consumer_loop():
     print("📨 [FCM Worker] Started independent notification loop", flush=True)
-    loop = asyncio.get_running_loop()
     while True:
         try:
-            await loop.run_in_executor(REDIS_POOL, process_fcm_job)
+            # [수정] 직접 await 호출 (async 함수이므로 executor 불필요)
+            await process_fcm_job()
             await asyncio.sleep(0.1) 
         except Exception as e:
             print(f"❌ [FCM Loop Error] {e}", flush=True)
             await asyncio.sleep(1)
 
 async def send_test_notification():
-    """앱 켜지면 무조건 알림 하나 보내서 테스트"""
     print("🔔 [Test] Sending startup notification...", flush=True)
     try:
         payload = {
@@ -153,31 +165,27 @@ async def send_test_notification():
             'entry': "120.00",
             'tp': "130.00"
         }
+        # [수정] await r.lpush 사용 (비동기)
         await r.lpush('fcm_queue', json.dumps(payload))
     except Exception as e:
-        print(f"❌ [Test] Failed: {e}")
+        print(f"❌ [Test] Failed: {e}", flush=True)
 
-# 🔥 [핵심 추가] 스캐너 루프 (별도 태스크로 분리)
-# 여기서 2초마다 API를 때리고(refresh_market_snapshot), 종목을 고릅니다.
+# 스캐너 태스크 (기존 로직 유지)
 async def task_global_scan(pipeline, bot_attach_times):
     print("🔭 [Scanner] Started (Hybrid Mode: 2s Interval)", flush=True)
     loop = asyncio.get_running_loop()
     
     while True:
         try:
-            # 1. [API Polling] 데이터 강제 갱신
-            await loop.run_in_executor(
-                DB_WORKER_POOL, 
-                pipeline.selector.refresh_market_snapshot # 👈 2초마다 호출됨
-            )
+            # API Polling
+            await loop.run_in_executor(DB_WORKER_POOL, pipeline.selector.refresh_market_snapshot)
 
-            # 2. [Scanning] 후보군 선별
+            # Scanning
             candidates = await loop.run_in_executor(
                 DB_WORKER_POOL,
                 partial(pipeline.selector.get_top_gainers_candidates, limit=10)
             )
             
-            # 3. [Management] 봇 붙이기/떼기
             if candidates:
                 target_top3 = pipeline.selector.get_best_snipers(candidates, limit=STS_TARGET_COUNT)
                 current_set = set(pipeline.snipers.keys())
@@ -194,7 +202,7 @@ async def task_global_scan(pipeline, bot_attach_times):
                         print(f"👋 [Worker] Detach: {rem}", flush=True)
                         del pipeline.snipers[rem]
                         if rem in bot_attach_times: del bot_attach_times[rem]
-                        r.srem('focused_tickers', rem)
+                        await r.srem('focused_tickers', rem) # Async Redis
                 
                 # Attach
                 for add in (new_set - current_set):
@@ -204,21 +212,16 @@ async def task_global_scan(pipeline, bot_attach_times):
                         pipeline.snipers[add] = new_bot
                         bot_attach_times[add] = now
                         run_warmup_task(new_bot)
-                        r.sadd('focused_tickers', add)
+                        await r.sadd('focused_tickers', add) # Async Redis
 
-            # 4. [Cleanup]
             pipeline.selector.garbage_collect()
-            
-            # 5. [Wait] 2초 대기 (유료 플랜이라 2초도 널널함)
             await asyncio.sleep(2)
 
         except Exception as e:
             print(f"⚠️ Scanner Error: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
             await asyncio.sleep(5)
 
-# 메인 루프 (이제는 시세 처리만 담당)
+# 메인 루프
 async def redis_consumer():
     print("🧠 [Worker] Starting Logic Engine (Async Redis Mode)...", flush=True)
     
@@ -229,26 +232,21 @@ async def redis_consumer():
     print("⏳ [System] Initializing Pipeline...", flush=True)
     pipeline = STSPipeline()
     
-    # 로컬 데이터 저장소
     last_agg = {}
     last_quotes = {}
     bot_attach_times = {}
 
     print("🧠 [Worker] Ready. Listening to 'ticker_stream' & 'fcm_queue'...", flush=True)
     
-    # 🔥 태스크 분리 실행
+    # 두 개의 태스크 병렬 실행
     asyncio.create_task(fcm_consumer_loop())
-    asyncio.create_task(task_global_scan(pipeline, bot_attach_times)) # 스캐너 별도 실행
+    asyncio.create_task(task_global_scan(pipeline, bot_attach_times))
 
-    loop = asyncio.get_running_loop()
-
+    # 메인 시세 처리 루프
     while True:
         try:
-            # 시세 데이터 처리 (WebSocket에서 넘어온 데이터)
-            pop_result = await loop.run_in_executor(
-                REDIS_POOL, 
-                partial(r.brpop, 'ticker_stream', timeout=1)
-            )
+            # [수정] await r.brpop 직접 호출 (비동기이므로 executor 불필요)
+            pop_result = await r.brpop('ticker_stream', timeout=1)
             
             if pop_result:
                 _, msg = pop_result
