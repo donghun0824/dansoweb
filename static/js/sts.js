@@ -650,3 +650,48 @@ window.showInfo = function(key) {
 window.closeInfo = function() {
     if(els.modal) els.modal.style.display = 'none';
 }
+/* ==========================================================================
+   [FIX] MISSING FUNCTION: renderSignals
+   ========================================================================== */
+function renderSignals(logs) {
+    // 1. DOM 요소가 없으면 중단
+    if (!els.signals) return;
+    
+    // 2. 기존 내용 초기화
+    els.signals.innerHTML = '';
+    
+    // 3. 로그가 없으면 중단
+    if (!logs || logs.length === 0) return;
+
+    // 4. 로그 반복 출력
+    logs.forEach(log => {
+        // 타임스탬프 처리 (시:분:초만 자르기)
+        let timeStr = '--:--:--';
+        if (log.timestamp) {
+            // DB에서 온 timestamp가 "YYYY-MM-DD HH:MM:SS" 형식이거나 ISO 형식이면 시간만 추출
+            timeStr = log.timestamp.split(' ')[1] || log.timestamp.split('T')[1].split('.')[0];
+        } else if (log.time) {
+             timeStr = log.time.split(' ')[1];
+        }
+        
+        // 점수 색상
+        const scoreVal = parseInt(log.score || 0);
+        const scoreColor = scoreVal >= 80 ? '#007AFF' : '#333';
+
+        const html = `
+            <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); animation: fadeIn 0.5s;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span style="background:rgba(52, 199, 89, 0.15); color:#34C759; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold;">BUY SIGNAL</span>
+                    <span style="font-size:10px; color:#999;">${timeStr}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:800; color:#1D1D1F; font-size:14px;">${log.ticker}</span>
+                    <div style="text-align:right;">
+                        <span style="font-family:'JetBrains Mono'; font-size:13px; font-weight:600;">$${parseFloat(log.price).toFixed(2)}</span>
+                        <span style="font-size:10px; color:${scoreColor}; margin-left:5px;">(${scoreVal}pts)</span>
+                    </div>
+                </div>
+            </div>`;
+        els.signals.insertAdjacentHTML('beforeend', html);
+    });
+}
