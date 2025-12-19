@@ -61,45 +61,31 @@ def run_warmup_task(bot):
     except Exception as e:
         print(f"⚠️ [Warmup Start Error] {e}")
 
-# 🔥 [추가] 알림 큐 처리 함수 (정규화된 방식)
 def process_fcm_job():
     """
-    Redis 'fcm_queue'에서 작업을 꺼내 실제 푸시를 쏘는 함수
+    Redis 'fcm_queue'에서 작업을 꺼내 실제 푸시를 쏘는 함수 (수정됨)
     """
     try:
-        # 1. 큐에서 하나 꺼내기 (Non-blocking rpop 사용)
+        # 1. 큐에서 하나 꺼내기
         packed_data = r.rpop('fcm_queue')
-        
-        if not packed_data: return # 할 일 없으면 리턴
+        if not packed_data: return 
 
         # 2. 데이터 풀기
         task = json.loads(packed_data)
         ticker = task['ticker']
         score = task['score']
         
-        # 3. DB에서 토큰 가져오기 (직접 수행)
+        # 3. DB에서 토큰 가져오기
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT token, min_score FROM fcm_tokens")
         subscribers = cursor.fetchall()
         cursor.close()
-        conn.close() # 바로 반납
+        conn.close() 
 
         if not subscribers: return
 
-        # 4. 정규화된 알림 설정 (Android/iOS 표준)
-        # [Android] 중요도 높음 + 기본 소리
-        android_config = messaging.AndroidConfig(
-            priority='high',
-            notification=messaging.AndroidNotification(sound='default', click_action='FLUTTER_NOTIFICATION_CLICK')
-        )
-        # [iOS] 즉시 전송 + 기본 소리
-        apns_config = messaging.APNSConfig(
-            headers={'apns-priority': '10'},
-            payload=messaging.APNSPayload(aps=messaging.Aps(sound='default', content_available=True))
-        )
-
-        # 내용 구성
+        # 🔥 [수정 1] 제목(title)과 내용(body)을 먼저 정의합니다! (순서 변경)
         if task.get('entry') and task.get('tp'):
             title = f"BUY {ticker} (Score: {score})"
             body = f"Entry: ${task['entry']} / TP: ${task['tp']}"
@@ -107,11 +93,36 @@ def process_fcm_job():
             title = f"SCAN {ticker} (Score: {score})"
             body = f"Current: ${task['price']}"
 
+        # 4. 정규화된 알림 설정 (Android/iOS 표준)
+        
+        # 🔥 [수정 2] Android 설정에 제목과 내용을 직접 넣습니다.
+        android_config = messaging.AndroidConfig(
+            priority='high',
+            notification=messaging.AndroidNotification(
+                title=title,    # 👈 갤럭시 필독 사항
+                body=body,      # 👈 갤럭시 필독 사항
+                sound='default', 
+                click_action='FLUTTER_NOTIFICATION_CLICK'
+            )
+        )
+        
+        # 🔥 [수정 3] iOS 설정에도 제목과 내용을 넣습니다.
+        apns_config = messaging.APNSConfig(
+            headers={'apns-priority': '10'},
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    alert=messaging.ApsAlert(title=title, body=body), # 👈 아이폰 필독 사항
+                    sound='default', 
+                    content_available=True
+                )
+            )
+        )
+
         # 데이터 페이로드
         data_payload = {
             'type': 'signal',
             'ticker': ticker,
-            'price': str(task['price']), # 문자열 안전 변환
+            'price': str(task['price']), 
             'score': str(score),
             'click_action': 'FLUTTER_NOTIFICATION_CLICK'
         }
@@ -156,7 +167,6 @@ def process_fcm_job():
     except Exception as e:
         print(f"❌ [Worker FCM Error] {e}", flush=True)
 
-        # [여기에 붙여넣기]
 # 🔥 알림만 전담하는 독립적인 비동기 루프 (새로 추가됨)
 async def fcm_consumer_loop():
     print("📨 [FCM Worker] Started independent notification loop", flush=True)
