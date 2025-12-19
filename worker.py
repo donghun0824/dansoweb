@@ -63,7 +63,7 @@ def run_warmup_task(bot):
 
 def process_fcm_job():
     """
-    Redis 'fcm_queue'에서 작업을 꺼내 실제 푸시를 쏘는 함수 (수정됨)
+    Redis 'fcm_queue'에서 작업을 꺼내 실제 푸시를 쏘는 함수 (수정됨: 알림 호환성 개선 최종본)
     """
     try:
         # 1. 큐에서 하나 꺼내기
@@ -85,7 +85,7 @@ def process_fcm_job():
 
         if not subscribers: return
 
-        # 🔥 [수정 1] 제목(title)과 내용(body)을 먼저 정의합니다! (순서 변경)
+        # 4. 제목과 내용 정의
         if task.get('entry') and task.get('tp'):
             title = f"BUY {ticker} (Score: {score})"
             body = f"Entry: ${task['entry']} / TP: ${task['tp']}"
@@ -93,32 +93,7 @@ def process_fcm_job():
             title = f"SCAN {ticker} (Score: {score})"
             body = f"Current: ${task['price']}"
 
-        # 4. 정규화된 알림 설정 (Android/iOS 표준)
-        
-        # 🔥 [수정 2] Android 설정에 제목과 내용을 직접 넣습니다.
-        android_config = messaging.AndroidConfig(
-            priority='high',
-            notification=messaging.AndroidNotification(
-                title=title,    # 👈 갤럭시 필독 사항
-                body=body,      # 👈 갤럭시 필독 사항
-                sound='default', 
-                click_action='FLUTTER_NOTIFICATION_CLICK'
-            )
-        )
-        
-        # 🔥 [수정 3] iOS 설정에도 제목과 내용을 넣습니다.
-        apns_config = messaging.APNSConfig(
-            headers={'apns-priority': '10'},
-            payload=messaging.APNSPayload(
-                aps=messaging.Aps(
-                    alert=messaging.ApsAlert(title=title, body=body), # 👈 아이폰 필독 사항
-                    sound='default', 
-                    content_available=True
-                )
-            )
-        )
-
-        # 데이터 페이로드
+        # 5. 데이터 페이로드 (앱 내부 로직용 - 화면 이동 등)
         data_payload = {
             'type': 'signal',
             'ticker': ticker,
@@ -129,7 +104,7 @@ def process_fcm_job():
 
         print(f"📨 [Worker] Sending FCM: {title}", flush=True)
 
-        # 5. 발송 루프
+        # 6. 발송 루프
         success = 0
         failed_tokens = []
         
@@ -144,17 +119,35 @@ def process_fcm_job():
             except: pass
 
             try:
+                # 🔥 [최종 수정 핵심] 
+                # android_config, apns_config에서 'title', 'body'를 모두 제거했습니다.
+                # 대신 최상위 notification 객체 하나만 믿고 보냅니다. (가장 호환성이 좋습니다)
                 msg = messaging.Message(
                     token=token,
-                    notification=messaging.Notification(title=title, body=body),
+                    notification=messaging.Notification(
+                        title=title, 
+                        body=body
+                    ),
                     data=data_payload,
-                    android=android_config,
-                    apns=apns_config
+                    android=messaging.AndroidConfig(
+                        priority='high',
+                        notification=messaging.AndroidNotification(
+                            sound='default',
+                            click_action='FLUTTER_NOTIFICATION_CLICK'
+                        )
+                    ),
+                    apns=messaging.APNSConfig(
+                        payload=messaging.APNSPayload(
+                            aps=messaging.Aps(sound='default')
+                        )
+                    )
                 )
                 messaging.send(msg)
                 success += 1
             except Exception as e:
-                if "registration-token-not-registered" in str(e): failed_tokens.append(token)
+                # 토큰이 만료되었거나 유효하지 않은 경우
+                if "registration-token-not-registered" in str(e) or "not-found" in str(e): 
+                    failed_tokens.append(token)
 
         # 토큰 청소
         if failed_tokens:

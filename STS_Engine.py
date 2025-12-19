@@ -38,18 +38,18 @@ REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
 r = redis.from_url(REDIS_URL)
 
 # [A] 스캐너 설정 (Target Selector) - 종목 발굴 기준
-STS_SCAN_MIN_DOLLAR_VOL = 5_000_000  # 최소 거래대금 (500만불)
-STS_SCAN_MIN_PRICE = 1.0            # 최소 주가 (1.0불 - 잡주 차단)
-STS_SCAN_MAX_PRICE = 100          # 최대 주가 (100불)
-STS_SCAN_MIN_CHANGE = 1.5            # 최소 등락률 (1.5%)
+STS_SCAN_MIN_DOLLAR_VOL = 500_000  # 최소 거래대금 (50만불)
+STS_SCAN_MIN_PRICE = 0.5            # 최소 주가 (0.5불 -)
+STS_SCAN_MAX_PRICE = 30          # 최대 주가 (30불)
+STS_SCAN_MIN_CHANGE = 2.0            # 최소 등락률 (2.0%)
 STS_TARGET_COUNT = 3                 # 최종 감시할 종목 수
 
 # [B] 스나이퍼 봇 설정 (SniperBot) - 진입 필터 (Hard Kill)
 STS_BOT_MAX_SPREAD = 1.2             # 허용 스프레드 (1.2% 초과시 진입 금지)
 STS_BOT_MIN_TICK_SPEED = 2           # 최소 체결 속도 (초당 2건 이상)
-STS_BOT_MIN_LIQUIDITY_1M = 200_000 # 1분 최소 거래대금 (100만불)
+STS_BOT_MIN_LIQUIDITY_1M = 200_000 # 1분 최소 거래대금 (20만불)
 STS_BOT_SAFE_LIQUIDITY_1M = 500_000 # 안전 50만불
-STS_BOT_MIN_BOOK_USD = 50_000       # 호가창 최소 잔량 (50만불)
+STS_BOT_MIN_BOOK_USD = 50_000       # 호가창 최소 잔량 (5만불)
 STS_BOT_MIN_BOOK_RATIO = 0.05       # [비율 기준] 최소 5% (1분 거래대금 대비 호가 잔량 비율)
 
 # [C] 전략별 세부 임계값 (Sensitivity)
@@ -775,18 +775,66 @@ class MicrostructureAnalyzer:
             traceback.print_exc()
             return None      
 
-# [V7.2] Target Selector (Cold Start 해결: Snapshot API 연동)
+# [STS_Engine.py] TargetSelector 클래스 (최종 수정본)
+
 class TargetSelector:
-    def __init__(self, api_key=None): # 👈 [변경] api_key 인자 추가
+    def __init__(self, api_key=None):
         self.snapshots = {} 
+        self.static_stats = {}  # 🔥 [NEW] 정적 데이터(전일 거래량 등) 저장소
         self.last_gc_time = time.time()
         self.api_key = api_key 
         
-        # 🔥 [핵심] 봇 시작 시 Polygon Snapshot API로 오늘 누적 데이터 복구
+        # 🔥 [핵심] 봇 시작 시 데이터 복구 절차
         if self.api_key:
+            # 1. 참조 데이터(전일 거래량) 먼저 로딩 (RVOL 분모 확보)
+            self.load_static_data()
+            # 2. 오늘 장중 스냅샷 데이터 복구
             self.fetch_initial_market_state()
         else:
             print("⚠️ [Selector] API Key missing. Cold Start protection disabled.", flush=True)
+
+    def load_static_data(self):
+        """
+        [배치 작업] 최근 거래일의 '전 종목' 데이터를 한 번에 가져와서 메모리에 박아둡니다.
+        목적: 실시간 RVOL 계산을 위한 '분모(평균 거래량 대용)' 확보
+        """
+        print("💾 [System] Loading Static Reference Data (Yesterday's Vol)...", flush=True)
+        try:
+            # 1. 최근 평일(Business Day) 계산
+            import datetime
+            today = datetime.datetime.now()
+            offset = 1
+            if today.weekday() == 0: offset = 3 # 월요일이면 금요일 데이터
+            elif today.weekday() == 6: offset = 2 # 일요일이면 금요일 데이터
+            
+            target_date = (today - datetime.timedelta(days=offset)).strftime('%Y-%m-%d')
+            
+            # Grouped Daily Bars (해당 날짜의 전 종목 데이터)
+            url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{target_date}?adjusted=true&apiKey={self.api_key}"
+            
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    count = 0
+                    if 'results' in data:
+                        for item in data['results']:
+                            t = item['T']
+                            v = item.get('v', 0)
+                            # 거래량이 너무 적으면 노이즈가 심하므로 최소값 보정
+                            if v > 0:
+                                self.static_stats[t] = {
+                                    'prev_vol': max(v, 100000) # 최소 10만주로 보정
+                                }
+                                count += 1
+                        print(f"✅ [System] Static Data Loaded! ({count} tickers from {target_date})", flush=True)
+                    else:
+                        print(f"⚠️ [System] Static Data Empty (Date: {target_date})", flush=True)
+                else:
+                    print(f"⚠️ [System] Static Data Load Failed: {resp.status_code}", flush=True)
+
+        except Exception as e:
+            print(f"❌ [Error] Reference Data Load Exception: {e}", flush=True)
 
     def fetch_initial_market_state(self):
         """Polygon API를 통해 장중 재시작 시에도 누적 거래량(v)과 시가(o)를 복구함"""
@@ -794,8 +842,6 @@ class TargetSelector:
         try:
             url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey={self.api_key}"
             
-            # 🔥 [수정] requests 대신 httpx 사용 (재귀 에러 해결의 핵심)
-            # httpx는 이미 코드 상단에 import 되어 있으니 바로 쓰시면 됩니다.
             with httpx.Client(timeout=30.0) as client:
                 resp = client.get(url)
             
@@ -808,22 +854,18 @@ class TargetSelector:
                         day = item.get('day', {})
                         min_bar = item.get('min', {}) 
                         
-                        # 데이터가 부실하면(거래량/시가 없음) 스킵
                         if not day.get('v') or not day.get('o'): continue
-                        
-                        # 현재가 추정 (Last Trade -> Min Close -> Day Close 순)
                         curr_price = item.get('lastTrade', {}).get('p', min_bar.get('c', day.get('c')))
                         if not curr_price: continue
 
-                        # 🔥 [메모리 복구] 누적 거래량과 시가를 정확히 세팅
                         self.snapshots[t] = {
                             'o': day['o'],      
                             'h': day.get('h', curr_price),
                             'l': day.get('l', curr_price),
                             'c': curr_price,
-                            'v': day['v'],           # 오늘 누적 거래량 복구
+                            'v': day['v'],           
                             'vwap': day.get('vw', curr_price),
-                            'start_price': day['o'], # Fake Pump 계산용 시가 복구
+                            'start_price': day['o'], 
                             'last_updated': time.time()
                         }
                         count += 1
@@ -835,7 +877,6 @@ class TargetSelector:
 
     def update(self, agg_data):
         t = agg_data['sym']
-        # 스냅샷에 없던 신규 종목이 들어오면 초기화
         if t not in self.snapshots: 
             self.snapshots[t] = {
                 'o': agg_data['o'], 'h': agg_data['h'], 'l': agg_data['l'], 
@@ -849,10 +890,7 @@ class TargetSelector:
         d['c'] = agg_data['c']
         d['h'] = max(d['h'], agg_data['h'])
         d['l'] = min(d['l'], agg_data['l'])
-        
-        # 🔥 [수정] 복구된 v값 위에 실시간 거래량을 계속 누적
         d['v'] += agg_data['v']
-        
         d['vwap'] = agg_data.get('vw', d['c'])
         d['last_updated'] = time.time()
 
@@ -880,17 +918,23 @@ class TargetSelector:
                 d = self.snapshots.get(t)
                 if not d: continue
                 
+                # 🔥 [수정] DB에 저장할 때 RVOL 값도 계산해서 넣음
+                # 0으로 넣으면 웹 대시보드에서 RVOL을 못 봅니다.
+                ref = self.static_stats.get(t, {'prev_vol': 1000000})
+                rvol_est = d['v'] / ref['prev_vol']
+                
                 query = """
                 INSERT INTO sts_live_targets 
                 (ticker, price, ai_score, day_change, dollar_vol, rvol, status, last_updated)
-                VALUES (%s, %s, %s, %s, %s, 0, 'SCANNING', NOW()) 
+                VALUES (%s, %s, %s, %s, %s, %s, 'SCANNING', NOW()) 
                 ON CONFLICT (ticker) DO UPDATE SET
                     price = EXCLUDED.price, day_change = EXCLUDED.day_change,
                     dollar_vol = EXCLUDED.dollar_vol, ai_score = EXCLUDED.ai_score,
+                    rvol = EXCLUDED.rvol,
                     last_updated = NOW()
                 WHERE sts_live_targets.status = 'SCANNING'; 
                 """
-                cursor.execute(query, (t, float(d['c']), float(score), float(change), float(vol))) 
+                cursor.execute(query, (t, float(d['c']), float(score), float(change), float(vol), float(rvol_est))) 
             
             conn.commit()
             cursor.close()
@@ -907,37 +951,50 @@ class TargetSelector:
         for t, d in self.snapshots.items():
             if now - d['last_updated'] > 60: continue 
             
-            # 🔥 [Refactor] 상단 상수(STS_SCAN_*) 적용으로 일원화
-            
-            # 1. 가격 필터 (잡주 차단)
-            # 기존: 2.0 (하드코딩) -> 변경: STS_SCAN_MIN_PRICE (설정값 5.0)
+            # ---------------------------------------------------------
+            # 1. [Gatekeeper] 기본 입장 자격 심사
+            # ---------------------------------------------------------
             if d['c'] < STS_SCAN_MIN_PRICE or d['c'] > STS_SCAN_MAX_PRICE: continue
             
-            # 2. 유동성 필터 (최소 거래대금)
             dollar_vol = d['c'] * d['v']
-            # 기존: STS_MIN_DOLLAR_VOL -> 변경: STS_SCAN_MIN_DOLLAR_VOL
             if dollar_vol < STS_SCAN_MIN_DOLLAR_VOL: continue 
 
-            # 3. 변동성 필터 (최소 등락률)
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
-            # 기존: STS_MIN_CHANGE -> 변경: STS_SCAN_MIN_CHANGE
             if change_pct < STS_SCAN_MIN_CHANGE: continue 
 
-            # 4. Fake Pump 방지 (급등할수록 더 많은 거래량 요구)
+            # Fake Pump 방지
             required_vol = STS_SCAN_MIN_DOLLAR_VOL * (1 + (change_pct * 0.1))
             if dollar_vol < required_vol: continue
 
-            # 🔥 [핵심 수정] 점수 거품 제거
-            # 기존: change_pct * 2 (30% 오르면 60점 먹고 들어감 -> 잡주 1등 원인)
-            # 변경: change_pct * 0.5 (30% 올라도 15점만 인정 -> 나머지는 유동성으로 증명해야 함)
-            liquidity_score = np.log10(dollar_vol) * 10  
-            momentum_score = change_pct * 0.5 
+            # ---------------------------------------------------------
+            # 🚀 [Hybrid Scoring] Momentum x Liquidity Cap x RVOL
+            # ---------------------------------------------------------
             
-            # 유동성 점수 비중을 70%로 높여서 '돈 많은 종목' 우대
-            score = (momentum_score * 0.3) + (liquidity_score * 0.7)
+            # [A] Momentum Score (70% 비중) - 변동성 우선
+            # 1% 오를 때마다 2점 (최대 100점)
+            momentum_score = min(change_pct * 2.0, 100)
+
+            # [B] Liquidity Factor (30% 비중) - Cap 적용 ($100M)
+            # 1억불 넘으면 만점(100점)이지만, 더 이상 가산점은 없음 (대형주 독주 방지)
+            liquidity_raw = min(dollar_vol, 100_000_000) / 100_000_000 * 100
             
-            # 100점 초과 방지
-            score = min(score, 99)
+            # [C] RVOL Factor (가산점)
+            # 전일 거래량 대비 오늘 얼마나 터졌나?
+            ref_data = self.static_stats.get(t, {'prev_vol': 1000000})
+            rvol = d['v'] / ref_data['prev_vol']
+            
+            # RVOL이 2배 이상이면 가산점 부여 (최대 20점)
+            # 대형주는 보통 RVOL이 1.0 근처라 가산점을 못 받음
+            rvol_bonus = min(max(0, rvol - 1.0) * 10, 20)
+            
+            # 최종 점수 계산
+            # (모멘텀 70% + 유동성 30%) + RVOL보너스 + 저가주보너스
+            score = (momentum_score * 0.7) + (liquidity_raw * 0.3) + rvol_bonus
+            
+            # 가격이 10불 미만이면(가벼우면) 소폭 가산점 (+5)
+            if d['c'] < 10.0: score += 5
+            
+            score = min(score, 99) # 99점 상한선
             
             scored.append((t, score, change_pct, dollar_vol))
         
@@ -962,22 +1019,19 @@ class TargetSelector:
         메모리와 DB에서 오래된 데이터를 주기적으로 삭제합니다.
         """
         now = time.time()
-        # GC 주기가 안 되었으면 패스
         if now - self.last_gc_time < GC_INTERVAL: return
         
-        # 1. [메모리 청소] 오랫동안 업데이트 없는 스냅샷 제거
+        # 1. [메모리 청소]
         to_remove = [t for t, d in self.snapshots.items() if now - d['last_updated'] > GC_TTL]
         for t in to_remove: 
             del self.snapshots[t]
             
-        # 2. [DB 청소] 🔥 여기가 핵심! (죽은 데이터 즉시 삭제)
-        # 갱신이 멈춘 'SCANNING' 상태의 종목을 DB에서 날려버려서 웹페이지에서 사라지게 함
+        # 2. [DB 청소]
         conn = None
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # "마지막 업데이트가 1분(60초) 이상 지난 스캔 종목은 삭제하라"
             query = """
                 DELETE FROM sts_live_targets 
                 WHERE status = 'SCANNING' 
@@ -985,11 +1039,8 @@ class TargetSelector:
             """
             cursor.execute(query)
             conn.commit()
-            
-            # 삭제된 게 있으면 로그 출력
             if cursor.rowcount > 0:
                 print(f"🧹 [GC] Cleaned up {cursor.rowcount} stale targets from DB.", flush=True)
-                
             cursor.close()
         except Exception as e:
             print(f"⚠️ [GC Error] DB Cleanup failed: {e}", flush=True)
