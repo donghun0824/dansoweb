@@ -1,10 +1,10 @@
-// [firebase-messaging-sw.js] 최종 수정본
-// worker.py가 보낸 제목/내용을 그대로 표시하는 표준 방식
+// [firebase-messaging-sw.js] 최종 수정본 (데이터 메시지 처리용)
 
+// 1. 라이브러리 임포트
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 
-// 사용자님의 Config 유지
+// 2. 사용자 설정
 const firebaseConfig = {
   apiKey: "AIzaSyDWDmEgyl2z6mh8-OJ4jXubROLqbPbl6wk",
   authDomain: "gen-lang-client-0379169283.firebaseapp.com",
@@ -15,25 +15,35 @@ const firebaseConfig = {
   measurementId: "G-DFFBKLCBWS"
 };
 
+// 3. 초기화
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
+// 4. 백그라운드 메시지 핸들러
 messaging.onBackgroundMessage((payload) => {
-  console.log("[FCM SW] 백그라운드 메시지 수신:", payload);
+  console.log("[FCM SW] 데이터 메시지 수신:", payload);
 
-  // 🔥 [핵심 수정] 
-  // 기존처럼 data.price 등을 꺼내서 직접 조립하지 마세요!
-  // worker.py가 이미 notification.title과 notification.body에
-  // "BUY AAPL (Score:99)" 같은 완성된 문구를 담아서 보냈습니다.
-  // 우리는 그걸 그대로 가져다 쓰기만 하면 됩니다.
+  // 🔥 [핵심] worker.py가 title과 body를 'data' 안에 숨겨 보냈습니다.
+  // payload.notification이 아니라 payload.data에서 꺼내야 합니다.
+  const data = payload.data || {};
   
-  const notificationTitle = payload.notification.title;
-  const notificationOptions = {
-    body: payload.notification.body, // 서버가 보낸 내용 그대로 사용
+  const title = data.title || 'Danso Alert';
+  const options = {
+    body: data.body || 'Check dashboard for details.',
     icon: "/static/images/danso_logo.png",
-    // 클릭 시 앱으로 데이터 전달을 위해 data 객체는 유지
-    data: payload.data 
+    badge: "/static/images/danso_logo.png",
+    data: data // 클릭 이벤트용 데이터 전달
   };
 
-  return self.registration.showNotification(notificationTitle, notificationOptions);
+  // 서비스 워커가 직접 알림창을 만듭니다. (브라우저 개입 차단)
+  return self.registration.showNotification(title, options);
+});
+
+// 5. 알림 클릭 시 앱 열기 (UX 필수)
+self.addEventListener('notificationclick', function(event) {
+  event.notification.close();
+  // 알림 클릭하면 메인 페이지('/')를 엽니다.
+  event.waitUntil(
+    clients.openWindow('/')
+  );
 });

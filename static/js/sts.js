@@ -651,7 +651,7 @@ window.closeInfo = function() {
     if(els.modal) els.modal.style.display = 'none';
 }
 /* ==========================================================================
-   [FIX] MISSING FUNCTION: renderSignals
+   [FIX] MISSING FUNCTION: renderSignals (Safe Version)
    ========================================================================== */
 function renderSignals(logs) {
     // 1. DOM 요소가 없으면 중단
@@ -665,13 +665,28 @@ function renderSignals(logs) {
 
     // 4. 로그 반복 출력
     logs.forEach(log => {
-        // 타임스탬프 처리 (시:분:초만 자르기)
+        // [FIX] 시간 파싱 안전장치 (에러 방지)
         let timeStr = '--:--:--';
-        if (log.timestamp) {
-            // DB에서 온 timestamp가 "YYYY-MM-DD HH:MM:SS" 형식이거나 ISO 형식이면 시간만 추출
-            timeStr = log.timestamp.split(' ')[1] || log.timestamp.split('T')[1].split('.')[0];
-        } else if (log.time) {
-             timeStr = log.time.split(' ')[1];
+        const rawTime = log.timestamp || log.time; // timestamp 또는 time 필드 확인
+
+        if (rawTime) {
+            try {
+                // 문자열인지 확인 후 처리
+                const tStr = String(rawTime);
+                if (tStr.includes(' ')) {
+                    // "2023-12-20 14:30:00" 형식 -> 공백 뒤 시간만 추출
+                    timeStr = tStr.split(' ')[1]; 
+                } else if (tStr.includes('T')) {
+                    // "2023-12-20T14:30:00.000Z" ISO 형식 -> T 뒤, 점 앞 추출
+                    timeStr = tStr.split('T')[1].split('.')[0];
+                } else {
+                    // "14:30:00" 처럼 시간만 있는 경우 그대로 사용
+                    timeStr = tStr; 
+                }
+            } catch (e) {
+                console.warn("Time parse warn:", e);
+                timeStr = String(rawTime); // 에러나면 원본 그대로 표시
+            }
         }
         
         // 점수 색상

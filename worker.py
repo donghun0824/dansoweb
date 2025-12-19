@@ -61,21 +61,19 @@ def run_warmup_task(bot):
     except Exception as e:
         print(f"⚠️ [Warmup Start Error] {e}")
 
+# [worker.py] process_fcm_job 함수 (Data-only Message 방식 - 최종 수정)
+
 def process_fcm_job():
-    """
-    Redis 'fcm_queue'에서 작업을 꺼내 실제 푸시를 쏘는 함수 (수정됨: 알림 호환성 개선 최종본)
-    """
     try:
-        # 1. 큐에서 하나 꺼내기
+        # 1. 큐에서 데이터 꺼내기
         packed_data = r.rpop('fcm_queue')
         if not packed_data: return 
 
-        # 2. 데이터 풀기
         task = json.loads(packed_data)
         ticker = task['ticker']
         score = task['score']
         
-        # 3. DB에서 토큰 가져오기
+        # 2. DB에서 토큰 가져오기
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT token, min_score FROM fcm_tokens")
@@ -85,7 +83,7 @@ def process_fcm_job():
 
         if not subscribers: return
 
-        # 4. 제목과 내용 정의
+        # 3. 제목/내용 생성
         if task.get('entry') and task.get('tp'):
             title = f"BUY {ticker} (Score: {score})"
             body = f"Entry: ${task['entry']} / TP: ${task['tp']}"
@@ -93,18 +91,19 @@ def process_fcm_job():
             title = f"SCAN {ticker} (Score: {score})"
             body = f"Current: ${task['price']}"
 
-        # 5. 데이터 페이로드 (앱 내부 로직용 - 화면 이동 등)
+        # 🔥 [핵심 변경] notification 옵션을 쓰지 않기 위해
+        # 제목(title)과 내용(body)을 data_payload 안에 다 집어넣습니다.
         data_payload = {
-            'type': 'signal',
-            'ticker': ticker,
+            'title': title,   
+            'body': body,     
+            'ticker': str(ticker),
             'price': str(task['price']), 
             'score': str(score),
-            'click_action': 'FLUTTER_NOTIFICATION_CLICK'
+            'click_action': '/'
         }
 
-        print(f"📨 [Worker] Sending FCM: {title}", flush=True)
+        print(f"📨 [Worker] Sending Data-only FCM: {title}", flush=True)
 
-        # 6. 발송 루프
         success = 0
         failed_tokens = []
         
@@ -119,37 +118,19 @@ def process_fcm_job():
             except: pass
 
             try:
-                # 🔥 [최종 수정 핵심] 
-                # android_config, apns_config에서 'title', 'body'를 모두 제거했습니다.
-                # 대신 최상위 notification 객체 하나만 믿고 보냅니다. (가장 호환성이 좋습니다)
+                # 🔥 [핵심] notification=... 을 완전히 삭제했습니다.
+                # 오직 data=... 만 보냅니다. 
+                # 이렇게 해야 웹(Service Worker)에서 알림을 100% 제어할 수 있습니다.
                 msg = messaging.Message(
                     token=token,
-                    notification=messaging.Notification(
-                        title=title, 
-                        body=body
-                    ),
-                    data=data_payload,
-                    android=messaging.AndroidConfig(
-                        priority='high',
-                        notification=messaging.AndroidNotification(
-                            sound='default',
-                            click_action='FLUTTER_NOTIFICATION_CLICK'
-                        )
-                    ),
-                    apns=messaging.APNSConfig(
-                        payload=messaging.APNSPayload(
-                            aps=messaging.Aps(sound='default')
-                        )
-                    )
+                    data=data_payload
                 )
                 messaging.send(msg)
                 success += 1
             except Exception as e:
-                # 토큰이 만료되었거나 유효하지 않은 경우
                 if "registration-token-not-registered" in str(e) or "not-found" in str(e): 
                     failed_tokens.append(token)
 
-        # 토큰 청소
         if failed_tokens:
             conn = get_db_connection()
             c = conn.cursor()
