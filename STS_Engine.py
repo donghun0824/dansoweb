@@ -37,26 +37,30 @@ WS_URI = "wss://socket.polygon.io/stocks"
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
 r = redis.from_url(REDIS_URL)
 
+# ==============================================================================
+# 1. CONFIGURATION & CONSTANTS (Modified for Small-Cap Scalping)
+# ==============================================================================
+
 # [A] 스캐너 설정 (Target Selector) - 종목 발굴 기준
-STS_SCAN_MIN_DOLLAR_VOL = 500_000  # 최소 거래대금 (50만불)
-STS_SCAN_MIN_PRICE = 0.5            # 최소 주가 (0.5불 -)
-STS_SCAN_MAX_PRICE = 30          # 최대 주가 (30불)
-STS_SCAN_MIN_CHANGE = 2.0            # 최소 등락률 (2.0%)
-STS_TARGET_COUNT = 3                 # 최종 감시할 종목 수
+STS_SCAN_MIN_DOLLAR_VOL = 100_000   # [변경] 50만불 -> 10만불 (초기 포착 강화)
+STS_SCAN_MIN_PRICE = 0.5            
+STS_SCAN_MAX_PRICE = 20.0           # [변경] 30불 -> 20불 (무거운 주식 배제)
+STS_SCAN_MIN_CHANGE = 2.0           
+STS_TARGET_COUNT = 3                # 최종 활성 스나이퍼 수 (Active)
+STS_STAGING_COUNT = 10              # [신규] 관찰 대상 수 (Staging)
 
-# [B] 스나이퍼 봇 설정 (SniperBot) - 진입 필터 (Hard Kill)
-STS_BOT_MAX_SPREAD = 1.2             # 허용 스프레드 (1.2% 초과시 진입 금지)
-STS_BOT_MIN_TICK_SPEED = 2           # 최소 체결 속도 (초당 2건 이상)
-STS_BOT_MIN_LIQUIDITY_1M = 200_000 # 1분 최소 거래대금 (20만불)
-STS_BOT_SAFE_LIQUIDITY_1M = 500_000 # 안전 50만불
-STS_BOT_MIN_BOOK_USD = 50_000       # 호가창 최소 잔량 (5만불)
-STS_BOT_MIN_BOOK_RATIO = 0.05       # [비율 기준] 최소 5% (1분 거래대금 대비 호가 잔량 비율)
+# [B] 스나이퍼 봇 설정 (SniperBot) - 진입 필터 (Relaxed for Volatility)
+STS_BOT_MAX_SPREAD_RATIO = 0.5      # [신규] ATR 대비 스프레드 비율 (절대값 대신 상대값 사용)
+STS_BOT_MIN_TICK_SPEED = 2          
+STS_BOT_MIN_LIQUIDITY_1M = 50_000   # [변경] 20만불 -> 5만불 (스몰캡 생존 라인)
+STS_BOT_SAFE_LIQUIDITY_1M = 200_000 # [변경] 50만불 -> 20만불
+STS_BOT_MIN_BOOK_RATIO = 0.02       # [변경] 5% -> 2% (스몰캡은 호가가 얇음)
 
-# [C] 전략별 세부 임계값 (Sensitivity)
-STS_VPIN_LIMIT_REBOUND = 0.9         # 리바운드 전략 VPIN 한계
-STS_VPIN_LIMIT_MOMENTUM = 2.0        # 모멘텀 전략 VPIN 한계 (더 관대함)
-STS_RVOL_MIN_REBOUND = 1.0           # 리바운드 최소 RVOL
-STS_RVOL_MIN_MOMENTUM = 2.0          # 모멘텀 최소 RVOL (폭발적 거래량 필요)
+# [C] 전략별 세부 임계값
+STS_VPIN_LIMIT_REBOUND = 0.9        
+STS_VPIN_LIMIT_MOMENTUM = 2.0       
+STS_RVOL_MIN_REBOUND = 1.5          # [상향] 확실한 거래량 필요
+STS_RVOL_MIN_MOMENTUM = 2.5         # [상향] 폭발적인 거래량 필요
 
 # [D] 시스템 설정
 OBI_LEVELS = 20               # 오더북 깊이
@@ -845,7 +849,7 @@ class TargetSelector:
             # 유료 플랜이므로 타임아웃 짧게(5초) 잡고 빠르게 치고 빠짐
             url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?apiKey={self.api_key}"
             
-            with httpx.Client(timeout=5.0) as client:
+            with httpx.Client(timeout=10.0) as client:
                 resp = client.get(url)
             
             if resp.status_code == 200:
@@ -1097,6 +1101,8 @@ class SniperBot:
         self.aiming_start_time = 0.0
         self.aiming_start_price = 0.0
 
+        self.created_at = time.time()
+
     def _calc_rebound_score(self, m):
         score = 0; reasons = []
         rsi = m.get('rsi', 50)
@@ -1145,94 +1151,90 @@ class SniperBot:
         except Exception:
             return 0.5
 
-    def _check_filters(self, m, strategy, final_score):
-        # -------------------------------------------------------------
-        # 0. 데이터 준비 (Metrics Setup)
-        # -------------------------------------------------------------
-        rvol = m.get('rvol', 0)
-        vpin = m.get('vpin', 0)
-        ofi_accel = m.get('ofi_accel', 0) # get_metrics에서 계산된 값
-        liq_1m = m.get('dollar_vol_1m', 0)
-        book_usd = m.get('top5_book_usd', 0)
-        spread = m.get('spread', 0)
+# 기존 _calculate_regime_p 함수가 끝나는 곳 다음에 붙여넣으세요.
 
-        # -------------------------------------------------------------
-        # 🔥 [1. Safety Net] VPIN 독성 체크 (최우선 차단)
-        # -------------------------------------------------------------
-        # 아무리 좋아 보여도 독성(VPIN)이 1.2를 넘으면 폭탄 돌리기임 -> 즉시 차단
-        if vpin > 1.2:
-            return False, f"Toxic VPIN ({vpin:.2f})"
+    def is_ready(self):
+        """[New] 데이터가 충분히 쌓였는지 검증 (Warmup Gate)"""
+        # 1. 시간 경과 확인 (봇 생성 후 최소 5초 경과)
+        if (time.time() - self.created_at) < 5.0:
+            return False
 
-        # -------------------------------------------------------------
-        # 🔥 [2. Super Momentum Flag] 야수 모드 판별
-        # -------------------------------------------------------------
-        # RVOL이 2.5배 넘고 + OFI 가속도가 꺾이지 않았으면 -> '슈퍼 모멘텀'
-        # 이 경우엔 호가가 좀 얇거나 스프레드가 커도 봐줍니다 (Bypass)
-        is_super_momentum = (rvol >= 2.5 and ofi_accel >= 0)
-
-        # -------------------------------------------------------------
-        # 3. [유동성 필터] 절대 기준 (Hard Floor)
-        # -------------------------------------------------------------
-        # 최소 20만불(2.8억)은 무조건 넘어야 함
-        if liq_1m < STS_BOT_MIN_LIQUIDITY_1M: 
-            return False, f"Dead Liquidity (${int(liq_1m/1000)}k)"
-
-        # -------------------------------------------------------------
-        # 4. [호가창 필터] 절대금액 + 비율 (Smart Orderbook)
-        # -------------------------------------------------------------
-        # (A) 절대 금액 기준
-        # 평소엔 $50k, 슈퍼 모멘텀이면 $40k까지 허용
-        min_book_abs = 40_000 if is_super_momentum else STS_BOT_MIN_BOOK_USD
-        if book_usd < min_book_abs:
-            return False, f"Thin Book (${int(book_usd/1000)}k)"
-
-        # (B) 비율 기준 (거래대금 대비 5% 룰)
-        if liq_1m > 0:
-            book_ratio = book_usd / liq_1m
-            # 평소엔 5%, 슈퍼 모멘텀이면 3%까지 허용
-            min_ratio = 0.03 if is_super_momentum else STS_BOT_MIN_BOOK_RATIO
+        # 2. 데이터 개수 확인 (최소 300틱 이상)
+        if len(self.analyzer.raw_ticks) < 300:
+            return False
             
-            if book_ratio < min_ratio:
-                # 단, 점수가 80점 이상이면 살려줌
-                if final_score < 80:
-                    return False, f"Unstable Book Ratio ({book_ratio*100:.1f}%)"
+        # 3. 필수 지표 계산 여부
+        if self.atr == 0 or self.vwap == 0:
+            return False
+            
+        return True
 
-        # -------------------------------------------------------------
-        # 5. [구간별 유동성] Tiered Liquidity
-        # -------------------------------------------------------------
-        # 유동성이 $200k ~ $500k 사이(위험 구간)라면 -> 확실한 거래량(RVOL)이나 점수 필요
-        if liq_1m < STS_BOT_SAFE_LIQUIDITY_1M:
-            if rvol < 3.0 and final_score < 75:
-                return False, f"Risky Zone (${int(liq_1m/1000)}k) - Need higher Vol/Score"
-
-        # -------------------------------------------------------------
-        # 6. [스프레드 & 속도]
-        # -------------------------------------------------------------
-        # 평소엔 1.2%, 슈퍼 모멘텀이면 2.5%까지 허용 (야수 모드)
-        max_spread = 2.5 if is_super_momentum else STS_BOT_MAX_SPREAD
-        if spread > max_spread:
-            return False, f"Wide Spread ({spread:.2f}%)"
+    def calculate_ers(self, m):
+        """[New] Execution Readiness Score - 발사 준비 점수"""
+        score = 0
         
-        if m.get('tick_speed', 0) < STS_BOT_MIN_TICK_SPEED: 
-            return False, "Low Tick Speed"
+        # 1. OFI & 수급 (40점) - 매수 압력 확인
+        if m.get('ofi', 0) > 0: score += 20
+        if m.get('ofi_accel', 0) > 0: score += 20 
+        
+        # 2. 속도 (30점) - 평소(10s avg)보다 2배 빠른가?
+        avg_speed = m.get('tick_speed_avg_10s', 1)
+        curr_speed = m.get('tick_speed', 0)
+        
+        # 0으로 나누기 방지
+        if avg_speed == 0: avg_speed = 1 
+        
+        if curr_speed > (avg_speed * 2.0): score += 30
+        elif curr_speed > (avg_speed * 1.5): score += 15
+        
+        # 3. 응축 (Spread Squeeze) (20점)
+        # 스프레드가 ATR 대비 30% 이내로 좁혀졌는가?
+        atr_val = m.get('atr', 1)
+        if atr_val == 0: atr_val = 1
+        
+        rel_spread = m.get('spread', 0) / (atr_val * 100 / m['last_price'] + 1e-9)
+        if rel_spread < 0.3: score += 20 
+        
+        # 4. 건전성 (VPIN) (10점)
+        if m.get('vpin', 1.0) < 0.8: score += 10
+        
+        return min(score, 100)
 
-        # -------------------------------------------------------------
-        # 7. 전략별 추가 필터 (기존 유지)
-        # -------------------------------------------------------------
-        if strategy == "REBOUND":
-            if vpin > STS_VPIN_LIMIT_REBOUND: return False, "High VPIN (Rebound)"
-            if rvol < STS_RVOL_MIN_REBOUND: return False, "Low Vol (Rebound)"
-        elif strategy in ["MOMENTUM", "DIP_AND_RIP"]:
-            # 모멘텀 전략의 VPIN/RVOL 필터는 위에서 이미 처리했거나 완화됨
-            if rvol < STS_RVOL_MIN_MOMENTUM: return False, "Weak Vol (Momentum)"
-            
+    # [교체] 기존 _check_filters 삭제 후 이 코드로 대체
+    def _check_filters(self, m, strategy, ers_score):
+        # 0. Warmup 확인
+        if not self.is_ready():
+            return False, "Warming Up"
+
+        # 1. 유동성 확인 (스몰캡 기준 완화: $50,000)
+        liq_1m = m.get('dollar_vol_1m', 0)
+        if liq_1m < STS_BOT_MIN_LIQUIDITY_1M:
+            return False, f"Low Liq ${int(liq_1m)}"
+
+        # 2. 호가 잔량 확인 ($10k 이상이면 통과)
+        book_usd = m.get('top5_book_usd', 0)
+        if book_usd < 10_000: 
+            return False, f"Thin Book ${int(book_usd)}"
+
+        # 3. 독성 확인 (VPIN) - 1.0 초과시 차단
+        if m.get('vpin', 0) > 1.0: 
+            return False, "Toxic Flow"
+
         return True, "PASS"
 
+    # [교체] 기존 update_dashboard_db 삭제 후 이 코드로 대체
     def update_dashboard_db(self, tick_data, quote_data, agg_data):
         self.analyzer.update_tick(tick_data, quote_data)
         
         if agg_data and agg_data.get('vwap'): self.vwap = agg_data.get('vwap')
         if self.vwap == 0 and tick_data.get('p'): self.vwap = tick_data['p']
+
+        # 1. Warmup Gate (준비 안됐으면 계산 중단 및 리턴)
+        if not self.is_ready():
+            # 상태를 WARM_UP으로 찍어서 DB에 알림 (모니터링용)
+            if self.state != "WARM_UP":
+                 self.state = "WARM_UP"
+            return 
 
         m = self.analyzer.get_metrics()
         if not m or m.get('tick_speed', 0) == 0: return 
@@ -1240,7 +1242,7 @@ class SniperBot:
         if m.get('atr') and m['atr'] > 0: self.atr = m['atr']
         else: self.atr = max(self.selector.get_atr(self.ticker), m['last_price'] * 0.01)
 
-        # 1. AI Score
+        # 2. AI Score (옵션 - 기존 로직 유지)
         ai_prob = 0.0
         if self.model:
             try:
@@ -1257,33 +1259,19 @@ class SniperBot:
                 ai_prob = sum(self.prob_history) / len(self.prob_history)
             except: pass
 
-        # 2. Strategy
-        score_reb, _ = self._calc_rebound_score(m)
-        score_mom, _ = self._calc_momentum_score(m)
+        # 3. Score Calculation (ERS 중심)
+        ers = self.calculate_ers(m)
         p = self._calculate_regime_p(m)
         
-        quant_score = (score_mom * p) + (score_reb * (1 - p))
-        strategy = "WATCHING"
-        if p > 0.7: strategy = "MOMENTUM"
-        elif p < 0.3: strategy = "REBOUND"
-        else: strategy = "DIP_AND_RIP" if (score_reb > 50 and score_mom > 50) else "MOMENTUM"
-
-        final_score = (ai_prob * 100 * 0.4) + (quant_score * 0.6)
-        is_pass, _ = self._check_filters(m, strategy, final_score)
+        strategy = "MOMENTUM" # 기본 전략
         
-        if len(self.analyzer.raw_ticks) < 50:
-            if m.get('rvol', 0) > 5.0: is_pass = True 
-            else: final_score = 0; is_pass = False; self.state = "WARM_UP"
+        # 필터 체크 (ERS 점수 전달)
+        is_pass, reason = self._check_filters(m, strategy, ers)
+        
+        # 화면 표시용 점수는 ERS 사용
+        display_score = ers if is_pass else 0
 
-        display_score = final_score if is_pass else 0
-
-        # 3. Notification
-        if final_score >= 60 and is_pass and self.state != "FIRED":
-            if (time.time() - self.last_ready_alert) > 180:
-                self.last_ready_alert = time.time()
-                asyncio.create_task(send_fcm_notification(self.ticker, m['last_price'], int(final_score)))
-
-        # 4. DB Update
+        # 4. DB Update (상태 변경 시 혹은 1.5초 주기)
         now = time.time()
         if (self.state != self.last_logged_state) or (now - self.last_db_update > 1.5):
             metrics_copy = copy.deepcopy(m)
@@ -1302,93 +1290,42 @@ class SniperBot:
             'ofi': m.get('ofi', 0), 'weighted_obi': m.get('weighted_obi', 0)
         })
 
-        # 5. Zero-Latency Execution
-        thresh = self.CONFIG['thresh']
-
-        if self.state == "WATCHING":
-            if final_score >= 60 and is_pass:
-                self.state = "AIMING"
-                self.aiming_start_time = time.time()
-                self.aiming_start_price = m['last_price']
-                print(f"👀 [AIM] {self.ticker} Start Aiming...", flush=True)
+        # 5. Zero-Latency Execution Logic
+        if self.state == "WATCHING" and is_pass:
+            # [Fast Track] ERS 80점 이상이면 즉시 사격
+            if ers >= 80:
+                 print(f"⚡ [FAST] {self.ticker} High ERS Trigger ({ers})", flush=True)
+                 self.fire(m['last_price'], ai_prob, m, strategy="ZERO_LATENCY")
+                 return
+            
+            # [Aiming Mode] ERS 60점 이상이면 조준 시작
+            elif ers >= 60:
+                 self.state = "AIMING"
+                 self.aiming_start_time = time.time()
+                 self.aiming_start_price = m['last_price']
+                 print(f"👀 [AIM] {self.ticker} Start Aiming (ERS:{ers})...", flush=True)
 
         elif self.state == "AIMING":
-            # ---------------------------------------------------------
-            # 🔥 [Step 1] Zero-Latency Fire (초단타 돌파 전략)
-            # ---------------------------------------------------------
-            # 전략: 10초 평균 대비 속도/스프레드 급변 + 직전 고점 돌파 + VWAP 지지
+            # 조준 중 가격이 튀거나 ERS가 급상승하면 발사
+            price_change_pct = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
             
-            # 1. 지표 추출 (Analyzer에서 계산해준 값들 사용)
-            tick_speed = m.get('tick_speed', 0)
-            tick_speed_avg = m.get('tick_speed_avg_10s', 1) 
-            spread = m.get('spread', 0)
-            spread_avg = m.get('spread_avg_10s', 100)
-            book_usd = m.get('top5_book_usd', 0)
-            prev_high = m.get('prev_1m_high', 99999)
+            # 조건 1: 가격 상승 + ERS 유지
+            if price_change_pct > 0.2 and ers >= 60:
+                 self.fire(m['last_price'], ai_prob, m, strategy="MOMENTUM")
+                 return
             
-            # 2. 상세 조건 체크 (4대 조건)
-            
-            # (A) 속도 & 수급: 속도가 평소의 3배 & OFI 가속도 양수 (세력 급습)
-            cond_speed = (tick_speed >= tick_speed_avg * 3.0) and (m.get('ofi_accel', 0) > 0)
-            
-            # (B) 스프레드 수렴: 평소의 0.7배로 좁아짐 + 호가 잔량 안전판($100k, 급등시 $50k)
-            # 논리: 스프레드가 좁아진다는 건 '발사 직전'의 응축 신호
-            min_book_zl = 100_000 if m.get('rvol', 0) < 5.0 else 50_000
-            cond_spread = (spread <= spread_avg * 0.7) and (book_usd >= min_book_zl)
-            
-            # (C) RVOL & VPIN: 거래량 폭발(2.5배↑) + 독성 건전(0.6~1.0)
-            cond_vol = (m.get('rvol', 0) >= 2.5) and (0.6 <= m.get('vpin', 0) <= 1.0)
-            
-            # (D) 가격 & 추세 안전장치 (Safety Guard)
-            # - Breakout: 직전 1분 고점 돌파
-            # - Cap: VWAP +1% ~ +3% 구간 (너무 비싸면 추격매수 금지)
-            # - Regime: Hurst > 0.55 (확실한 추세장)
-            cond_price = (
-                m['last_price'] > prev_high and         
-                1.0 <= m.get('vwap_dist', 0) <= 3.0 and 
-                m.get('hurst', 0.5) > 0.55             
-            )
-            
-            # 3. 최종 판단 (조건 만족 시 즉시 진입)
-            if cond_speed and cond_spread and cond_vol and cond_price and is_pass:
-                 print(f"⚡ [ZERO-LATENCY] {self.ticker} BREAKOUT! (Spd:{tick_speed} Spr:{spread:.2f}%)", flush=True)
-                 # 전략명을 'ZERO_LATENCY'로 명시하여 발사
+            # 조건 2: ERS 폭발
+            if ers >= 80:
                  self.fire(m['last_price'], ai_prob, m, strategy="ZERO_LATENCY")
                  return
 
-            # ---------------------------------------------------------
-            # [Step 2] 표준 패스트트랙 (Standard Fast-Track)
-            # ---------------------------------------------------------
-            # 기존 로직 유지: 점수가 아주 높으면(80점↑) 안전하게 진입
-            if final_score >= thresh['fast_track'] and is_pass:
-                 # 최소한의 수급(OFI 양수)과 호가(OBI) 확인
-                 if m.get('ofi', 0) > 0 and m.get('weighted_obi', 0) > 0.4:
-                     print(f"⚡ [FAST] {self.ticker} High Score Trigger!", flush=True)
-                     self.fire(m['last_price'], ai_prob, m, strategy=strategy)
-                     return
-
-            # ---------------------------------------------------------
-            # [Step 3] 일반 확인 사살 (Micro-Confirmation)
-            # ---------------------------------------------------------
-            # 가격이 1초 동안 안 빠지고 버티거나, 호가가 좋으면 진입
-            price_change_pct = (m['last_price'] - self.aiming_start_price) / self.aiming_start_price * 100
-            
-            if final_score >= thresh['entry'] and is_pass:
-                if price_change_pct > -0.02 or m.get('obi', 0) > 0.2:
-                    self.fire(m['last_price'], ai_prob, m, strategy=strategy)
-                    return
-
-            # ---------------------------------------------------------
-            # [Step 4] 포기 (Timeout)
-            # ---------------------------------------------------------
-            elapsed = time.time() - self.aiming_start_time
-            # 1초 지났거나 가격이 미끄러지면 조준 해제
-            if elapsed > thresh['confirm_window'] or price_change_pct < thresh['max_slip']:
+            # 타임아웃 (1초)
+            if (time.time() - self.aiming_start_time) > 1.0 or price_change_pct < -0.1:
                 self.state = "WATCHING"
                 self.aiming_start_time = 0
             
         elif self.state == "FIRED":
-            self.manage_position(m, m['last_price']) # m 전체 전달
+            self.manage_position(m, m['last_price'])
     
     async def warmup(self):
         print(f"🔥 [Warmup] Fetching history for {self.ticker}...", flush=True)
@@ -1692,45 +1629,83 @@ class STSPipeline:
                 traceback.print_exc()
                 await asyncio.sleep(5)
 
-    # [STSPipeline 클래스 내부]
+    # [교체] 기존 task_focus_manager 삭제 후 이 코드로 대체
     async def task_focus_manager(self, ws, candidates=None):
-        print("🎯 [Manager] Started (Fast Mode: 5s)", flush=True)
+        print("🎯 [Manager] Started (Staging Mode: 10 Candidates)", flush=True)
+        
         while True:
             try:
-                await asyncio.sleep(5)
+                # 1. 반응 속도 향상 (5초 -> 2초)
+                await asyncio.sleep(2.0)
+                
                 if not self.candidates: continue
 
-                target_top3 = self.selector.get_best_snipers(self.candidates, limit=STS_TARGET_COUNT)
+                # -------------------------------------------------------------
+                # [Phase 1] Staging Area 관리 (Top 10 구독 유지)
+                # -------------------------------------------------------------
+                # 스캐너가 가져온 후보군 중 상위 10개를 무조건 구독합니다.
+                # (STS_TARGET_COUNT=3 대신 10개를 봅니다)
+                staging_targets = self.candidates[:10]
                 
                 current_set = set(self.snipers.keys())
-                new_set = set(target_top3)
+                new_set = set(staging_targets)
                 
-                # Detach (감시 중단 종목 정리)
+                # A. Detach (Top 10에서 밀려나면 과감히 구독 해지)
                 to_remove = current_set - new_set
                 if to_remove:
-                    print(f"👋 Detach: {list(to_remove)}", flush=True)
+                    # print(f"👋 Detach: {list(to_remove)}", flush=True) # 로그 너무 많으면 주석
                     unsubscribe_params = [f"T.{t}" for t in to_remove] + [f"Q.{t}" for t in to_remove]
                     await self.unsubscribe(ws, unsubscribe_params)
                     for t in to_remove: 
                         if t in self.snipers: del self.snipers[t]
 
-                # Attach (새로운 종목 감시 시작)
+                # B. Attach (Top 10에 새로 진입하면 구독 + 봇 생성 + 웜업 시작)
                 to_add = new_set - current_set
                 if to_add:
-                    print(f"🚀 Attach: {list(to_add)}", flush=True)
+                    print(f"🚀 Staging (Warmup Start): {list(to_add)}", flush=True)
                     subscribe_params = [f"T.{t}" for t in to_add] + [f"Q.{t}" for t in to_add]
                     await self.subscribe(ws, subscribe_params)
                     
                     for t in to_add:
-                        # [핵심 수정] shared_model 대신 model_bytes 전달 (모델 충돌 방지)
+                        # 봇 생성
                         new_bot = SniperBot(t, self.logger, self.selector, self.model_bytes)
                         self.snipers[t] = new_bot 
-                        
-                        # [핵심 수정] 웜업을 비동기 태스크로 실행 (봇이 멈추지 않음)
+                        # 생성 즉시 비동기로 과거 데이터 로딩(Warmup) 시작
                         asyncio.create_task(new_bot.warmup())
+
+                # -------------------------------------------------------------
+                # [Phase 2] Active Sniper 선정 (Top 3 승격 심사)
+                # -------------------------------------------------------------
+                # Staging된 10개 봇 중에서 '데이터가 준비되고(Ready)', 'ERS 점수가 높은' 상위 3개를 뽑습니다.
+                ready_bots = []
+                for ticker, bot in self.snipers.items():
+                    # 웜업이 덜 된 봇은 평가에서 제외
+                    if bot.is_ready():
+                        # 현재 시점의 ERS(실행 점수) 계산
+                        m = bot.analyzer.get_metrics()
+                        if m:
+                            score = bot.calculate_ers(m)
+                            ready_bots.append((ticker, score))
+                
+                # ERS 점수 높은 순 정렬
+                ready_bots.sort(key=lambda x: x[1], reverse=True)
+                
+                # Top 3 선정 (Active List)
+                active_tickers = [x[0] for x in ready_bots[:3]]
+                
+                # (선택 사항) 현재 Active Target이 누구인지 가끔 로그 출력
+                # if active_tickers:
+                #     print(f"🔥 Active Snipers: {active_tickers}", flush=True)
+
+                # 봇들에게 "너는 지금 주전 선수(Active)야"라고 알려줌 (옵션)
+                for ticker, bot in self.snipers.items():
+                    # 봇 객체에 is_active_target 속성을 동적으로 할당/갱신
+                    bot.is_active_target = (ticker in active_tickers)
 
             except Exception as e:
                 print(f"❌ Manager Error: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
                 await asyncio.sleep(5)
                 # ==============================================================================
 # ==============================================================================

@@ -170,55 +170,70 @@ async def send_test_notification():
     except Exception as e:
         print(f"❌ [Test] Failed: {e}", flush=True)
 
-# 스캐너 태스크 (기존 로직 유지)
 async def task_global_scan(pipeline, bot_attach_times):
-    print("🔭 [Scanner] Started (Hybrid Mode: 2s Interval)", flush=True)
+    print("🔭 [Scanner] Started (Hybrid Mode: Top 10 Staging)", flush=True)
     loop = asyncio.get_running_loop()
     
     while True:
         try:
-            # API Polling
+            # 1. API Polling (스냅샷 갱신)
             await loop.run_in_executor(DB_WORKER_POOL, pipeline.selector.refresh_market_snapshot)
 
-            # Scanning
+            # 2. Scanning (Top 10 후보군 추출)
             candidates = await loop.run_in_executor(
                 DB_WORKER_POOL,
                 partial(pipeline.selector.get_top_gainers_candidates, limit=10)
             )
             
             if candidates:
-                target_top3 = pipeline.selector.get_best_snipers(candidates, limit=STS_TARGET_COUNT)
-                current_set = set(pipeline.snipers.keys())
-                new_set = set(target_top3)
+                # -------------------------------------------------------------
+                # 🔥 [핵심 수정] Top 3만 뽑는 로직 제거 -> Top 10 전체를 Staging 대상으로 설정
+                # -------------------------------------------------------------
+                # 기존: target_top3 = pipeline.selector.get_best_snipers(...)
+                # 수정: candidates 리스트 전체(최대 10개)를 구독 대상으로 잡음
+                staging_targets = candidates[:10]
                 
-                # Detach
+                current_set = set(pipeline.snipers.keys())
+                new_set = set(staging_targets)
+                
+                # A. Detach (Top 10에서 밀려나면 구독 해지)
                 to_remove = current_set - new_set
                 now = time.time()
                 for rem in to_remove:
+                    # 너무 빨리 붙었다 떨어지는 것 방지 (최소 60초 유지)
                     attach_time = bot_attach_times.get(rem, 0)
                     if now - attach_time < 60: continue 
                     
                     if rem in pipeline.snipers: 
-                        print(f"👋 [Worker] Detach: {rem}", flush=True)
+                        # print(f"👋 [Worker] Detach: {rem}", flush=True) # 로그 너무 많으면 주석
                         del pipeline.snipers[rem]
                         if rem in bot_attach_times: del bot_attach_times[rem]
-                        await r.srem('focused_tickers', rem) # Async Redis
+                        # Ingester에게 수집 중단 요청
+                        await r.srem('focused_tickers', rem) 
                 
-                # Attach
+                # B. Attach (Top 10에 진입하면 봇 생성 + 웜업 시작)
                 for add in (new_set - current_set):
                     if add not in pipeline.snipers:
-                        print(f"🚀 [Worker] Attach: {add}", flush=True)
+                        print(f"🚀 [Worker] Staging Attach: {add}", flush=True)
                         new_bot = SniperBot(add, pipeline.logger, pipeline.selector, pipeline.model_bytes)
                         pipeline.snipers[add] = new_bot
                         bot_attach_times[add] = now
+                        
+                        # [중요] 비동기 웜업 시작
                         run_warmup_task(new_bot)
-                        await r.sadd('focused_tickers', add) # Async Redis
+                        
+                        # [중요] Ingester에게 데이터 수집 요청 (10개 다 수집)
+                        await r.sadd('focused_tickers', add) 
 
+            # Garbage Collection
             pipeline.selector.garbage_collect()
             await asyncio.sleep(2)
 
         except Exception as e:
             print(f"⚠️ Scanner Error: {e}", flush=True)
+            # 에러 발생 시 상세 정보 출력
+            import traceback
+            traceback.print_exc()
             await asyncio.sleep(5)
 
 # 메인 루프
