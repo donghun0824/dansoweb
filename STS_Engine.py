@@ -955,7 +955,11 @@ class TargetSelector:
         scored = []
         now = time.time()
         
-        for t, d in self.snapshots.items():
+        # 🔥 [핵심 수정] 딕셔너리를 list()로 감싸서 안전한 리스트 복사본을 만듭니다.
+        # 기존: for t, d in self.snapshots.items():  <-- 에러 발생 지점
+        snapshot_items = list(self.snapshots.items()) 
+
+        for t, d in snapshot_items:
             if now - d['last_updated'] > 60: continue 
             
             # ---------------------------------------------------------
@@ -964,6 +968,7 @@ class TargetSelector:
             if d['c'] < STS_SCAN_MIN_PRICE or d['c'] > STS_SCAN_MAX_PRICE: continue
             
             dollar_vol = d['c'] * d['v']
+            # STS_SCAN_MIN_DOLLAR_VOL 상수가 정의되어 있는지 확인하세요 (없으면 100_000 등 직접 입력)
             if dollar_vol < STS_SCAN_MIN_DOLLAR_VOL: continue 
 
             change_pct = (d['c'] - d['start_price']) / d['start_price'] * 100
@@ -978,30 +983,23 @@ class TargetSelector:
             # ---------------------------------------------------------
             
             # [A] Momentum Score (70% 비중) - 변동성 우선
-            # 1% 오를 때마다 2점 (최대 100점)
             momentum_score = min(change_pct * 2.0, 100)
 
             # [B] Liquidity Factor (30% 비중) - Cap 적용 ($100M)
-            # 1억불 넘으면 만점(100점)이지만, 더 이상 가산점은 없음 (대형주 독주 방지)
             liquidity_raw = min(dollar_vol, 100_000_000) / 100_000_000 * 100
             
             # [C] RVOL Factor (가산점)
-            # 전일 거래량 대비 오늘 얼마나 터졌나?
             ref_data = self.static_stats.get(t, {'prev_vol': 1000000})
             rvol = d['v'] / ref_data['prev_vol']
             
-            # RVOL이 2배 이상이면 가산점 부여 (최대 20점)
-            # 대형주는 보통 RVOL이 1.0 근처라 가산점을 못 받음
             rvol_bonus = min(max(0, rvol - 1.0) * 10, 20)
             
             # 최종 점수 계산
-            # (모멘텀 70% + 유동성 30%) + RVOL보너스 + 저가주보너스
             score = (momentum_score * 0.7) + (liquidity_raw * 0.3) + rvol_bonus
             
-            # 가격이 10불 미만이면(가벼우면) 소폭 가산점 (+5)
             if d['c'] < 10.0: score += 5
             
-            score = min(score, 99) # 99점 상한선
+            score = min(score, 99) 
             
             scored.append((t, score, change_pct, dollar_vol))
         
@@ -1028,12 +1026,22 @@ class TargetSelector:
         now = time.time()
         if now - self.last_gc_time < GC_INTERVAL: return
         
-        # 1. [메모리 청소]
-        to_remove = [t for t, d in self.snapshots.items() if now - d['last_updated'] > GC_TTL]
+        # ---------------------------------------------------------
+        # 1. [메모리 청소] - 🔥 [핵심 수정]
+        # ---------------------------------------------------------
+        # 원본 딕셔너리를 직접 돌리지 않고 list()로 복사본을 떠서 돌립니다.
+        # 이렇게 해야 루프 도중 데이터가 들어와도 에러가 안 납니다.
+        snapshot_items = list(self.snapshots.items())
+        
+        to_remove = [t for t, d in snapshot_items if now - d['last_updated'] > GC_TTL]
+        
         for t in to_remove: 
-            del self.snapshots[t]
+            # del 대신 pop을 사용하여, 혹시 다른 스레드가 이미 지웠어도 에러(KeyError)가 안 나게 합니다.
+            self.snapshots.pop(t, None)
             
-        # 2. [DB 청소]
+        # ---------------------------------------------------------
+        # 2. [DB 청소] (이 부분은 기존 유지)
+        # ---------------------------------------------------------
         conn = None
         try:
             conn = get_db_connection()
