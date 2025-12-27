@@ -1658,15 +1658,33 @@ class STSPipeline:
                 current_set = set(self.snipers.keys())
                 new_set = set(staging_targets)
                 
-                # A. Detach (Top 10에서 밀려나면 과감히 구독 해지)
+                # A. Detach (Top 10에서 밀려나면 구독 해지 - 방어 로직 적용됨)
                 to_remove = current_set - new_set
                 if to_remove:
-                    # print(f"👋 Detach: {list(to_remove)}", flush=True) # 로그 너무 많으면 주석
-                    unsubscribe_params = [f"T.{t}" for t in to_remove] + [f"Q.{t}" for t in to_remove]
-                    await self.unsubscribe(ws, unsubscribe_params)
-                    for t in to_remove: 
-                        if t in self.snipers: del self.snipers[t]
+                    real_remove_list = []
+                    for t in to_remove:
+                        if t in self.snipers:
+                            bot = self.snipers[t]
+                            
+                            # 🛡️ [방어 로직 1] 중요한 상태(조준, 진입, 포지션 보유)면 삭제 금지
+                            if bot.state in ['AIMING', 'FIRED'] or bot.position:
+                                # 로그가 너무 많으면 아래 줄 주석 처리
+                                # print(f"🛡️ [Protect] Keeping {t} (State: {bot.state})", flush=True)
+                                continue
+                            
+                            # 🛡️ [방어 로직 2] 웜업 중이라면 최소 3분(180초)은 기회를 줌
+                            if bot.state == 'WARM_UP' and (time.time() - bot.created_at < 180):
+                                 continue
 
+                            # 위 조건에 해당하지 않으면(그냥 멍때리는 중이면) 삭제
+                            del self.snipers[t]
+                            real_remove_list.append(t)
+                    
+                    # 실제로 삭제된 종목만 웹소켓 구독 취소
+                    if real_remove_list:
+                        unsubscribe_params = [f"T.{t}" for t in real_remove_list] + [f"Q.{t}" for t in real_remove_list]
+                        await self.unsubscribe(ws, unsubscribe_params)
+                        
                 # B. Attach (Top 10에 새로 진입하면 구독 + 봇 생성 + 웜업 시작)
                 to_add = new_set - current_set
                 if to_add:

@@ -157,14 +157,14 @@ async function updateDashboard() {
     }
 }
 
-    
-
 function renderScannerList(targets) {
     if (!els.scannerList) return;
-    els.scannerList.innerHTML = '';
 
-    // 타겟이 0개일 때 대기 화면 표시
+    // 타겟이 0개일 때 대기 화면 표시 (기존 로직 유지하되, 자식이 없을 때만 표시)
     if (targets.length === 0) {
+        // 이미 대기 화면이 떠있으면 리턴 (중복 렌더링 방지)
+        if (els.scannerList.innerHTML.includes("Scanning Markets")) return;
+        
         els.scannerList.innerHTML = `
             <div style="padding:40px 20px; text-align:center; color:#86868B;">
                 <div style="margin-bottom:10px; font-size:18px;">📡</div>
@@ -174,10 +174,26 @@ function renderScannerList(targets) {
         return;
     }
 
-    // 4. 타겟 목록 렌더링 루프
+    // "Scanning Markets" 메시지가 떠있다면 지워줌
+    if (els.scannerList.innerHTML.includes("Scanning Markets")) {
+        els.scannerList.innerHTML = '';
+    }
+
+    // 1. [준비] 현재 서버에서 온 타겟들의 ID 목록 생성
+    const targetIds = new Set(targets.map(t => `row-${t.ticker}`));
+
+    // 2. [삭제] 화면에는 있는데, 서버 데이터(targets)에는 없는 종목 삭제
+    // (Array.from으로 복사본을 만들어 순회해야 실시간 삭제 시 오류 안 남)
+    Array.from(els.scannerList.children).forEach(child => {
+        // child.id가 존재하고, targetIds에 없으면 삭제 대상
+        if (child.id && !targetIds.has(child.id)) {
+            child.remove();
+        }
+    });
+
+    // 3. [생성 및 업데이트] 타겟 데이터 루프
     targets.forEach(item => {
-        // --- [A] 점수 계산 및 포맷팅 ---
-        // 0.xx 확률값이면 100을 곱해서 점수로 변환
+        // --- [A] 점수 계산 ---
         let rawScore = item.ai_score !== undefined ? item.ai_score : (item.ai_prob || 0);
         if (rawScore <= 1 && rawScore > 0) rawScore *= 100;
         const score = Math.round(rawScore);
@@ -186,43 +202,65 @@ function renderScannerList(targets) {
         const priceVal = item.price ? parseFloat(item.price) : 0;
         const priceStr = priceVal.toFixed(2);
 
-        // --- [C] 등락률 계산 및 색상 결정 (핵심 수정 사항) ---
-        // 백엔드에서 'day_change' 혹은 'change'로 들어오는 값을 받음
+        // --- [C] 등락률 계산 ---
         const chgVal = parseFloat(item.change || item.day_change || 0);
-        
-        // 부호 처리 (+ 기호 붙이기)
         const sign = chgVal > 0 ? '+' : '';
         const chgStr = `${sign}${chgVal.toFixed(2)}%`;
         
-        // CSS 클래스 결정 (CSS에 정의된 .up, .down, .flat 사용)
         let chgClass = 'flat';
-        if (chgVal > 0) chgClass = 'up';     // 양수: 초록
-        if (chgVal < 0) chgClass = 'down';   // 음수: 빨강
+        if (chgVal > 0) chgClass = 'up';
+        if (chgVal < 0) chgClass = 'down';
 
-        // --- [D] 상태 클래스 (고득점, 선택됨) ---
+        // --- [D] 클래스 정의 ---
         const isHighScore = score >= 80;
         const activeClass = (item.ticker === currentTicker) ? 'active' : '';
         const highScoreClass = isHighScore ? 'high-score' : '';
+        
+        // 고유 ID 생성 (DOM 검색용)
+        const rowId = `row-${item.ticker}`;
+        
+        // --- [E] DOM 조작 (핵심 변경) ---
+        let row = document.getElementById(rowId);
 
-        // --- [E] HTML 조립 (배지 적용됨) ---
-        const html = `
-            <div class="ticker-row ${highScoreClass} ${activeClass}" onclick="selectTicker('${item.ticker}')">
-                
-                <div class="ticker-left">
-                    <div class="t-symbol">${item.ticker}</div>
-                    <div class="t-score-badge">Score ${score}</div>
-                </div>
-
-                <div class="ticker-right">
-                    <div class="t-price">$${priceStr}</div>
-                    <div class="t-change-badge ${chgClass}">
-                        ${chgStr}
-                    </div>
-                </div>
-
-            </div>`;
+        if (row) {
+            // [UPDATE] 이미 존재하면: 텍스트와 클래스만 살짝 바꿈 (깜빡임 없음)
+            row.className = `ticker-row ${highScoreClass} ${activeClass}`; // 활성/고득점 상태 업데이트
             
-        els.scannerList.insertAdjacentHTML('beforeend', html);
+            // 내부 요소 텍스트 갱신 (querySelector 사용)
+            // 1. 점수 뱃지
+            const scoreEl = row.querySelector('.t-score-badge');
+            if (scoreEl) scoreEl.innerText = `Score ${score}`;
+            
+            // 2. 가격
+            const priceEl = row.querySelector('.t-price');
+            if (priceEl) priceEl.innerText = `$${priceStr}`;
+            
+            // 3. 등락률 뱃지
+            const chgEl = row.querySelector('.t-change-badge');
+            if (chgEl) {
+                chgEl.className = `t-change-badge ${chgClass}`; // 색상 변경
+                chgEl.innerText = chgStr; // 값 변경
+            }
+
+        } else {
+            // [CREATE] 없으면: 새로 만들어서 붙임 (HTML 구조 동일)
+            // id="${rowId}" 가 반드시 포함되어야 함
+            const html = `
+                <div id="${rowId}" class="ticker-row ${highScoreClass} ${activeClass}" onclick="selectTicker('${item.ticker}')">
+                    <div class="ticker-left">
+                        <div class="t-symbol">${item.ticker}</div>
+                        <div class="t-score-badge">Score ${score}</div>
+                    </div>
+                    <div class="ticker-right">
+                        <div class="t-price">$${priceStr}</div>
+                        <div class="t-change-badge ${chgClass}">
+                            ${chgStr}
+                        </div>
+                    </div>
+                </div>`;
+            
+            els.scannerList.insertAdjacentHTML('beforeend', html);
+        }
     });
 }
 // [추가] 등락률 표시 헬퍼 (데이터에 change가 있다면 표시)
