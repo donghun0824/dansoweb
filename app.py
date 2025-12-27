@@ -4,6 +4,7 @@ from flask import Flask, render_template, jsonify, request, send_from_directory,
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
+from werkzeug.middleware.proxy_fix import ProxyFix # 🔥 [추가] 프록시 픽스 임포트
 import secrets 
 import json
 import os
@@ -13,13 +14,26 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
+# 🔥 [핵심 수정] Render/Cloudflare 환경에서 HTTPS 인식을 위한 설정
+# x_proto=1: HTTPS 헤더 인식, x_host=1: 호스트 인식
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 socketio = SocketIO(app, cors_allowed_origins="*")
 # --- 1. 설정 및 환경 변수 ---
-app.secret_key = os.environ.get('SECRET_KEY', 'dev_key_for_session')
+# SECRET_KEY가 고정되어 있어야 서버 재시작 시에도 로그인이 유지됩니다.
+app.secret_key = os.environ.get('SECRET_KEY', 'fix_this_key_for_production_login_persistence')
+
+# 세션 유지 기간 설정 (31일)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=31)
-app.config['SESSION_COOKIE_SECURE'] = True
-app.config['REMEMBER_COOKIE_SECURE'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+# 🔥 [보안 설정 자동화]
+# Render 환경(RENDER env가 있음)이거나 운영 모드일 때만 Secure 쿠키 적용
+is_production = os.environ.get('RENDER') or os.environ.get('FLASK_ENV') == 'production'
+
+app.config['SESSION_COOKIE_SECURE'] = is_production    # HTTPS일 때만 쿠키 전송 (운영: True / 로컬: False)
+app.config['REMEMBER_COOKIE_SECURE'] = is_production   # "기억하기" 쿠키 보안 설정
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'          # OAuth 연동을 위해 Lax 권장
+
 API_KEY = os.environ.get('POLYGON_API_KEY')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
