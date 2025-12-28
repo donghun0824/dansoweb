@@ -32,17 +32,17 @@
   "screenshots": [
     {
       "src": "/static/images/feature_scanner.png",
-      "sizes": "1080x1920",
+      "sizes": "2750x1622",
       "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Mobile Scanner"
+      "form_factor": "wide",
+      "label": "Desktop Scanner"
     },
     {
       "src": "/static/images/feature_sniper.png",
-      "sizes": "1920x1080",
+      "sizes": "2750x1622",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Desktop Dashboard"
+      "label": "Desktop Sniper"
     }
   ],
   "categories": ["finance", "productivity", "business"]
