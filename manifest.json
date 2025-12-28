@@ -11,19 +11,19 @@
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/static/images/danso_logo.png",
+      "src": "/static/images/web-app-manifest-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/static/images/danso_logo.png",
+      "src": "/static/images/web-app-manifest-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/static/images/danso_logo.png",
+      "src": "/static/images/web-app-manifest-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
@@ -31,14 +31,14 @@
   ],
   "screenshots": [
     {
-      "src": "/static/images/screenshot_mobile.png",
+      "src": "/static/images/feature_scanner.png",
       "sizes": "1080x1920",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Mobile Dashboard"
+      "label": "Mobile Scanner"
     },
     {
-      "src": "/static/images/screenshot_desktop.png",
+      "src": "/static/images/feature_sniper.png",
       "sizes": "1920x1080",
       "type": "image/png",
       "form_factor": "wide",
