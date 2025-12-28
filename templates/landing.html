@@ -16,6 +16,8 @@
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
     <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='images/favicon-96x96.png') }}">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0A0E18">
 
     <style>
         /* Custom Styles (Tailwind 보조) */
@@ -455,6 +457,12 @@
         document.getElementById('danso-popup').classList.add('hidden');
     }
 </script>
-          
+
+<script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+            .then(function() { console.log('Service Worker Registered'); });
+    }
+</script>          
 </body>
 </html>
