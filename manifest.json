@@ -2,6 +2,7 @@
   "name": "Danso Terminal Pro",
   "short_name": "Danso",
   "description": "AI Powered Scalping Assistant & Real-time Market Scanner",
+  "id": "/sts",
   "start_url": "/sts",
   "scope": "/",
   "display": "standalone",
@@ -26,6 +27,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/static/images/screenshot_mobile.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Mobile Dashboard"
+    },
+    {
+      "src": "/static/images/screenshot_desktop.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Desktop Dashboard"
     }
   ],
   "categories": ["finance", "productivity", "business"]
